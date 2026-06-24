@@ -1,0 +1,76 @@
+name: GLENS Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  glens-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
+
+    - name: Install npm dependencies
+      run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp
+
+    - name: Install CloakBrowser Chromium binary
+      run: npx cloakbrowser install
+
+    - name: Run GLENS test
+      env:
+        GLENS_MODE: lens
+        GLENS_BATCH_SIZE: 3
+        GLENS_BATCH_DELAY_MS: 2000
+        GLENS_SEARCH_DELAY_MS: 200
+        GLENS_NAV_TIMEOUT: 30000
+        GLENS_RESP_TIMEOUT: 30000
+        GLENS_JSON_IDLE_MS: 800
+        GLENS_UPLOAD_TIMEOUT: 10000
+        GLENS_UPLOAD_RETRIES: 2
+        GLENS_NAV_RETRIES: 2
+        GLENS_MAX_RETRIES: 1
+        GLENS_BACKOFF_BASE_MS: 300
+        GLENS_BACKOFF_MAX_MS: 3000
+        GLENS_MAX_DIM: 1024
+        GLENS_QUALITY: 85
+        GLENS_SCREENSHOTS: "false"
+        GLENS_SCREENSHOTS_ERROR_ONLY: "true"
+        GLENS_RECORDING: "true"
+        GLENS_RECORDING_FPS: 12
+        GLENS_RECORDING_QUALITY: 60
+        GLENS_RECORDING_RES: 1280x720
+        GLENS_RECORDING_OVERLAY_COLOR: "#FF0000"
+        GLENS_RECORDING_OVERLAY_SIZE: 16
+        GLENS_OUTPUT_DIR: ./output
+        GLENS_SKIP_READY_CHECK: "true"
+        GLENS_FAST_CLOSE: "true"
+        GLENS_NAV_WAIT: domcontentloaded
+        GLENS_LOG_LEVEL: info
+      run: node glens.js
+
+    - name: Upload output artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: glens-output
+        path: |
+          output/
+          !output/tmp/
+        retention-days: 7
