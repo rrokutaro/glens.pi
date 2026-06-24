@@ -1,4 +1,3 @@
-%%writefile glens_test.js
 import { launch } from 'cloakbrowser/puppeteer';
 import fs from 'fs';
 import path from 'path';
