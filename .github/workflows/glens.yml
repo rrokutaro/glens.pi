@@ -28,6 +28,25 @@ jobs:
     - name: Install CloakBrowser Chromium binary
       run: npx cloakbrowser install
 
+    - name: Create package.json type module
+      run: |
+        if [ -f package.json ]; then
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.type='module'; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n'); console.log('Updated package.json with type:module');"
+        else
+          echo '{"name":"glens","type":"module"}' > package.json
+        fi
+
+    - name: Verify images exist
+      run: |
+        mkdir -p images
+        if [ "$(ls -A images 2>/dev/null)" ]; then
+          echo "Images found:"
+          ls -la images/
+        else
+          echo "WARNING: No images in ./images/ directory. The script will fail."
+          echo "Add your images to an 'images/' folder in your repo, or adjust IMAGE_DIR_CANDIDATES in glens.js."
+        fi
+
     - name: Run GLENS test
       env:
         GLENS_MODE: lens
