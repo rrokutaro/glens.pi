@@ -491,37 +491,41 @@ function cleanupTempImages() {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  UPLOAD
 // ═══════════════════════════════════════════════════════════════════════════════
-async function uploadToUguu(filePath) {
-    const { FormData } = await import('formdata-node');
-    const { fileFromPath } = await import('formdata-node/file-from-path');
+async function uploadToCatbox(filePath) {
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
     const form = new FormData();
-    form.append('files[]', await fileFromPath(filePath));
-    const res = await fetch('https://uguu.se/upload?time=60', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!data.success || !data.files?.length) throw new Error(`Uguu: ${JSON.stringify(data).slice(0, 80)}`);
-    return data.files[0].url;
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', blob, path.basename(filePath));
+    const res = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: form
+    });
+    const url = (await res.text()).trim();
+    if (!url.startsWith('http')) throw new Error(`Catbox: ${url.slice(0, 80)}`);
+    return url;
+}
+
+async function uploadToLitterbox(filePath) {
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('time', '72h');
+    form.append('fileToUpload', blob, path.basename(filePath));
+    const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+        method: 'POST',
+        body: form
+    });
+    const url = (await res.text()).trim();
+    if (!url.startsWith('http')) throw new Error(`Litterbox: ${url.slice(0, 80)}`);
+    return url;
 }
 
 async function uploadImage(filePath) {
     const methods = [
-        { name: 'Uguu', fn: async (p) => uploadToUguu(p) },
-        { name: '0x0.st', fn: async (p) => {
-            const { FormData } = await import('formdata-node');
-            const { fileFromPath } = await import('formdata-node/file-from-path');
-            const form = new FormData(); form.append('file', await fileFromPath(p));
-            const res = await fetch('https://0x0.st', { method: 'POST', body: form });
-            const url = (await res.text()).trim();
-            if (!url.startsWith('http')) throw new Error(`0x0.st: ${url.slice(0, 50)}`);
-            return url;
-        }},
-        { name: 'transfer.sh', fn: async (p) => {
-            const res = await fetch(`https://transfer.sh/${path.basename(p)}`, {
-                method: 'PUT', body: fs.readFileSync(p), headers: { 'Content-Type': 'application/octet-stream' }
-            });
-            const url = (await res.text()).trim();
-            if (!url.startsWith('http')) throw new Error(`transfer.sh: ${url.slice(0, 50)}`);
-            return url;
-        }},
+        { name: 'catbox.moe', fn: async (p) => uploadToCatbox(p) },
+        { name: 'litterbox.catbox.moe', fn: async (p) => uploadToLitterbox(p) },
     ];
     for (const m of methods) {
         try {
