@@ -1,3 +1,4 @@
+%%writefile glens_test.js
 import { launch } from 'cloakbrowser/puppeteer';
 import fs from 'fs';
 import path from 'path';
@@ -492,11 +493,11 @@ function cleanupTempImages() {
 //  UPLOAD
 // ═══════════════════════════════════════════════════════════════════════════════
 async function uploadToCatbox(filePath) {
-    const { FormData } = await import('formdata-node');
-    const { fileFromPath } = await import('formdata-node/file-from-path');
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', await fileFromPath(filePath));
+    form.append('fileToUpload', blob, path.basename(filePath));
     const res = await fetch('https://catbox.moe/user/api.php', {
         method: 'POST',
         body: form
@@ -507,12 +508,12 @@ async function uploadToCatbox(filePath) {
 }
 
 async function uploadToLitterbox(filePath) {
-    const { FormData } = await import('formdata-node');
-    const { fileFromPath } = await import('formdata-node/file-from-path');
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
     form.append('time', '72h');
-    form.append('fileToUpload', await fileFromPath(filePath));
+    form.append('fileToUpload', blob, path.basename(filePath));
     const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
         method: 'POST',
         body: form
