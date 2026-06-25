@@ -1,4 +1,4 @@
-# GLENS — Google Lens Product Identifier
+# GLENS.PI — Google Lens Product Identifier
 
 ![](./assets/banner.gif)
 
