@@ -1,6 +1,6 @@
 # GLENS — Google Lens Product Identifier
 
-![](./assets/vid.mp4)
+![](./assets/banner.gif)
 
 Automated pipeline that uploads images to Google Lens, extracts AI-generated product analysis (titles, brands, prices, sources, dropship viability, social appearances), and outputs structured JSON.
 
