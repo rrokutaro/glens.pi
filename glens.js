@@ -6,9 +6,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  CONFIG
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- CONFIG ---
 const CONFIG = {
     mode: process.env.GLENS_MODE || 'lens',
     batch: {
@@ -89,9 +87,7 @@ function atomicWrite(filePath, data) {
     fs.renameSync(tmpPath, filePath);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SCREEN RECORDER
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- SCREEN RECORDER ---
 class ScreenRecorder {
     constructor(outputPath) {
         this.outputPath = outputPath;
@@ -151,7 +147,7 @@ class ScreenRecorder {
                 this.frameCount++;
                 await client.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
             } catch (e) {
-                // Frame dropped, continue
+                // dropped
             }
         });
 
@@ -214,23 +210,18 @@ class ScreenRecorder {
         return new Promise((resolve) => {
             const ffmpegPath = this._findFfmpeg();
             if (!ffmpegPath) {
-                log('warn', 'ffmpeg not found. Frames saved as image sequence.');
+                log('warn', 'ffmpeg not found. Saved frames only.');
                 const frameList = path.join(this.framesDir, '..', path.basename(this.outputPath) + '_frames.txt');
-                fs.writeFileSync(frameList, 'Frames: ' + this.frameCount + '\nDir: ' + this.framesDir + '\nffmpeg command:\nffmpeg -framerate ' + CONFIG.recording.fps + ' -i ' + path.join(this.framesDir, 'frame_%06d.jpg') + ' -c:v libx264 -pix_fmt yuv420p -crf 23 ' + this.outputPath);
+                fs.writeFileSync(frameList, 'Frames: ' + this.frameCount + '\nDir: ' + this.framesDir);
                 resolve();
                 return;
             }
 
             const [width, height] = CONFIG.recording.resolution.split('x');
             const args = [
-                '-y',
-                '-framerate', String(CONFIG.recording.fps),
+                '-y', '-framerate', String(CONFIG.recording.fps),
                 '-i', path.join(this.framesDir, 'frame_%06d.jpg'),
-                '-c:v', 'libx264',
-                '-pix_fmt', 'yuv420p',
-                '-crf', '28',
-                '-preset', 'fast',
-                '-movflags', '+faststart',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '28', '-preset', 'fast', '-movflags', '+faststart',
                 '-vf', 'scale=' + width + ':' + height + ':force_original_aspect_ratio=decrease,pad=' + width + ':' + height + ':(ow-iw)/2:(oh-ih)/2:black',
                 this.outputPath
             ];
@@ -248,9 +239,9 @@ class ScreenRecorder {
                 clearTimeout(timeoutId);
                 if (code === 0) {
                     const stats = fs.statSync(this.outputPath);
-                    log('info', '🎬 Video saved: ' + path.basename(this.outputPath) + ' (' + (stats.size / 1024 / 1024).toFixed(1) + 'MB, ' + this.frameCount + ' frames)');
+                    log('info', '🎬 Video clip saved: ' + path.basename(this.outputPath) + ' (' + (stats.size / 1024 / 1024).toFixed(1) + 'MB)');
                 } else {
-                    log('warn', 'ffmpeg exited ' + code + '. ' + stderr.slice(0, 200));
+                    log('warn', 'ffmpeg exited ' + code + '. ' + stderr.slice(0, 150));
                 }
                 resolve();
             });
@@ -265,55 +256,26 @@ class ScreenRecorder {
     _findFfmpeg() {
         const candidates = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
         for (const c of candidates) {
-            try {
-                execSync('which ' + c, { stdio: 'ignore' });
-                return c;
-            } catch (e) {}
+            try { execSync('which ' + c, { stdio: 'ignore' }); return c; } catch (e) {}
         }
         return null;
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  BLOCK DETECTION
-// ═══════════════════════════════════════════════════════════════════════════════
-const BLOCK_KEYWORDS = [
-    'unusual traffic',
-    'robot',
-    'captcha',
-    'recaptcha',
-    'verify you are human',
-    'i\'m not a robot',
-    'try again later',
-    'rate limit',
-    'too many requests',
-    'access denied',
-    'blocked',
-    'suspicious activity',
-    'automated requests',
-    'temporarily unavailable',
-];
-
-const RATE_LIMIT_KEYWORDS = [
-    'rate limit',
-    'too many requests',
-    'try again later',
-    'temporarily unavailable',
-    'slow down',
-];
+// --- BLOCK DETECTION ---
+const BLOCK_KEYWORDS = ['unusual traffic', 'robot', 'captcha', 'recaptcha', 'verify you are human', 'i\'m not a robot', 'try again later', 'rate limit', 'too many requests', 'access denied', 'blocked', 'suspicious activity', 'automated requests', 'temporarily unavailable'];
+const RATE_LIMIT_KEYWORDS = ['rate limit', 'too many requests', 'try again later', 'temporarily unavailable', 'slow down'];
 
 function detectBlockPage(text) {
     if (!text || text.length < 100) return false;
     const lower = text.toLowerCase();
-    return BLOCK_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+    return BLOCK_KEYWORDS.some(kw => lower.includes(kw));
 }
-
 function detectRateLimit(text) {
     if (!text || text.length < 50) return false;
     const lower = text.toLowerCase();
-    return RATE_LIMIT_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+    return RATE_LIMIT_KEYWORDS.some(kw => lower.includes(kw));
 }
-
 function analyzeResponse(text) {
     const result = {
         hasJson: !!extractJsonFromText(text || ''),
@@ -327,9 +289,7 @@ function analyzeResponse(text) {
     return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  PATHS
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- PATHS ---
 const OUTPUT_DIR = CONFIG.output.dir;
 const SCREENSHOTS_DIR = path.join(OUTPUT_DIR, 'screenshots');
 const RESPONSES_DIR = path.join(OUTPUT_DIR, 'responses');
@@ -340,9 +300,7 @@ const TMP_DIR = path.join(process.cwd(), 'tmp_resized');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE DISCOVERY
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- IMAGE DISCOVERY ---
 const IMAGE_DIR_CANDIDATES = [
     path.join(process.cwd(), 'images'),
     path.join(process.cwd(), 'contents', 'images'),
@@ -360,11 +318,7 @@ if (ENV_URLS && ENV_URLS.trim()) {
             IMAGE_PATHS = parsed.map((url, i) => {
                 let basename = 'image.jpg';
                 try { basename = path.basename(new URL(url).pathname); } catch(e) {}
-                return {
-                    type: 'url',
-                    url: url,
-                    filename: 'url_' + i + '_' + basename
-                };
+                return { type: 'url', url: url, filename: 'url_' + i + '_' + basename };
             });
             log('info', 'Using ' + parsed.length + ' provided URL(s)');
         } else {
@@ -377,22 +331,17 @@ if (ENV_URLS && ENV_URLS.trim()) {
 } else {
     for (const dir of IMAGE_DIR_CANDIDATES) {
         if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir)
-                .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
-                .map(f => path.join(dir, f));
+            const files = fs.readdirSync(dir).filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f)).map(f => path.join(dir, f));
             if (files.length > 0) { IMAGE_PATHS = files; log('info', 'Found ' + files.length + ' image(s)'); break; }
         }
     }
 }
-
 if (IMAGE_PATHS.length === 0) {
     log('error', 'No images found');
     process.exit(1);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  PROMPT
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- PROMPT ---
 const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (clothing, footwear, accessories, jewelry, etc.). For each product found, provide:
 
 1. Title: Product name
@@ -418,14 +367,10 @@ const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (c
 Return ONLY raw JSON. No code blocks, no explanations. Raw JSON text in one line.
 
 Schema:
-
 {"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"dropshipViability":{"score":1-10,"reasoning":"string","risks":["string"]},"estimatedResaleRange":{"low":"string","high":"string","currency":"string"},"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}]}]}
 
 Heres the image URL: {IMAGE_URL}`;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  DOM UTILITIES
-// ═══════════════════════════════════════════════════════════════════════════════
 const FIND_DEEP_SCRIPT = `
 function findAllDeep(root, selector) {
   const results = [];
@@ -456,9 +401,7 @@ function getVisibleTextDeep(root) {
 }
 `;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE RESIZE
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- IMAGE RESIZE ---
 async function resizeImage(imgPathOrInfo) {
     if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'url') {
         imgPathOrInfo.originalId = imgPathOrInfo.url;
@@ -471,92 +414,56 @@ async function resizeImage(imgPathOrInfo) {
     try {
         const meta = await sharp(imgPath).metadata();
         const needs = meta.width > CONFIG.image.maxDimension || meta.height > CONFIG.image.maxDimension;
-        const pipeline = needs
-            ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargement: true })
-            : sharp(imgPath);
+        const pipeline = needs ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargement: true }) : sharp(imgPath);
         await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
-        log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
         return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename, originalId };
     } catch (e) {
-        log('warn', 'Resize fail ' + filename + ': ' + e.message + '. Using original.');
         return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename, originalId };
     }
 }
-
 function cleanupTempImages() {
     try {
         if (!fs.existsSync(TMP_DIR)) return;
-        const files = fs.readdirSync(TMP_DIR);
         let removed = 0;
-        for (const f of files) { try { fs.unlinkSync(path.join(TMP_DIR, f)); removed++; } catch(e) {} }
-        log('info', 'Cleaned ' + removed + ' temp files');
-    } catch (e) { log('warn', 'Cleanup: ' + e.message); }
+        for (const f of fs.readdirSync(TMP_DIR)) { try { fs.unlinkSync(path.join(TMP_DIR, f)); removed++; } catch(e) {} }
+    } catch (e) {}
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  UPLOAD
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- UPLOAD ---
 async function uploadToCatbox(filePath) {
     const buf = fs.readFileSync(filePath);
-    const blob = new Blob([buf]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', blob, path.basename(filePath));
-    const res = await fetch('https://catbox.moe/user/api.php', {
-        method: 'POST',
-        body: form
-    });
+    form.append('fileToUpload', new Blob([buf]), path.basename(filePath));
+    const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: form });
     const url = (await res.text()).trim();
     if (!url.startsWith('http')) throw new Error('Catbox: ' + url.slice(0, 80));
     return url;
 }
-
 async function uploadToLitterbox(filePath) {
     const buf = fs.readFileSync(filePath);
-    const blob = new Blob([buf]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
     form.append('time', '72h');
-    form.append('fileToUpload', blob, path.basename(filePath));
-    const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-        method: 'POST',
-        body: form
-    });
+    form.append('fileToUpload', new Blob([buf]), path.basename(filePath));
+    const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', { method: 'POST', body: form });
     const url = (await res.text()).trim();
     if (!url.startsWith('http')) throw new Error('Litterbox: ' + url.slice(0, 80));
     return url;
 }
-
 async function uploadImage(filePath) {
-    const methods = [
-        { name: 'catbox.moe', fn: async (p) => uploadToCatbox(p) },
-        { name: 'litterbox.catbox.moe', fn: async (p) => uploadToLitterbox(p) },
-    ];
+    const methods = [{ name: 'catbox', fn: uploadToCatbox }, { name: 'litterbox', fn: uploadToLitterbox }];
     for (const m of methods) {
-        try {
-            log('debug', 'Upload ' + m.name + '...');
-            const url = await retry(() => m.fn(filePath), { attempts: CONFIG.retry.uploadAttempts, label: m.name });
-            log('info', 'Uploaded -> ' + url.slice(0, 50) + '...');
-            return url;
-        } catch (e) { log('warn', m.name + ' fail: ' + e.message.slice(0, 60)); }
+        try { return await retry(() => m.fn(filePath), { attempts: CONFIG.retry.uploadAttempts, label: m.name }); }
+        catch (e) { log('warn', m.name + ' fail: ' + e.message.slice(0, 60)); }
     }
     throw new Error('All uploads failed');
 }
 
-function buildPrompt(imageUrl) {
-    return PROMPT_TEMPLATE.replace('{IMAGE_URL}', imageUrl);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  JSON EXTRACTION
-// ═══════════════════════════════════════════════════════════════════════════════
-function isSchemaTemplate(s) {
-    if (!s) return false;
-    return s.includes('"title":"string"') || s.includes('"brand":"string"');
-}
+// --- JSON EXTRACTION ---
 function isRealProductData(s) {
     if (!s || !s.includes('"products"')) return false;
-    if (isSchemaTemplate(s)) return false;
+    if (s.includes('"title":"string"') || s.includes('"brand":"string"')) return false;
     return /"url":"https?:\/\//.test(s) || /"current":"[^"]*\d/.test(s) || /"brand":"(?!string)[^"]+"/.test(s);
 }
 function extractBalancedJson(text, start) {
@@ -613,44 +520,24 @@ function extractJsonFromText(text) {
     return null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  RESPONSE EXTRACTION
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- STREAMED RESPONSE ---
 async function getResponseTextFromPage(page) {
     await page.evaluate(FIND_DEEP_SCRIPT);
-    const selectors = [
-        'model-response', '[class*="response"]', '[class*="message"]', '[class*="chat"]',
-        '[class*="conversation"]', 'article', '[role="region"]', '[role="main"]', 'main',
-        '[class*="markdown"]', '[class*="content"]'
-    ];
+    const selectors = ['model-response', '[class*="response"]', '[class*="message"]', '[class*="chat"]', '[class*="conversation"]', 'article', '[role="region"]', '[role="main"]', 'main', '[class*="markdown"]', '[class*="content"]'];
     for (const sel of selectors) {
         try {
-            const texts = await page.evaluate((s) => {
-                return findAllDeep(document.body, s)
-                    .map(e => getVisibleTextDeep(e))
-                    .filter(t => t.length > 50);
-            }, sel);
+            const texts = await page.evaluate((s) => findAllDeep(document.body, s).map(e => getVisibleTextDeep(e)).filter(t => t.length > 50), sel);
             if (texts.length) {
                 const best = texts.reduce((a, b) => a.length > b.length ? a : b, '');
-                if (best.length > 100) {
-                    if (extractJsonFromText(best)) return best;
-                    return best;
-                }
+                if (best.length > 100) return best;
             }
         } catch(e) {}
     }
     return await page.evaluate(() => getVisibleTextDeep(document.body));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  STREAMED RESPONSE
-// ═══════════════════════════════════════════════════════════════════════════════
 async function waitForStreamedResponse(page, recorder) {
-    const checkInterval = 400;
-    const maxWait = CONFIG.timeouts.response;
-    const jsonIdle = CONFIG.timeouts.jsonIdle;
-    log('info', 'Wait response...');
-
+    const checkInterval = 400, maxWait = CONFIG.timeouts.response, jsonIdle = CONFIG.timeouts.jsonIdle;
     let lastText = '', lastJson = null, lastChange = Date.now(), start = Date.now(), stable = 0, ticks = 0;
 
     while (true) {
@@ -663,21 +550,16 @@ async function waitForStreamedResponse(page, recorder) {
             const json = extractJsonFromText(current);
             if (json && json !== lastJson) {
                 lastJson = json;
-                log('info', 'JSON ' + json.length + ' chars');
                 if (recorder) await recorder.updateStatus('JSON FOUND');
             }
-        } else {
-            stable++;
-        }
+        } else stable++;
 
         const idle = Date.now() - lastChange;
 
         if (lastJson && idle >= jsonIdle) {
-            log('info', 'JSON stable ' + jsonIdle + 'ms. Done.');
             if (recorder) await recorder.updateStatus('DONE');
             return { text: lastJson, html: '', duration: Date.now() - start, jsonExtracted: true };
         }
-
         if (stable >= 2 && current.length > 500 && idle >= 2000) {
             const j = extractJsonFromText(current);
             if (j) {
@@ -685,36 +567,23 @@ async function waitForStreamedResponse(page, recorder) {
                 return { text: j, html: '', duration: Date.now() - start, jsonExtracted: true };
             }
         }
-
         if (idle >= maxWait) {
-            log('warn', 'Timeout ' + maxWait + 'ms');
             if (recorder) await recorder.updateStatus('TIMEOUT');
             const j = extractJsonFromText(current) || lastJson;
-            if (j) return { text: j, html: '', duration: Date.now() - start, jsonExtracted: true };
-            return { text: current, html: '', duration: Date.now() - start, jsonExtracted: false };
+            return { text: j || current, html: '', duration: Date.now() - start, jsonExtracted: !!j };
         }
-
-        if (ticks % 12 === 0) {
-            log('info', ((maxWait - idle) / 1000).toFixed(0) + 's left | ' + current.length + ' chars | JSON: ' + (lastJson ? lastJson.length + 'ch' : 'scan'));
-            if (recorder) await recorder.updateStatus('SCANNING ' + current.length + 'ch');
-        }
+        if (ticks % 12 === 0 && recorder) await recorder.updateStatus('SCANNING ' + current.length + 'ch');
         await new Promise(r => setTimeout(r, checkInterval));
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SCREENSHOT HELPER
-// ═══════════════════════════════════════════════════════════════════════════════
 async function takeScreenshot(page, ssPath) {
     if (!CONFIG.screenshots.enabled) return;
     if (CONFIG.screenshots.onErrorOnly && !ssPath.includes('error')) return;
-    try { await page.screenshot({ path: ssPath, fullPage: true }); }
-    catch(e) { log('warn', 'SS: ' + e.message.slice(0, 40)); }
+    try { await page.screenshot({ path: ssPath, fullPage: true }); } catch(e) {}
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  STANDARD MODE
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- CORE MODES ---
 async function processImageStandard(browser, imageInfo, index, total) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
@@ -732,7 +601,7 @@ async function processImageStandard(browser, imageInfo, index, total) {
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
-        const fullPrompt = buildPrompt(imageUrl);
+        const fullPrompt = PROMPT_TEMPLATE.replace('{IMAGE_URL}', imageUrl);
         const ctx = await browser.createBrowserContext();
         const page = await ctx.newPage();
 
@@ -745,12 +614,8 @@ async function processImageStandard(browser, imageInfo, index, total) {
                 await recorder.updateLabel('[' + (index + 1) + '/' + total + '] ' + filename.slice(0, 30), 'NAVIGATING');
             }
 
-            await retry(() => page.goto('https://google.com/ai?hl=en&gl=us', {
-                waitUntil: CONFIG.perf.navWaitUntil,
-                timeout: CONFIG.timeouts.navigation
-            }), { attempts: CONFIG.retry.navigationAttempts, label: 'Nav' });
+            await retry(() => page.goto('https://google.com/ai?hl=en&gl=us', { waitUntil: CONFIG.perf.navWaitUntil, timeout: CONFIG.timeouts.navigation }), { attempts: CONFIG.retry.navigationAttempts, label: 'Nav' });
             if (recorder) await recorder.updateStatus('PAGE LOADED');
-            await takeScreenshot(page, ssPrefix + '_loaded.png');
 
             const promptSels = ['textarea[placeholder*="Ask" i]', 'textarea[aria-label*="message" i]', '[contenteditable="true"]', 'textarea', '[role="textbox"]'];
             let promptEl = null;
@@ -760,7 +625,6 @@ async function processImageStandard(browser, imageInfo, index, total) {
             await promptEl.click();
             await page.evaluate((t) => { const el = document.activeElement || document.querySelector('textarea'); if (el) { el.value = t; el.dispatchEvent(new Event('input', { bubbles: true })); } }, fullPrompt);
             if (recorder) await recorder.updateStatus('PROMPT SET');
-            await takeScreenshot(page, ssPrefix + '_prompt.png');
 
             const sendSels = ['button[aria-label*="Send" i]', 'button[aria-label*="send" i]', 'button[type="submit"]', '[data-testid="send-button"]'];
             let sent = false;
@@ -770,12 +634,10 @@ async function processImageStandard(browser, imageInfo, index, total) {
             }
             if (!sent) await page.keyboard.press('Enter');
             if (recorder) await recorder.updateStatus('SUBMITTED');
-            await takeScreenshot(page, ssPrefix + '_submitted.png');
 
             const resp = await waitForStreamedResponse(page, recorder);
             log('info', 'Response: ' + resp.text.length + ' chars');
-            await takeScreenshot(page, ssPrefix + '_response.png');
-
+            
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
@@ -783,25 +645,16 @@ async function processImageStandard(browser, imageInfo, index, total) {
 
             return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) {
-                await recorder.stop();
-                activeRecorders.delete(recorder);
-            }
+            if (recorder) { await recorder.stop(); activeRecorders.delete(recorder); }
             await ctx.close();
         }
     } catch (err) {
-        if (recorder) {
-            await recorder.stop();
-            activeRecorders.delete(recorder);
-        }
+        if (recorder) { await recorder.stop(); activeRecorders.delete(recorder); }
         log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LENS MODE
-// ═══════════════════════════════════════════════════════════════════════════════
 async function processImageLens(browser, imageInfo, index, total) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
@@ -819,7 +672,7 @@ async function processImageLens(browser, imageInfo, index, total) {
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
-        const fullPrompt = buildPrompt(imageUrl);
+        const fullPrompt = PROMPT_TEMPLATE.replace('{IMAGE_URL}', imageUrl);
         const ctx = await browser.createBrowserContext();
         const page = await ctx.newPage();
 
@@ -832,49 +685,25 @@ async function processImageLens(browser, imageInfo, index, total) {
                 await recorder.updateLabel('[' + (index + 1) + '/' + total + '] ' + filename.slice(0, 30), 'NAVIGATING');
             }
 
-            const encodedPrompt = encodeURIComponent(fullPrompt);
-            const lensUrl = 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(imageUrl) + '&q=' + encodedPrompt;
-
-            await retry(() => page.goto(lensUrl, {
-                waitUntil: CONFIG.perf.navWaitUntil,
-                timeout: CONFIG.timeouts.navigation
-            }), { attempts: CONFIG.retry.navigationAttempts, label: 'Lens' });
+            const lensUrl = 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(imageUrl) + '&q=' + encodeURIComponent(fullPrompt);
+            await retry(() => page.goto(lensUrl, { waitUntil: CONFIG.perf.navWaitUntil, timeout: CONFIG.timeouts.navigation }), { attempts: CONFIG.retry.navigationAttempts, label: 'Lens' });
             if (recorder) await recorder.updateStatus('LENS LOADED');
-            await takeScreenshot(page, ssPrefix + '_lens.png');
 
             const finalUrl = page.url();
-            log('debug', 'Redirect: ' + finalUrl.slice(0, 80));
-
-            let aiUrl;
-            try {
-                const u = new URL(finalUrl);
-                u.searchParams.delete('udm');
-                u.searchParams.set('udm', '50');
-                aiUrl = u.toString();
-            } catch {
-                aiUrl = finalUrl.includes('udm=') ? finalUrl.replace(/udm=[^&]+/, 'udm=50')
-                    : finalUrl + (finalUrl.includes('?') ? '&' : '?') + 'udm=50';
-            }
+            let aiUrl = finalUrl.includes('udm=') ? finalUrl.replace(/udm=[^&]+/, 'udm=50') : finalUrl + (finalUrl.includes('?') ? '&' : '?') + 'udm=50';
+            try { const u = new URL(finalUrl); u.searchParams.set('udm', '50'); aiUrl = u.toString(); } catch {}
 
             if (recorder) await recorder.updateStatus('AI MODE');
-            let aiNavigated = false;
             try {
                 await page.evaluate((url) => { window.location.href = url; }, aiUrl);
                 await page.waitForNavigation({ waitUntil: CONFIG.perf.navWaitUntil, timeout: 10000 });
-                aiNavigated = true;
             } catch (e) {
-                log('debug', 'Eval nav fail, fallback goto: ' + e.message.slice(0, 50));
-                await retry(() => page.goto(aiUrl, {
-                    waitUntil: CONFIG.perf.navWaitUntil,
-                    timeout: CONFIG.timeouts.navigation
-                }), { attempts: 1, label: 'AI fallback' });
+                await retry(() => page.goto(aiUrl, { waitUntil: CONFIG.perf.navWaitUntil, timeout: CONFIG.timeouts.navigation }), { attempts: 1, label: 'AI fallback' });
             }
             if (recorder) await recorder.updateStatus('AI LOADED');
-            await takeScreenshot(page, ssPrefix + '_ai.png');
 
             const resp = await waitForStreamedResponse(page, recorder);
             log('info', 'Response: ' + resp.text.length + ' chars');
-            await takeScreenshot(page, ssPrefix + '_response.png');
 
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
@@ -883,66 +712,46 @@ async function processImageLens(browser, imageInfo, index, total) {
 
             return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) {
-                await recorder.stop();
-                activeRecorders.delete(recorder);
-            }
+            if (recorder) { await recorder.stop(); activeRecorders.delete(recorder); }
             await ctx.close();
         }
     } catch (err) {
-        if (recorder) {
-            await recorder.stop();
-            activeRecorders.delete(recorder);
-        }
+        if (recorder) { await recorder.stop(); activeRecorders.delete(recorder); }
         log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ROUTER
-// ═══════════════════════════════════════════════════════════════════════════════
 async function processImage(browser, imageInfo, index, total) {
-    return CONFIG.mode === 'lens'
-        ? processImageLens(browser, imageInfo, index, total)
-        : processImageStandard(browser, imageInfo, index, total);
+    return CONFIG.mode === 'lens' ? processImageLens(browser, imageInfo, index, total) : processImageStandard(browser, imageInfo, index, total);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  BATCH PROCESSING
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- BATCHING & VIDEO COMPILATION ---
 function chunkArray(arr, size) {
     const chunks = [];
     for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
     return chunks;
-}
-async function jitteredDelay(baseMs) {
-    await new Promise(r => setTimeout(r, baseMs + Math.random() * 200));
 }
 
 async function processBatch(browser, batch, batchIndex, totalBatches, offset) {
     log('info', 'BATCH [' + (batchIndex + 1) + '/' + totalBatches + '] ' + batch.length + ' img [' + CONFIG.mode + ']');
     const results = [];
     if (CONFIG.batch.enabled) {
-        const promises = batch.map((img, i) => processImage(browser, img, offset + i, IMAGE_PATHS.length));
-        results.push(...await Promise.all(promises));
+        results.push(...await Promise.all(batch.map((img, i) => processImage(browser, img, offset + i, IMAGE_PATHS.length))));
     } else {
         for (let i = 0; i < batch.length; i++) {
             results.push(await processImage(browser, batch[i], offset + i, IMAGE_PATHS.length));
-            if (i < batch.length - 1) await jitteredDelay(CONFIG.batch.delayBetweenSearchesMs);
+            if (i < batch.length - 1) await new Promise(r => setTimeout(r, CONFIG.batch.delayBetweenSearchesMs));
         }
     }
     return results;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  VIDEO COMPILATION
-// ═══════════════════════════════════════════════════════════════════════════════
 async function compileRecordings(recordingsDir) {
     if (!fs.existsSync(recordingsDir)) return;
     const files = fs.readdirSync(recordingsDir).filter(f => f.endsWith('.mp4') && !f.startsWith('session_'));
     if (files.length === 0) return;
-    
+
     const sessionName = 'session_' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4';
     const sessionPath = path.join(recordingsDir, sessionName);
 
@@ -953,59 +762,30 @@ async function compileRecordings(recordingsDir) {
     }
 
     const listPath = path.join(recordingsDir, 'concat_list.txt');
-    let listContent = '';
-    
-    // Sort videos by the index (e.g., lens_1_xxx.mp4, lens_2_xxx.mp4) to stitch them sequentially
-    files.sort((a, b) => {
-        const numA = parseInt(a.split('_')[1]) || 0;
-        const numB = parseInt(b.split('_')[1]) || 0;
-        return numA - numB;
-    });
-
-    for (const f of files) {
-        listContent += "file '" + f.replace(/'/g, "'\\''") + "'\n";
-    }
-    fs.writeFileSync(listPath, listContent);
+    files.sort((a, b) => (parseInt(a.split('_')[1]) || 0) - (parseInt(b.split('_')[1]) || 0));
+    fs.writeFileSync(listPath, files.map(f => "file '" + f.replace(/'/g, "'\\''") + "'").join('\n') + '\n');
 
     return new Promise((resolve) => {
         let ffmpegPath = null;
         for (const c of ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
             try { execSync('which ' + c, { stdio: 'ignore' }); ffmpegPath = c; break; } catch (e) {}
         }
-
-        if (!ffmpegPath) {
-            log('warn', 'ffmpeg not found. Videos will remain separate clips.');
-            resolve();
-            return;
-        }
+        if (!ffmpegPath) { log('warn', 'ffmpeg not found. Videos remain separate.'); resolve(); return; }
 
         const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', sessionPath], { cwd: recordingsDir });
-        let stderr = '';
-        if (proc.stderr) proc.stderr.on('data', d => stderr += d);
-
         proc.on('close', (code) => {
             if (code === 0) {
-                log('info', '🎬 Compiled ' + files.length + ' separate clips into one session video: ' + sessionName);
-                // Clean up the smaller clips
-                for (const f of files) {
-                    try { fs.unlinkSync(path.join(recordingsDir, f)); } catch(e) {}
-                }
-            } else {
-                log('warn', 'Failed to compile clips (exit code ' + code + '): ' + stderr.slice(0, 150));
-            }
+                log('info', '🎬 Compiled ' + files.length + ' clips into: ' + sessionName);
+                for (const f of files) { try { fs.unlinkSync(path.join(recordingsDir, f)); } catch(e) {} }
+            } else log('warn', 'Failed to compile clips.');
             try { fs.unlinkSync(listPath); } catch(e) {}
             resolve();
         });
-        proc.on('error', () => {
-            try { fs.unlinkSync(listPath); } catch(e) {}
-            resolve();
-        });
+        proc.on('error', () => { try { fs.unlinkSync(listPath); } catch(e) {} resolve(); });
     });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  GRACEFUL SHUTDOWN
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- MAIN RUNNER ---
 let activeBrowser = null;
 const activeRecorders = new Set();
 let isShuttingDown = false;
@@ -1016,56 +796,24 @@ async function gracefulShutdown(sig) {
     log('warn', 'Signal ' + sig + '. Shutdown...');
     for (const rec of activeRecorders) await rec.stop();
     if (activeBrowser) {
-        let closed = false;
-        activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-        await new Promise(r => setTimeout(r, 5000));
-        if (!closed) {
-            log('warn', 'Browser close hung. Force killing...');
-            try {
-                const proc = activeBrowser.process && activeBrowser.process();
-                if (proc) proc.kill('SIGKILL');
-            } catch(e) {}
-        }
+        activeBrowser.close().catch(() => {});
+        setTimeout(() => { try { activeBrowser.process()?.kill('SIGKILL'); } catch(e) {} }, 3000);
     }
     cleanupTempImages();
     process.exit(0);
 }
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('unhandledRejection', (err) => log('error', 'Unhandled:', err.message));
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  MAIN
-// ═══════════════════════════════════════════════════════════════════════════════
 async function startTesting() {
-    log('info', '═══════════════════════════════════════════════════════════════');
-    log('info', '  GLENS PRODUCTION v6.2 — GLOBAL SCREEN RECORDER');
-    log('info', '═══════════════════════════════════════════════════════════════');
-    log('info', 'Mode: ' + CONFIG.mode.toUpperCase() + ' | Batch: ' + CONFIG.batch.size + ' | JSON idle: ' + CONFIG.timeouts.jsonIdle + 'ms');
-    log('info', 'Nav wait: ' + CONFIG.perf.navWaitUntil + ' | Screenshots: ' + (CONFIG.screenshots.enabled ? 'ON' : 'OFF'));
-    log('info', 'Recording: ' + (CONFIG.recording.enabled ? 'ON' : 'OFF') + ' | ' + CONFIG.recording.fps + 'fps | ' + CONFIG.recording.resolution);
-    log('info', 'CPUs: ' + os.cpus().length + ' | Mem: ' + (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) + 'GB');
-
+    log('info', 'GLENS PRODUCTION v6.3');
     const tStart = Date.now();
-
-    log('info', 'Resize...');
-    const tResize = Date.now();
     const imageInfos = await Promise.all(IMAGE_PATHS.map(p => resizeImage(p)));
-    log('info', 'Resized ' + imageInfos.length + ' in ' + ((Date.now() - tResize) / 1000).toFixed(1) + 's');
 
-    log('info', 'Launch browser...');
-    const tBrowser = Date.now();
     activeBrowser = await launch({
-        headless: true,
-        humanize: true,
-        args: [
-            '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-            '--disable-gpu', '--window-size=1366,768',
-            '--disable-background-networking', '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
-        ]
+        headless: true, humanize: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--window-size=1366,768']
     });
-    log('info', 'Browser ' + ((Date.now() - tBrowser) / 1000).toFixed(1) + 's');
 
     const allResults = [];
     let isGloballyBlocked = false;
@@ -1074,141 +822,52 @@ async function startTesting() {
         const batches = chunkArray(imageInfos, CONFIG.batch.size);
         for (let b = 0; b < batches.length; b++) {
             if (isGloballyBlocked) {
-                log('warn', '🚫 IP is blocked. Skipping remaining ' + (batches.length - b) + ' batches.');
-                const remaining = imageInfos.slice(b * CONFIG.batch.size);
-                for (const img of remaining) {
-                    allResults.push({
-                        filename: img.filename,
-                        originalId: img.originalId,
-                        imageUrl: null,
-                        response: '',
-                        html: '',
-                        duration: 0,
-                        error: 'Skipped: IP blocked',
-                        timedOut: false,
-                        jsonExtracted: false
-                    });
-                }
+                log('warn', '🚫 IP blocked. Skipping remaining batches.');
+                allResults.push(...imageInfos.slice(b * CONFIG.batch.size).map(img => ({
+                    filename: img.filename, originalId: img.originalId, imageUrl: null, response: '', error: 'Skipped: IP blocked'
+                })));
                 break;
             }
 
-            const offset = b * CONFIG.batch.size;
-            const results = await processBatch(activeBrowser, batches[b], b, batches.length, offset);
+            const results = await processBatch(activeBrowser, batches[b], b, batches.length, b * CONFIG.batch.size);
             allResults.push(...results);
 
-            const analysis = results.map(r => analyzeResponse(r.response));
-            const blockedCount = analysis.filter(a => a.isBlocked || a.isCaptchaHtml).length;
-            const rateLimitedCount = analysis.filter(a => a.isRateLimited).length;
-            const noJsonCount = analysis.filter(a => !a.hasJson && !a.isBlocked && !a.isRateLimited).length;
-
-            if (blockedCount > 0) {
-                log('warn', '⚠️ BATCH BLOCKED: ' + blockedCount + '/' + results.length + ' images hit CAPTCHA/block');
-                if (blockedCount >= 1) {
-                    isGloballyBlocked = true;
-                    log('error', '🚫 IP BLOCKED DETECTED. Stopping all further processing.');
-                }
-            }
-
-            if (rateLimitedCount > 0) log('warn', '⏳ Rate limited on ' + rateLimitedCount + '/' + results.length + ' images');
-            if (noJsonCount > 0) log('info', noJsonCount + '/' + results.length + ' images without JSON');
+            const blockedCount = results.filter(r => analyzeResponse(r.response).isBlocked || analyzeResponse(r.response).isCaptchaHtml).length;
+            if (blockedCount > 0) isGloballyBlocked = true;
 
             if (!isGloballyBlocked && b < batches.length - 1) {
-                const cooldown = rateLimitedCount > 0 ? CONFIG.batch.delayBetweenBatchesMs * 2 : CONFIG.batch.delayBetweenBatchesMs;
-                log('info', 'Cooldown ' + cooldown + 'ms...');
-                await jitteredDelay(cooldown);
+                await new Promise(r => setTimeout(r, CONFIG.batch.delayBetweenBatchesMs));
             }
         }
     } finally {
-        if (CONFIG.perf.fastClose) {
-            log('info', 'Close browser (async)...');
-            let closed = false;
-            activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-            await new Promise(r => setTimeout(r, 10));
-            if (!closed) {
-                try {
-                    const proc = activeBrowser.process && activeBrowser.process();
-                    if (proc) proc.kill('SIGKILL');
-                } catch(e) {}
-            }
-            activeBrowser = null;
-        } else {
-            log('info', 'Close browser...');
-            let closed = false;
-            activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-            await new Promise(r => setTimeout(r, 10000));
-            if (!closed) {
-                log('warn', 'Browser close hung. Force killing...');
-                try {
-                    const proc = activeBrowser.process && activeBrowser.process();
-                    if (proc) proc.kill('SIGKILL');
-                } catch(e) {}
-            }
-            activeBrowser = null;
+        if (activeBrowser) {
+            activeBrowser.close().catch(() => {});
+            setTimeout(() => { try { activeBrowser.process()?.kill('SIGKILL'); } catch(e) {} }, 3000);
         }
     }
-
-    const successful = allResults.filter(r => !r.error && !r.timedOut).length;
-    const withJson = allResults.filter(r => !!extractJsonFromText(r.response || '')).length;
-    const blocked = allResults.filter(r => {
-        const a = analyzeResponse(r.response);
-        return a.isBlocked || a.isCaptchaHtml;
-    }).length;
-    const skippedBlocked = allResults.filter(r => r.error && r.error.includes('Skipped: IP blocked')).length;
-    const rateLimited = allResults.filter(r => {
-        const a = analyzeResponse(r.response);
-        return a.isRateLimited;
-    }).length;
-    const failed = allResults.filter(r => r.error || r.timedOut).length;
 
     const output = {
         timestamp: new Date().toISOString(),
         totalImages: imageInfos.length,
-        successful, failed, withValidJson: withJson, blocked, skippedBlocked, rateLimited,
-        mode: CONFIG.mode,
-        config: { batchSize: CONFIG.batch.size, jsonIdle: CONFIG.timeouts.jsonIdle, navWaitUntil: CONFIG.perf.navWaitUntil, recording: CONFIG.recording },
-        system: { platform: os.platform(), cpus: os.cpus().length, totalMemoryGB: (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) },
-        results: allResults.map(r => {
-            const a = analyzeResponse(r.response);
-            return {
-                filename: r.filename, originalId: r.originalId, imageUrl: r.imageUrl, response: r.response,
-                duration: r.duration, error: r.error || null, timedOut: r.timedOut || false,
-                isBlocked: a.isBlocked || a.isCaptchaHtml,
-                isRateLimited: a.isRateLimited,
-                hasJson: a.hasJson,
-            };
-        }),
+        results: allResults.map(r => ({
+            filename: r.filename, originalId: r.originalId, imageUrl: r.imageUrl, response: r.response, error: r.error
+        })),
     };
 
     const jsonPath = path.join(RESPONSES_DIR, 'ai_responses.json');
-    const jsonData = JSON.stringify(output, null, 2);
-    if (CONFIG.output.atomicWrites) atomicWrite(jsonPath, jsonData);
-    else fs.writeFileSync(jsonPath, jsonData);
-    log('info', 'Saved -> ' + jsonPath);
+    if (CONFIG.output.atomicWrites) atomicWrite(jsonPath, JSON.stringify(output, null, 2));
+    else fs.writeFileSync(jsonPath, JSON.stringify(output, null, 2));
 
     const SUCCESSFUL_DIR = path.join(OUTPUT_DIR, 'successful');
     if (!fs.existsSync(SUCCESSFUL_DIR)) fs.mkdirSync(SUCCESSFUL_DIR, { recursive: true });
 
-    const successfulResults = allResults.filter(r => !r.error && !r.timedOut && r.response);
-
+    const successfulResults = allResults.filter(r => !r.error && r.response);
     for (const r of successfulResults) {
         const identifier = r.originalId || r.filename;
         const hash = crypto.createHash('md5').update(identifier).digest('hex');
-        const outputFilename = hash + '.json';
-        
-        const payload = {
-            originalId: identifier,
-            filename: outputFilename,
-            imageURL: r.imageUrl,
-            response: r.response
-        };
-        const filePath = path.join(SUCCESSFUL_DIR, outputFilename);
-        const data = JSON.stringify(payload, null, 2);
-        if (CONFIG.output.atomicWrites) atomicWrite(filePath, data);
-        else fs.writeFileSync(filePath, data, 'utf8');
-    }
-
-    if (successfulResults.length > 0) {
-        log('info', 'Saved ' + successfulResults.length + ' successful result(s) to ' + SUCCESSFUL_DIR);
+        const filePath = path.join(SUCCESSFUL_DIR, hash + '.json');
+        const data = JSON.stringify({ originalId: identifier, filename: hash + '.json', imageURL: r.imageUrl, response: r.response }, null, 2);
+        if (CONFIG.output.atomicWrites) atomicWrite(filePath, data); else fs.writeFileSync(filePath, data);
     }
 
     cleanupTempImages();
@@ -1219,28 +878,11 @@ async function startTesting() {
     }
 
     const total = ((Date.now() - tStart) / 1000).toFixed(1);
-    log('info', '═══════════════════════════════════════════════════════════════');
-    log('info', 'DONE ' + total + 's | ' + successful + '/' + imageInfos.length + ' OK | ' + withJson + ' JSON | ' + blocked + ' BLOCKED | ' + skippedBlocked + ' SKIPPED | ' + rateLimited + ' RATE-LIMITED | ' + failed + ' FAIL');
-    if (CONFIG.recording.enabled) log('info', 'Recordings saved in: ' + RECORDINGS_DIR);
-    log('info', '═══════════════════════════════════════════════════════════════');
-    if (blocked > 0) log('warn', 'Google detected unusual traffic. Retry on a different IP.');
-    if (failed > 0) process.exitCode = 1;
+    log('info', 'DONE ' + total + 's | ' + successfulResults.length + '/' + imageInfos.length + ' OK');
+    if (isGloballyBlocked) process.exitCode = 1;
 }
 
 startTesting().catch(err => {
     log('error', 'Fatal:', err.message);
-    for (const rec of activeRecorders) rec.stop().catch(() => {});
-    if (activeBrowser) {
-        let closed = false;
-        activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-        setTimeout(() => {
-            if (!closed) {
-                try {
-                    const proc = activeBrowser.process && activeBrowser.process();
-                    if (proc) proc.kill('SIGKILL');
-                } catch(e) {}
-            }
-        }, 5000);
-    }
-    cleanupTempImages();
-    process.exit(1);
+    gracefulShutdown('FATAL');
+});
