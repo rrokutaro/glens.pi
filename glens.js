@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import os from 'os';
+import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -91,7 +92,7 @@ function atomicWrite(filePath, data) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SCREEN RECORDER
 // ═══════════════════════════════════════════════════════════════════════════════
-class GlobalScreenRecorder {
+class ScreenRecorder {
     constructor(outputPath) {
         this.outputPath = outputPath;
         this.framesDir = outputPath + '_frames';
@@ -238,7 +239,6 @@ class GlobalScreenRecorder {
             let stderr = '';
             proc.stderr.on('data', d => { stderr += d; });
 
-            // Store the timeout ID so we can clear it once encoding resolves, preventing event loop stalls
             const timeoutId = setTimeout(() => {
                 try { proc.kill('SIGKILL'); } catch(e) {}
                 resolve();
@@ -461,11 +461,13 @@ function getVisibleTextDeep(root) {
 // ═══════════════════════════════════════════════════════════════════════════════
 async function resizeImage(imgPathOrInfo) {
     if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'url') {
+        imgPathOrInfo.originalId = imgPathOrInfo.url;
         return imgPathOrInfo;
     }
     const imgPath = imgPathOrInfo;
     const filename = path.basename(imgPath, path.extname(imgPath)) + '.jpg';
     const outPath = path.join(TMP_DIR, filename);
+    const originalId = path.basename(imgPath);
     try {
         const meta = await sharp(imgPath).metadata();
         const needs = meta.width > CONFIG.image.maxDimension || meta.height > CONFIG.image.maxDimension;
@@ -474,10 +476,10 @@ async function resizeImage(imgPathOrInfo) {
             : sharp(imgPath);
         await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
         log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
-        return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename };
+        return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename, originalId };
     } catch (e) {
         log('warn', 'Resize fail ' + filename + ': ' + e.message + '. Using original.');
-        return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename };
+        return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename, originalId };
     }
 }
 
@@ -724,7 +726,7 @@ async function processImageStandard(browser, imageInfo, index, total) {
     let recorder = null;
     if (CONFIG.recording.enabled) {
         const vidPath = path.join(RECORDINGS_DIR, `std_${index + 1}_${safeName}.mp4`);
-        recorder = new GlobalScreenRecorder(vidPath);
+        recorder = new ScreenRecorder(vidPath);
         activeRecorders.add(recorder);
     }
 
@@ -779,7 +781,7 @@ async function processImageStandard(browser, imageInfo, index, total) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
             }
 
-            return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
+            return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
             if (recorder) {
                 await recorder.stop();
@@ -793,7 +795,7 @@ async function processImageStandard(browser, imageInfo, index, total) {
             activeRecorders.delete(recorder);
         }
         log('error', 'Fail ' + filename + ': ' + err.message);
-        return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
+        return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
 
@@ -811,7 +813,7 @@ async function processImageLens(browser, imageInfo, index, total) {
     let recorder = null;
     if (CONFIG.recording.enabled) {
         const vidPath = path.join(RECORDINGS_DIR, `lens_${index + 1}_${safeName}.mp4`);
-        recorder = new GlobalScreenRecorder(vidPath);
+        recorder = new ScreenRecorder(vidPath);
         activeRecorders.add(recorder);
     }
 
@@ -879,7 +881,7 @@ async function processImageLens(browser, imageInfo, index, total) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
             }
 
-            return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
+            return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
             if (recorder) {
                 await recorder.stop();
@@ -893,7 +895,7 @@ async function processImageLens(browser, imageInfo, index, total) {
             activeRecorders.delete(recorder);
         }
         log('error', 'Fail ' + filename + ': ' + err.message);
-        return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
+        return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
 
@@ -931,6 +933,74 @@ async function processBatch(browser, batch, batchIndex, totalBatches, offset) {
         }
     }
     return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  VIDEO COMPILATION
+// ═══════════════════════════════════════════════════════════════════════════════
+async function compileRecordings(recordingsDir) {
+    if (!fs.existsSync(recordingsDir)) return;
+    const files = fs.readdirSync(recordingsDir).filter(f => f.endsWith('.mp4') && !f.startsWith('session_'));
+    if (files.length === 0) return;
+    
+    const sessionName = 'session_' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4';
+    const sessionPath = path.join(recordingsDir, sessionName);
+
+    if (files.length === 1) {
+        fs.renameSync(path.join(recordingsDir, files[0]), sessionPath);
+        log('info', '🎬 Session video saved: ' + sessionName);
+        return;
+    }
+
+    const listPath = path.join(recordingsDir, 'concat_list.txt');
+    let listContent = '';
+    
+    // Sort videos by the index (e.g., lens_1_xxx.mp4, lens_2_xxx.mp4) to stitch them sequentially
+    files.sort((a, b) => {
+        const numA = parseInt(a.split('_')[1]) || 0;
+        const numB = parseInt(b.split('_')[1]) || 0;
+        return numA - numB;
+    });
+
+    for (const f of files) {
+        listContent += "file '" + f.replace(/'/g, "'\\''") + "'\n";
+    }
+    fs.writeFileSync(listPath, listContent);
+
+    return new Promise((resolve) => {
+        let ffmpegPath = null;
+        for (const c of ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+            try { execSync('which ' + c, { stdio: 'ignore' }); ffmpegPath = c; break; } catch (e) {}
+        }
+
+        if (!ffmpegPath) {
+            log('warn', 'ffmpeg not found. Videos will remain separate clips.');
+            resolve();
+            return;
+        }
+
+        const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', sessionPath], { cwd: recordingsDir });
+        let stderr = '';
+        if (proc.stderr) proc.stderr.on('data', d => stderr += d);
+
+        proc.on('close', (code) => {
+            if (code === 0) {
+                log('info', '🎬 Compiled ' + files.length + ' separate clips into one session video: ' + sessionName);
+                // Clean up the smaller clips
+                for (const f of files) {
+                    try { fs.unlinkSync(path.join(recordingsDir, f)); } catch(e) {}
+                }
+            } else {
+                log('warn', 'Failed to compile clips (exit code ' + code + '): ' + stderr.slice(0, 150));
+            }
+            try { fs.unlinkSync(listPath); } catch(e) {}
+            resolve();
+        });
+        proc.on('error', () => {
+            try { fs.unlinkSync(listPath); } catch(e) {}
+            resolve();
+        });
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1009,6 +1079,7 @@ async function startTesting() {
                 for (const img of remaining) {
                     allResults.push({
                         filename: img.filename,
+                        originalId: img.originalId,
                         imageUrl: null,
                         response: '',
                         html: '',
@@ -1052,7 +1123,6 @@ async function startTesting() {
             log('info', 'Close browser (async)...');
             let closed = false;
             activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-            // fastClose removes long wait and delegates to exit naturally if operations are completed
             await new Promise(r => setTimeout(r, 10));
             if (!closed) {
                 try {
@@ -1100,7 +1170,7 @@ async function startTesting() {
         results: allResults.map(r => {
             const a = analyzeResponse(r.response);
             return {
-                filename: r.filename, imageUrl: r.imageUrl, response: r.response,
+                filename: r.filename, originalId: r.originalId, imageUrl: r.imageUrl, response: r.response,
                 duration: r.duration, error: r.error || null, timedOut: r.timedOut || false,
                 isBlocked: a.isBlocked || a.isCaptchaHtml,
                 isRateLimited: a.isRateLimited,
@@ -1118,14 +1188,15 @@ async function startTesting() {
     const SUCCESSFUL_DIR = path.join(OUTPUT_DIR, 'successful');
     if (!fs.existsSync(SUCCESSFUL_DIR)) fs.mkdirSync(SUCCESSFUL_DIR, { recursive: true });
 
-    const runId = process.env.GLENS_RUN_ID || 'local';
     const successfulResults = allResults.filter(r => !r.error && !r.timedOut && r.response);
-    let successIndex = 0;
 
     for (const r of successfulResults) {
-        const timestamp = Date.now();
-        const outputFilename = timestamp + '_' + runId + '_' + (successIndex++) + '.json';
+        const identifier = r.originalId || r.filename;
+        const hash = crypto.createHash('md5').update(identifier).digest('hex');
+        const outputFilename = hash + '.json';
+        
         const payload = {
+            originalId: identifier,
             filename: outputFilename,
             imageURL: r.imageUrl,
             response: r.response
@@ -1141,6 +1212,11 @@ async function startTesting() {
     }
 
     cleanupTempImages();
+
+    if (CONFIG.recording.enabled) {
+        log('info', 'Compiling separate recordings into one session file...');
+        await compileRecordings(RECORDINGS_DIR);
+    }
 
     const total = ((Date.now() - tStart) / 1000).toFixed(1);
     log('info', '═══════════════════════════════════════════════════════════════');
@@ -1168,4 +1244,3 @@ startTesting().catch(err => {
     }
     cleanupTempImages();
     process.exit(1);
-});
