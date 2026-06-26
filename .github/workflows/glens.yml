@@ -14,7 +14,7 @@ on:
       hf_repo:
         description: 'HuggingFace repo ID (e.g., rrokutaro/ugc-dropship)'
         required: false
-        default: 'rrokutaro/ugc-dropship'
+        default: 'hfusername/ugc-dropship'
       hf_path:
         description: 'Target directory inside the HF repo'
         required: false
