@@ -106,6 +106,8 @@ class GlobalScreenRecorder {
 
     async attach(page) {
         if (!CONFIG.recording.enabled) return;
+        // Prevent concurrent overwrites that leak CDP sessions in parallel batches
+        if (this.page) return;
         this.page = page;
         this.startTime = Date.now();
         if (!fs.existsSync(this.framesDir)) fs.mkdirSync(this.framesDir, { recursive: true });
@@ -131,8 +133,8 @@ class GlobalScreenRecorder {
             document.body.appendChild(div);
         }, color, size);
 
-        this.client = await this.page.target().createCDPSession();
-        await this.client.send('Page.startScreencast', {
+        const client = await this.page.target().createCDPSession();
+        await client.send('Page.startScreencast', {
             format: 'jpeg',
             quality: CONFIG.recording.quality,
             maxWidth: parseInt(CONFIG.recording.resolution.split('x')[0]),
@@ -140,19 +142,20 @@ class GlobalScreenRecorder {
             everyNthFrame: Math.max(1, Math.round(60 / CONFIG.recording.fps)),
         });
 
-        this.client.on('Page.screencastFrame', async (frame) => {
+        client.on('Page.screencastFrame', async (frame) => {
             if (!this.isRecording) return;
             try {
                 const buf = Buffer.from(frame.data, 'base64');
                 const framePath = path.join(this.framesDir, 'frame_' + String(this.frameCount).padStart(6, '0') + '.jpg');
                 fs.writeFileSync(framePath, buf);
                 this.frameCount++;
-                await this.client.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
+                await client.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
             } catch (e) {
                 // Frame dropped, continue
             }
         });
 
+        this.client = client;
         this.isRecording = true;
         log('info', '🎬 Global recording started: ' + path.basename(this.outputPath) + ' @ ' + CONFIG.recording.fps + 'fps');
     }
@@ -175,8 +178,10 @@ class GlobalScreenRecorder {
         await this.updateLabel(this.currentLabel, status);
     }
 
-    async detach() {
+    async detach(page) {
         if (!CONFIG.recording.enabled) return;
+        const targetPage = page || this.page;
+        if (!targetPage || (page && this.page !== page)) return;
         try {
             if (this.client) {
                 await this.client.send('Page.stopScreencast').catch(() => {});
@@ -766,7 +771,7 @@ async function processImageStandard(browser, imageInfo, index, total, recorder) 
 
             return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) await recorder.detach();
+            if (recorder) await recorder.detach(page);
             await ctx.close();
         }
     } catch (err) {
@@ -852,7 +857,7 @@ async function processImageLens(browser, imageInfo, index, total, recorder) {
 
             return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) await recorder.detach();
+            if (recorder) await recorder.detach(page);
             await ctx.close();
         }
     } catch (err) {
@@ -908,7 +913,18 @@ async function gracefulShutdown(sig) {
     isShuttingDown = true;
     log('warn', 'Signal ' + sig + '. Shutdown...');
     if (globalRecorder) await globalRecorder.stop();
-    if (activeBrowser) try { activeBrowser.close(); } catch(e) {}
+    if (activeBrowser) {
+        let closed = false;
+        activeBrowser.close().then(() => { closed = true; }).catch(() => {});
+        await new Promise(r => setTimeout(r, 5000));
+        if (!closed) {
+            log('warn', 'Browser close hung. Force killing...');
+            try {
+                const proc = activeBrowser.process && activeBrowser.process();
+                if (proc) proc.kill('SIGKILL');
+            } catch(e) {}
+        }
+    }
     cleanupTempImages();
     process.exit(0);
 }
@@ -1011,11 +1027,29 @@ async function startTesting() {
 
         if (CONFIG.perf.fastClose) {
             log('info', 'Close browser (async)...');
-            activeBrowser.close().catch(() => {});
+            let closed = false;
+            activeBrowser.close().then(() => { closed = true; }).catch(() => {});
+            await new Promise(r => setTimeout(r, 5000));
+            if (!closed) {
+                log('warn', 'Browser close hung. Force killing...');
+                try {
+                    const proc = activeBrowser.process && activeBrowser.process();
+                    if (proc) proc.kill('SIGKILL');
+                } catch(e) {}
+            }
             activeBrowser = null;
         } else {
             log('info', 'Close browser...');
-            await activeBrowser.close();
+            let closed = false;
+            activeBrowser.close().then(() => { closed = true; }).catch(() => {});
+            await new Promise(r => setTimeout(r, 10000));
+            if (!closed) {
+                log('warn', 'Browser close hung. Force killing...');
+                try {
+                    const proc = activeBrowser.process && activeBrowser.process();
+                    if (proc) proc.kill('SIGKILL');
+                } catch(e) {}
+            }
             activeBrowser = null;
         }
     }
@@ -1097,7 +1131,18 @@ async function startTesting() {
 startTesting().catch(err => {
     log('error', 'Fatal:', err.message);
     if (globalRecorder) globalRecorder.stop().catch(() => {});
-    if (activeBrowser) try { activeBrowser.close(); } catch(e) {}
+    if (activeBrowser) {
+        let closed = false;
+        activeBrowser.close().then(() => { closed = true; }).catch(() => {});
+        setTimeout(() => {
+            if (!closed) {
+                try {
+                    const proc = activeBrowser.process && activeBrowser.process();
+                    if (proc) proc.kill('SIGKILL');
+                } catch(e) {}
+            }
+        }, 5000);
+    }
     cleanupTempImages();
     process.exit(1);
 });
