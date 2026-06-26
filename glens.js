@@ -61,7 +61,7 @@ const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 function log(level, ...args) {
     if (LOG_LEVELS[level] < LOG_LEVELS[CONFIG.logLevel]) return;
     const ts = new Date().toISOString().slice(11, 23);
-    const prefix = `[${ts}] [${level.toUpperCase()}]`;
+    const prefix = '[' + ts + '] [' + level.toUpperCase() + ']';
     if (level === 'error') console.error(prefix, ...args);
     else if (level === 'warn') console.warn(prefix, ...args);
     else console.log(prefix, ...args);
@@ -75,26 +75,26 @@ async function retry(fn, { attempts = 2, label = 'op' } = {}) {
             lastErr = err;
             if (i === attempts - 1) break;
             const delayMs = Math.min(CONFIG.retry.backoffBaseMs * (i + 1), CONFIG.retry.backoffMaxMs);
-            log('warn', `⏳ ${label} fail ${i + 1}/${attempts}: ${err.message.slice(0, 50)}. Retry ${delayMs}ms`);
+            log('warn', '⏳ ' + label + ' fail ' + (i + 1) + '/' + attempts + ': ' + err.message.slice(0, 50) + '. Retry ' + delayMs + 'ms');
             await new Promise(r => setTimeout(r, delayMs));
         }
     }
-    throw new Error(`${label} failed ${attempts}x: ${lastErr.message}`);
+    throw new Error(label + ' failed ' + attempts + 'x: ' + lastErr.message);
 }
 
 function atomicWrite(filePath, data) {
-    const tmpPath = `${filePath}.tmp.${Date.now()}`;
+    const tmpPath = filePath + '.tmp.' + Date.now();
     fs.writeFileSync(tmpPath, data, 'utf8');
     fs.renameSync(tmpPath, filePath);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GLOBAL SCREEN RECORDER — One file for entire session
+//  GLOBAL SCREEN RECORDER
 // ═══════════════════════════════════════════════════════════════════════════════
 class GlobalScreenRecorder {
     constructor(outputPath) {
         this.outputPath = outputPath;
-        this.framesDir = path.join(path.dirname(outputPath), `.frames_global`);
+        this.framesDir = path.join(path.dirname(outputPath), '.frames_global');
         this.frameCount = 0;
         this.isRecording = false;
         this.client = null;
@@ -110,35 +110,27 @@ class GlobalScreenRecorder {
         this.startTime = Date.now();
         if (!fs.existsSync(this.framesDir)) fs.mkdirSync(this.framesDir, { recursive: true });
 
-        // Add overlay div to page
-        await this.page.evaluate((cfg) => {
+        const color = CONFIG.recording.overlayColor;
+        const size = CONFIG.recording.overlaySize;
+
+        await this.page.evaluate((c, s) => {
             const existing = document.getElementById('glens-overlay');
             if (existing) existing.remove();
             const div = document.createElement('div');
             div.id = 'glens-overlay';
-            div.style.cssText = `
-                position: fixed !important;
-                top: 8px !important;
-                left: 8px !important;
-                z-index: 999999 !important;
-                background: rgba(0,0,0,0.7) !important;
-                color: ${cfg.overlayColor} !important;
-                font-family: monospace !important;
-                font-size: ${cfg.overlaySize}px !important;
-                padding: 6px 10px !important;
-                border-radius: 4px !important;
-                pointer-events: none !important;
-                line-height: 1.4 !important;
-                white-space: pre !important;
-                max-width: 80vw !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-            `;
+            div.style.cssText =
+                'position:fixed!important;top:8px!important;left:8px!important;' +
+                'z-index:999999!important;background:rgba(0,0,0,0.7)!important;' +
+                'color:' + c + '!important;font-family:monospace!important;' +
+                'font-size:' + s + 'px!important;padding:6px 10px!important;' +
+                'border-radius:4px!important;pointer-events:none!important;' +
+                'line-height:1.4!important;white-space:pre!important;' +
+                'max-width:80vw!important;overflow:hidden!important;' +
+                'text-overflow:ellipsis!important;';
             div.textContent = '[STARTING...]';
             document.body.appendChild(div);
-        }, CONFIG.recording);
+        }, color, size);
 
-        // Start CDP screencast
         this.client = await this.page.target().createCDPSession();
         await this.client.send('Page.startScreencast', {
             format: 'jpeg',
@@ -152,22 +144,20 @@ class GlobalScreenRecorder {
             if (!this.isRecording) return;
             try {
                 const buf = Buffer.from(frame.data, 'base64');
-                const framePath = path.join(this.framesDir, `frame_${String(this.frameCount).padStart(6, '0')}.jpg`);
+                const framePath = path.join(this.framesDir, 'frame_' + String(this.frameCount).padStart(6, '0') + '.jpg');
                 fs.writeFileSync(framePath, buf);
                 this.frameCount++;
                 await this.client.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
             } catch (e) {
                 // Frame dropped, continue
             }
-       
-            }
         });
 
         this.isRecording = true;
-        log('info', `🎬 Global recording started: ${path.basename(this.outputPath)} @ ${CONFIG.recording.fps}fps`);
+        log('info', '🎬 Global recording started: ' + path.basename(this.outputPath) + ' @ ' + CONFIG.recording.fps + 'fps');
     }
 
-    async updateLabel(label, status = '') {
+    async updateLabel(label, status) {
         if (!CONFIG.recording.enabled || !this.page) return;
         this.currentLabel = label;
         if (status) this.currentStatus = status;
@@ -175,7 +165,7 @@ class GlobalScreenRecorder {
             const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(1);
             await this.page.evaluate((lbl, st, el) => {
                 const div = document.getElementById('glens-overlay');
-                if (div) div.textContent = `${lbl}\n[${st}] ${el}s`;
+                if (div) div.textContent = lbl + '\n[' + st + '] ' + el + 's';
             }, label, this.currentStatus, elapsed);
         } catch (e) {}
     }
@@ -202,12 +192,10 @@ class GlobalScreenRecorder {
         this.isRecording = false;
         await this.detach();
 
-        // Encode with ffmpeg if available
         if (this.frameCount > 0) {
             await this._encodeVideo();
         }
 
-        // Cleanup frames
         try {
             if (fs.existsSync(this.framesDir)) {
                 const files = fs.readdirSync(this.framesDir);
@@ -222,8 +210,8 @@ class GlobalScreenRecorder {
             const ffmpegPath = this._findFfmpeg();
             if (!ffmpegPath) {
                 log('warn', 'ffmpeg not found. Frames saved as image sequence.');
-                const frameList = path.join(this.framesDir, '..', `global_frames.txt`);
-                fs.writeFileSync(frameList, `Frames: ${this.frameCount}\nDir: ${this.framesDir}\nffmpeg command:\nffmpeg -framerate ${CONFIG.recording.fps} -i ${path.join(this.framesDir, 'frame_%06d.jpg')} -c:v libx264 -pix_fmt yuv420p -crf 23 ${this.outputPath}`);
+                const frameList = path.join(this.framesDir, '..', 'global_frames.txt');
+                fs.writeFileSync(frameList, 'Frames: ' + this.frameCount + '\nDir: ' + this.framesDir + '\nffmpeg command:\nffmpeg -framerate ' + CONFIG.recording.fps + ' -i ' + path.join(this.framesDir, 'frame_%06d.jpg') + ' -c:v libx264 -pix_fmt yuv420p -crf 23 ' + this.outputPath);
                 resolve();
                 return;
             }
@@ -238,28 +226,27 @@ class GlobalScreenRecorder {
                 '-crf', '28',
                 '-preset', 'fast',
                 '-movflags', '+faststart',
-                '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+                '-vf', 'scale=' + width + ':' + height + ':force_original_aspect_ratio=decrease,pad=' + width + ':' + height + ':(ow-iw)/2:(oh-ih)/2:black',
                 this.outputPath
             ];
 
             const proc = spawn(ffmpegPath, args, { stdio: 'pipe' });
             let stderr = '';
-            proc.stderr.on('data', d => stderr += d);
+            proc.stderr.on('data', d => { stderr += d; });
             proc.on('close', (code) => {
                 if (code === 0) {
                     const stats = fs.statSync(this.outputPath);
-                    log('info', `🎬 Video saved: ${path.basename(this.outputPath)} (${(stats.size/1024/1024).toFixed(1)}MB, ${this.frameCount} frames)`);
+                    log('info', '🎬 Video saved: ' + path.basename(this.outputPath) + ' (' + (stats.size / 1024 / 1024).toFixed(1) + 'MB, ' + this.frameCount + ' frames)');
                 } else {
-                    log('warn', `ffmpeg exited ${code}. ${stderr.slice(0, 200)}`);
+                    log('warn', 'ffmpeg exited ' + code + '. ' + stderr.slice(0, 200));
                 }
                 resolve();
             });
             proc.on('error', (err) => {
-                log('warn', `ffmpeg error: ${err.message}`);
+                log('warn', 'ffmpeg error: ' + err.message);
                 resolve();
             });
 
-            // Timeout after 120s for full session encoding
             setTimeout(() => {
                 try { proc.kill('SIGKILL'); } catch(e) {}
                 resolve();
@@ -271,7 +258,7 @@ class GlobalScreenRecorder {
         const candidates = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
         for (const c of candidates) {
             try {
-                execSync(`which ${c}`, { stdio: 'ignore' });
+                execSync('which ' + c, { stdio: 'ignore' });
                 return c;
             } catch (e) {}
         }
@@ -280,7 +267,7 @@ class GlobalScreenRecorder {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  BLOCK DETECTION — Critical for avoiding wasted retries on CAPTCHA
+//  BLOCK DETECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 const BLOCK_KEYWORDS = [
     'unusual traffic',
@@ -346,7 +333,7 @@ const TMP_DIR = path.join(process.cwd(), 'tmp_resized');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE DISCOVERY  (supports GLENS_IMAGE_URLS)
+//  IMAGE DISCOVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 const IMAGE_DIR_CANDIDATES = [
     path.join(process.cwd(), 'images'),
@@ -368,15 +355,15 @@ if (ENV_URLS && ENV_URLS.trim()) {
                 return {
                     type: 'url',
                     url: url,
-                    filename: `url_${i}_${basename}`
+                    filename: 'url_' + i + '_' + basename
                 };
             });
-            log('info', `Using ${parsed.length} provided URL(s)`);
+            log('info', 'Using ' + parsed.length + ' provided URL(s)');
         } else {
             throw new Error('Empty or non-array');
         }
     } catch (e) {
-        log('error', `GLENS_IMAGE_URLS must be a JSON array of strings. ${e.message}`);
+        log('error', 'GLENS_IMAGE_URLS must be a JSON array of strings. ' + e.message);
         process.exit(1);
     }
 } else {
@@ -385,7 +372,7 @@ if (ENV_URLS && ENV_URLS.trim()) {
             const files = fs.readdirSync(dir)
                 .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
                 .map(f => path.join(dir, f));
-            if (files.length > 0) { IMAGE_PATHS = files; log('info', `Found ${files.length} image(s)`); break; }
+            if (files.length > 0) { IMAGE_PATHS = files; log('info', 'Found ' + files.length + ' image(s)'); break; }
         }
     }
 }
@@ -462,7 +449,7 @@ function getVisibleTextDeep(root) {
 `;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE RESIZE  (passthrough for URL objects)
+//  IMAGE RESIZE
 // ═══════════════════════════════════════════════════════════════════════════════
 async function resizeImage(imgPathOrInfo) {
     if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'url') {
@@ -478,10 +465,10 @@ async function resizeImage(imgPathOrInfo) {
             ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargement: true })
             : sharp(imgPath);
         await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
-        log('debug', `${filename}: ${(fs.statSync(imgPath).size/1024).toFixed(0)}KB -> ${(fs.statSync(outPath).size/1024).toFixed(0)}KB`);
+        log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
         return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename };
     } catch (e) {
-        log('warn', `Resize fail ${filename}: ${e.message}. Using original.`);
+        log('warn', 'Resize fail ' + filename + ': ' + e.message + '. Using original.');
         return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename };
     }
 }
@@ -492,8 +479,8 @@ function cleanupTempImages() {
         const files = fs.readdirSync(TMP_DIR);
         let removed = 0;
         for (const f of files) { try { fs.unlinkSync(path.join(TMP_DIR, f)); removed++; } catch(e) {} }
-        log('info', `Cleaned ${removed} temp files`);
-    } catch (e) { log('warn', `Cleanup: ${e.message}`); }
+        log('info', 'Cleaned ' + removed + ' temp files');
+    } catch (e) { log('warn', 'Cleanup: ' + e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -510,7 +497,7 @@ async function uploadToCatbox(filePath) {
         body: form
     });
     const url = (await res.text()).trim();
-    if (!url.startsWith('http')) throw new Error(`Catbox: ${url.slice(0, 80)}`);
+    if (!url.startsWith('http')) throw new Error('Catbox: ' + url.slice(0, 80));
     return url;
 }
 
@@ -526,7 +513,7 @@ async function uploadToLitterbox(filePath) {
         body: form
     });
     const url = (await res.text()).trim();
-    if (!url.startsWith('http')) throw new Error(`Litterbox: ${url.slice(0, 80)}`);
+    if (!url.startsWith('http')) throw new Error('Litterbox: ' + url.slice(0, 80));
     return url;
 }
 
@@ -537,11 +524,11 @@ async function uploadImage(filePath) {
     ];
     for (const m of methods) {
         try {
-            log('debug', `Upload ${m.name}...`);
+            log('debug', 'Upload ' + m.name + '...');
             const url = await retry(() => m.fn(filePath), { attempts: CONFIG.retry.uploadAttempts, label: m.name });
-            log('info', `Uploaded -> ${url.slice(0, 50)}...`);
+            log('info', 'Uploaded -> ' + url.slice(0, 50) + '...');
             return url;
-        } catch (e) { log('warn', `${m.name} fail: ${e.message.slice(0, 60)}`); }
+        } catch (e) { log('warn', m.name + ' fail: ' + e.message.slice(0, 60)); }
     }
     throw new Error('All uploads failed');
 }
@@ -648,7 +635,7 @@ async function getResponseTextFromPage(page) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STREAMED RESPONSE
 // ═══════════════════════════════════════════════════════════════════════════════
-async function waitForStreamedResponse(page, recorder = null) {
+async function waitForStreamedResponse(page, recorder) {
     const checkInterval = 400;
     const maxWait = CONFIG.timeouts.response;
     const jsonIdle = CONFIG.timeouts.jsonIdle;
@@ -666,7 +653,7 @@ async function waitForStreamedResponse(page, recorder = null) {
             const json = extractJsonFromText(current);
             if (json && json !== lastJson) {
                 lastJson = json;
-                log('info', `JSON ${json.length} chars`);
+                log('info', 'JSON ' + json.length + ' chars');
                 if (recorder) await recorder.updateStatus('JSON FOUND');
             }
         } else {
@@ -676,7 +663,7 @@ async function waitForStreamedResponse(page, recorder = null) {
         const idle = Date.now() - lastChange;
 
         if (lastJson && idle >= jsonIdle) {
-            log('info', `JSON stable ${jsonIdle}ms. Done.`);
+            log('info', 'JSON stable ' + jsonIdle + 'ms. Done.');
             if (recorder) await recorder.updateStatus('DONE');
             return { text: lastJson, html: '', duration: Date.now() - start, jsonExtracted: true };
         }
@@ -690,7 +677,7 @@ async function waitForStreamedResponse(page, recorder = null) {
         }
 
         if (idle >= maxWait) {
-            log('warn', `Timeout ${maxWait}ms`);
+            log('warn', 'Timeout ' + maxWait + 'ms');
             if (recorder) await recorder.updateStatus('TIMEOUT');
             const j = extractJsonFromText(current) || lastJson;
             if (j) return { text: j, html: '', duration: Date.now() - start, jsonExtracted: true };
@@ -698,8 +685,8 @@ async function waitForStreamedResponse(page, recorder = null) {
         }
 
         if (ticks % 12 === 0) {
-            log('info', `${((maxWait - idle)/1000).toFixed(0)}s left | ${current.length} chars | JSON: ${lastJson ? lastJson.length + 'ch' : 'scan'}`);
-            if (recorder) await recorder.updateStatus(`SCANNING ${current.length}ch`);
+            log('info', ((maxWait - idle) / 1000).toFixed(0) + 's left | ' + current.length + ' chars | JSON: ' + (lastJson ? lastJson.length + 'ch' : 'scan'));
+            if (recorder) await recorder.updateStatus('SCANNING ' + current.length + 'ch');
         }
         await new Promise(r => setTimeout(r, checkInterval));
     }
@@ -712,19 +699,19 @@ async function takeScreenshot(page, ssPath) {
     if (!CONFIG.screenshots.enabled) return;
     if (CONFIG.screenshots.onErrorOnly && !ssPath.includes('error')) return;
     try { await page.screenshot({ path: ssPath, fullPage: true }); }
-    catch(e) { log('warn', `SS: ${e.message.slice(0, 40)}`); }
+    catch(e) { log('warn', 'SS: ' + e.message.slice(0, 40)); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  STANDARD MODE  (supports URL objects)
+//  STANDARD MODE
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImageStandard(browser, imageInfo, index, total, recorder = null) {
+async function processImageStandard(browser, imageInfo, index, total, recorder) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
-    const ssPrefix = path.join(SCREENSHOTS_DIR, `std_${index + 1}_${safeName}`);
+    const ssPrefix = path.join(SCREENSHOTS_DIR, 'std_' + (index + 1) + '_' + safeName);
     const t0 = Date.now();
 
-    log('info', `[STD] [${index + 1}/${total}] ${filename}`);
+    log('info', '[STD] [' + (index + 1) + '/' + total + '] ' + filename);
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
@@ -738,7 +725,7 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
 
             if (recorder) {
                 await recorder.attach(page);
-                await recorder.updateLabel(`[${index + 1}/${total}] ${filename.slice(0, 30)}`, 'NAVIGATING');
+                await recorder.updateLabel('[' + (index + 1) + '/' + total + '] ' + filename.slice(0, 30), 'NAVIGATING');
             }
 
             await retry(() => page.goto('https://google.com/ai?hl=en&gl=us', {
@@ -746,7 +733,7 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
                 timeout: CONFIG.timeouts.navigation
             }), { attempts: CONFIG.retry.navigationAttempts, label: 'Nav' });
             if (recorder) await recorder.updateStatus('PAGE LOADED');
-            await takeScreenshot(page, `${ssPrefix}_loaded.png`);
+            await takeScreenshot(page, ssPrefix + '_loaded.png');
 
             const promptSels = ['textarea[placeholder*="Ask" i]', 'textarea[aria-label*="message" i]', '[contenteditable="true"]', 'textarea', '[role="textbox"]'];
             let promptEl = null;
@@ -756,7 +743,7 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
             await promptEl.click();
             await page.evaluate((t) => { const el = document.activeElement || document.querySelector('textarea'); if (el) { el.value = t; el.dispatchEvent(new Event('input', { bubbles: true })); } }, fullPrompt);
             if (recorder) await recorder.updateStatus('PROMPT SET');
-            await takeScreenshot(page, `${ssPrefix}_prompt.png`);
+            await takeScreenshot(page, ssPrefix + '_prompt.png');
 
             const sendSels = ['button[aria-label*="Send" i]', 'button[aria-label*="send" i]', 'button[type="submit"]', '[data-testid="send-button"]'];
             let sent = false;
@@ -766,11 +753,11 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
             }
             if (!sent) await page.keyboard.press('Enter');
             if (recorder) await recorder.updateStatus('SUBMITTED');
-            await takeScreenshot(page, `${ssPrefix}_submitted.png`);
+            await takeScreenshot(page, ssPrefix + '_submitted.png');
 
             const resp = await waitForStreamedResponse(page, recorder);
-            log('info', `Response: ${resp.text.length} chars`);
-            await takeScreenshot(page, `${ssPrefix}_response.png`);
+            log('info', 'Response: ' + resp.text.length + ' chars');
+            await takeScreenshot(page, ssPrefix + '_response.png');
 
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
@@ -783,21 +770,21 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
             await ctx.close();
         }
     } catch (err) {
-        log('error', `Fail ${filename}: ${err.message}`);
+        log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  LENS MODE  (supports URL objects)
+//  LENS MODE
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImageLens(browser, imageInfo, index, total, recorder = null) {
+async function processImageLens(browser, imageInfo, index, total, recorder) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
-    const ssPrefix = path.join(SCREENSHOTS_DIR, `lens_${index + 1}_${safeName}`);
+    const ssPrefix = path.join(SCREENSHOTS_DIR, 'lens_' + (index + 1) + '_' + safeName);
     const t0 = Date.now();
 
-    log('info', `[LENS] [${index + 1}/${total}] ${filename}`);
+    log('info', '[LENS] [' + (index + 1) + '/' + total + '] ' + filename);
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
@@ -811,21 +798,21 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
 
             if (recorder) {
                 await recorder.attach(page);
-                await recorder.updateLabel(`[${index + 1}/${total}] ${filename.slice(0, 30)}`, 'NAVIGATING');
+                await recorder.updateLabel('[' + (index + 1) + '/' + total + '] ' + filename.slice(0, 30), 'NAVIGATING');
             }
 
             const encodedPrompt = encodeURIComponent(fullPrompt);
-            const lensUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}&q=${encodedPrompt}`;
+            const lensUrl = 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(imageUrl) + '&q=' + encodedPrompt;
 
             await retry(() => page.goto(lensUrl, {
                 waitUntil: CONFIG.perf.navWaitUntil,
                 timeout: CONFIG.timeouts.navigation
             }), { attempts: CONFIG.retry.navigationAttempts, label: 'Lens' });
             if (recorder) await recorder.updateStatus('LENS LOADED');
-            await takeScreenshot(page, `${ssPrefix}_lens.png`);
+            await takeScreenshot(page, ssPrefix + '_lens.png');
 
             const finalUrl = page.url();
-            log('debug', `Redirect: ${finalUrl.slice(0, 80)}`);
+            log('debug', 'Redirect: ' + finalUrl.slice(0, 80));
 
             let aiUrl;
             try {
@@ -845,18 +832,18 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
                 await page.waitForNavigation({ waitUntil: CONFIG.perf.navWaitUntil, timeout: 10000 });
                 aiNavigated = true;
             } catch (e) {
-                log('debug', `Eval nav fail, fallback goto: ${e.message.slice(0, 50)}`);
+                log('debug', 'Eval nav fail, fallback goto: ' + e.message.slice(0, 50));
                 await retry(() => page.goto(aiUrl, {
                     waitUntil: CONFIG.perf.navWaitUntil,
                     timeout: CONFIG.timeouts.navigation
                 }), { attempts: 1, label: 'AI fallback' });
             }
             if (recorder) await recorder.updateStatus('AI LOADED');
-            await takeScreenshot(page, `${ssPrefix}_ai.png`);
+            await takeScreenshot(page, ssPrefix + '_ai.png');
 
             const resp = await waitForStreamedResponse(page, recorder);
-            log('info', `Response: ${resp.text.length} chars`);
-            await takeScreenshot(page, `${ssPrefix}_response.png`);
+            log('info', 'Response: ' + resp.text.length + ' chars');
+            await takeScreenshot(page, ssPrefix + '_response.png');
 
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
@@ -869,7 +856,7 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
             await ctx.close();
         }
     } catch (err) {
-        log('error', `Fail ${filename}: ${err.message}`);
+        log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
 }
@@ -877,7 +864,7 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ROUTER
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImage(browser, imageInfo, index, total, recorder = null) {
+async function processImage(browser, imageInfo, index, total, recorder) {
     return CONFIG.mode === 'lens'
         ? processImageLens(browser, imageInfo, index, total, recorder)
         : processImageStandard(browser, imageInfo, index, total, recorder);
@@ -895,8 +882,8 @@ async function jitteredDelay(baseMs) {
     await new Promise(r => setTimeout(r, baseMs + Math.random() * 200));
 }
 
-async function processBatch(browser, batch, batchIndex, totalBatches, offset, recorder = null) {
-    log('info', `BATCH [${batchIndex + 1}/${totalBatches}] ${batch.length} img [${CONFIG.mode}]`);
+async function processBatch(browser, batch, batchIndex, totalBatches, offset, recorder) {
+    log('info', 'BATCH [' + (batchIndex + 1) + '/' + totalBatches + '] ' + batch.length + ' img [' + CONFIG.mode + ']');
     const results = [];
     if (CONFIG.batch.enabled) {
         const promises = batch.map((img, i) => processImage(browser, img, offset + i, IMAGE_PATHS.length, recorder));
@@ -919,7 +906,7 @@ let isShuttingDown = false;
 async function gracefulShutdown(sig) {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    log('warn', `Signal ${sig}. Shutdown...`);
+    log('warn', 'Signal ' + sig + '. Shutdown...');
     if (globalRecorder) await globalRecorder.stop();
     if (activeBrowser) try { activeBrowser.close(); } catch(e) {}
     cleanupTempImages();
@@ -936,18 +923,18 @@ async function startTesting() {
     log('info', '═══════════════════════════════════════════════════════════════');
     log('info', '  GLENS PRODUCTION v6.2 — GLOBAL SCREEN RECORDER');
     log('info', '═══════════════════════════════════════════════════════════════');
-    log('info', `Mode: ${CONFIG.mode.toUpperCase()} | Batch: ${CONFIG.batch.size} | JSON idle: ${CONFIG.timeouts.jsonIdle}ms`);
-    log('info', `Nav wait: ${CONFIG.perf.navWaitUntil} | Screenshots: ${CONFIG.screenshots.enabled ? 'ON' : 'OFF'}`);
-    log('info', `Recording: ${CONFIG.recording.enabled ? 'ON' : 'OFF'} | ${CONFIG.recording.fps}fps | ${CONFIG.recording.resolution}`);
-    log('info', `CPUs: ${os.cpus().length} | Mem: ${(os.totalmem()/1024/1024/1024).toFixed(1)}GB`);
+    log('info', 'Mode: ' + CONFIG.mode.toUpperCase() + ' | Batch: ' + CONFIG.batch.size + ' | JSON idle: ' + CONFIG.timeouts.jsonIdle + 'ms');
+    log('info', 'Nav wait: ' + CONFIG.perf.navWaitUntil + ' | Screenshots: ' + (CONFIG.screenshots.enabled ? 'ON' : 'OFF'));
+    log('info', 'Recording: ' + (CONFIG.recording.enabled ? 'ON' : 'OFF') + ' | ' + CONFIG.recording.fps + 'fps | ' + CONFIG.recording.resolution);
+    log('info', 'CPUs: ' + os.cpus().length + ' | Mem: ' + (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) + 'GB');
 
     const tStart = Date.now();
-    const globalVideoPath = path.join(RECORDINGS_DIR, `session_${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`);
+    const globalVideoPath = path.join(RECORDINGS_DIR, 'session_' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4');
 
     log('info', 'Resize...');
     const tResize = Date.now();
     const imageInfos = await Promise.all(IMAGE_PATHS.map(p => resizeImage(p)));
-    log('info', `Resized ${imageInfos.length} in ${((Date.now()-tResize)/1000).toFixed(1)}s`);
+    log('info', 'Resized ' + imageInfos.length + ' in ' + ((Date.now() - tResize) / 1000).toFixed(1) + 's');
 
     log('info', 'Launch browser...');
     const tBrowser = Date.now();
@@ -961,9 +948,8 @@ async function startTesting() {
             '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
         ]
     });
-    log('info', `Browser ${((Date.now()-tBrowser)/1000).toFixed(1)}s`);
+    log('info', 'Browser ' + ((Date.now() - tBrowser) / 1000).toFixed(1) + 's');
 
-    // Initialize global recorder
     globalRecorder = new GlobalScreenRecorder(globalVideoPath);
 
     const allResults = [];
@@ -973,7 +959,7 @@ async function startTesting() {
         const batches = chunkArray(imageInfos, CONFIG.batch.size);
         for (let b = 0; b < batches.length; b++) {
             if (isGloballyBlocked) {
-                log('warn', `🚫 IP is blocked. Skipping remaining ${batches.length - b} batches.`);
+                log('warn', '🚫 IP is blocked. Skipping remaining ' + (batches.length - b) + ' batches.');
                 const remaining = imageInfos.slice(b * CONFIG.batch.size);
                 for (const img of remaining) {
                     allResults.push({
@@ -1000,10 +986,10 @@ async function startTesting() {
             const noJsonCount = analysis.filter(a => !a.hasJson && !a.isBlocked && !a.isRateLimited).length;
 
             if (blockedCount > 0) {
-                log('warn', `⚠️ BATCH BLOCKED: ${blockedCount}/${results.length} images hit CAPTCHA/block`);
+                log('warn', '⚠️ BATCH BLOCKED: ' + blockedCount + '/' + results.length + ' images hit CAPTCHA/block');
                 if (blockedCount >= 1) {
                     isGloballyBlocked = true;
-                    log('error', `🚫 IP BLOCKED DETECTED. Stopping all further processing.`);
+                    log('error', '🚫 IP BLOCKED DETECTED. Stopping all further processing.');
                     if (globalRecorder) {
                         log('info', 'Stopping recorder early due to IP block...');
                         await globalRecorder.stop();
@@ -1011,12 +997,12 @@ async function startTesting() {
                 }
             }
 
-            if (rateLimitedCount > 0) log('warn', `⏳ Rate limited on ${rateLimitedCount}/${results.length} images`);
-            if (noJsonCount > 0) log('info', `${noJsonCount}/${results.length} images without JSON`);
+            if (rateLimitedCount > 0) log('warn', '⏳ Rate limited on ' + rateLimitedCount + '/' + results.length + ' images');
+            if (noJsonCount > 0) log('info', noJsonCount + '/' + results.length + ' images without JSON');
 
             if (!isGloballyBlocked && b < batches.length - 1) {
                 const cooldown = rateLimitedCount > 0 ? CONFIG.batch.delayBetweenBatchesMs * 2 : CONFIG.batch.delayBetweenBatchesMs;
-                log('info', `Cooldown ${cooldown}ms...`);
+                log('info', 'Cooldown ' + cooldown + 'ms...');
                 await jitteredDelay(cooldown);
             }
         }
@@ -1053,7 +1039,7 @@ async function startTesting() {
         successful, failed, withValidJson: withJson, blocked, skippedBlocked, rateLimited,
         mode: CONFIG.mode,
         config: { batchSize: CONFIG.batch.size, jsonIdle: CONFIG.timeouts.jsonIdle, navWaitUntil: CONFIG.perf.navWaitUntil, recording: CONFIG.recording },
-        system: { platform: os.platform(), cpus: os.cpus().length, totalMemoryGB: (os.totalmem()/1024/1024/1024).toFixed(1) },
+        system: { platform: os.platform(), cpus: os.cpus().length, totalMemoryGB: (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) },
         results: allResults.map(r => {
             const a = analyzeResponse(r.response);
             return {
@@ -1070,11 +1056,8 @@ async function startTesting() {
     const jsonData = JSON.stringify(output, null, 2);
     if (CONFIG.output.atomicWrites) atomicWrite(jsonPath, jsonData);
     else fs.writeFileSync(jsonPath, jsonData);
-    log('info', `Saved -> ${jsonPath}`);
+    log('info', 'Saved -> ' + jsonPath);
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  SAVE SUCCESSFUL RESPONSES (HF FORMAT)
-    // ═══════════════════════════════════════════════════════════════════════════════
     const SUCCESSFUL_DIR = path.join(OUTPUT_DIR, 'successful');
     if (!fs.existsSync(SUCCESSFUL_DIR)) fs.mkdirSync(SUCCESSFUL_DIR, { recursive: true });
 
@@ -1084,7 +1067,7 @@ async function startTesting() {
 
     for (const r of successfulResults) {
         const timestamp = Date.now();
-        const outputFilename = `${timestamp}_${runId}_${successIndex++}.json`;
+        const outputFilename = timestamp + '_' + runId + '_' + (successIndex++) + '.json';
         const payload = {
             filename: outputFilename,
             imageURL: r.imageUrl,
@@ -1097,16 +1080,15 @@ async function startTesting() {
     }
 
     if (successfulResults.length > 0) {
-        log('info', `Saved ${successfulResults.length} successful result(s) to ${SUCCESSFUL_DIR}`);
+        log('info', 'Saved ' + successfulResults.length + ' successful result(s) to ' + SUCCESSFUL_DIR);
     }
-    // ═══════════════════════════════════════════════════════════════════════════════
 
     cleanupTempImages();
 
     const total = ((Date.now() - tStart) / 1000).toFixed(1);
     log('info', '═══════════════════════════════════════════════════════════════');
-    log('info', `DONE ${total}s | ${successful}/${imageInfos.length} OK | ${withJson} JSON | ${blocked} BLOCKED | ${skippedBlocked} SKIPPED | ${rateLimited} RATE-LIMITED | ${failed} FAIL`);
-    if (CONFIG.recording.enabled) log('info', `Recording: ${globalVideoPath}`);
+    log('info', 'DONE ' + total + 's | ' + successful + '/' + imageInfos.length + ' OK | ' + withJson + ' JSON | ' + blocked + ' BLOCKED | ' + skippedBlocked + ' SKIPPED | ' + rateLimited + ' RATE-LIMITED | ' + failed + ' FAIL');
+    if (CONFIG.recording.enabled) log('info', 'Recording: ' + globalVideoPath);
     log('info', '═══════════════════════════════════════════════════════════════');
     if (blocked > 0) log('warn', 'Google detected unusual traffic. Retry on a different IP.');
     if (failed > 0) process.exitCode = 1;
