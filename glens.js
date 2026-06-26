@@ -159,6 +159,8 @@ class GlobalScreenRecorder {
             } catch (e) {
                 // Frame dropped, continue
             }
+       
+            }
         });
 
         this.isRecording = true;
@@ -344,7 +346,7 @@ const TMP_DIR = path.join(process.cwd(), 'tmp_resized');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE DISCOVERY
+//  IMAGE DISCOVERY  (supports GLENS_IMAGE_URLS)
 // ═══════════════════════════════════════════════════════════════════════════════
 const IMAGE_DIR_CANDIDATES = [
     path.join(process.cwd(), 'images'),
@@ -354,12 +356,37 @@ const IMAGE_DIR_CANDIDATES = [
 ];
 
 let IMAGE_PATHS = [];
-for (const dir of IMAGE_DIR_CANDIDATES) {
-    if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir)
-            .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
-            .map(f => path.join(dir, f));
-        if (files.length > 0) { IMAGE_PATHS = files; log('info', `Found ${files.length} image(s)`); break; }
+const ENV_URLS = process.env.GLENS_IMAGE_URLS;
+
+if (ENV_URLS && ENV_URLS.trim()) {
+    try {
+        const parsed = JSON.parse(ENV_URLS);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            IMAGE_PATHS = parsed.map((url, i) => {
+                let basename = 'image.jpg';
+                try { basename = path.basename(new URL(url).pathname); } catch(e) {}
+                return {
+                    type: 'url',
+                    url: url,
+                    filename: `url_${i}_${basename}`
+                };
+            });
+            log('info', `Using ${parsed.length} provided URL(s)`);
+        } else {
+            throw new Error('Empty or non-array');
+        }
+    } catch (e) {
+        log('error', `GLENS_IMAGE_URLS must be a JSON array of strings. ${e.message}`);
+        process.exit(1);
+    }
+} else {
+    for (const dir of IMAGE_DIR_CANDIDATES) {
+        if (fs.existsSync(dir)) {
+            const files = fs.readdirSync(dir)
+                .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
+                .map(f => path.join(dir, f));
+            if (files.length > 0) { IMAGE_PATHS = files; log('info', `Found ${files.length} image(s)`); break; }
+        }
     }
 }
 
@@ -371,29 +398,6 @@ if (IMAGE_PATHS.length === 0) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PROMPT
 // ═══════════════════════════════════════════════════════════════════════════════
-/*const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (clothing, footwear, accessories, jewelry, etc.). For each product found, provide:
-
-1. Title: Product name
-2. Brand: Manufacturer/brand name
-3. Description: What it is, key features, colors, materials
-4. Category: Type of product (top, bottom, footwear, accessory, etc.)
-5. Price: Current price and original/sale price if discounted
-6. Availability: In stock, out of stock, pre-order, etc.
-7. Sizing: Available sizes or size range
-8. Sources: At least 5 direct product page URLs where this exact or very similar item can be purchased. Sort by reliability (official brand store first, then major retailers, then resellers). Each source should include:
-   - Store name
-   - Direct product URL (very important)
-   - Price at that source (if known)
-   - Availability at that source
-
-Return ONLY raw JSON. No code blocks, no explanations. Raw JSON text in one line.
-
-Schema:
-
-{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}]}]}
-
-Heres the image URL: {IMAGE_URL}`;*/
-
 const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (clothing, footwear, accessories, jewelry, etc.). For each product found, provide:
 
 1. Title: Product name
@@ -458,9 +462,13 @@ function getVisibleTextDeep(root) {
 `;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IMAGE RESIZE
+//  IMAGE RESIZE  (passthrough for URL objects)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function resizeImage(imgPath) {
+async function resizeImage(imgPathOrInfo) {
+    if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'url') {
+        return imgPathOrInfo;
+    }
+    const imgPath = imgPathOrInfo;
     const filename = path.basename(imgPath, path.extname(imgPath)) + '.jpg';
     const outPath = path.join(TMP_DIR, filename);
     try {
@@ -471,10 +479,10 @@ async function resizeImage(imgPath) {
             : sharp(imgPath);
         await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
         log('debug', `${filename}: ${(fs.statSync(imgPath).size/1024).toFixed(0)}KB -> ${(fs.statSync(outPath).size/1024).toFixed(0)}KB`);
-        return { originalPath: imgPath, resizedPath: outPath, filename };
+        return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename };
     } catch (e) {
         log('warn', `Resize fail ${filename}: ${e.message}. Using original.`);
-        return { originalPath: imgPath, resizedPath: imgPath, filename };
+        return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename };
     }
 }
 
@@ -708,10 +716,10 @@ async function takeScreenshot(page, ssPath) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  STANDARD MODE
+//  STANDARD MODE  (supports URL objects)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function processImageStandard(browser, imageInfo, index, total, recorder = null) {
-    const { resizedPath, filename } = imageInfo;
+    const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
     const ssPrefix = path.join(SCREENSHOTS_DIR, `std_${index + 1}_${safeName}`);
     const t0 = Date.now();
@@ -719,7 +727,7 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
     log('info', `[STD] [${index + 1}/${total}] ${filename}`);
 
     try {
-        const imageUrl = await uploadImage(resizedPath);
+        const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
         const fullPrompt = buildPrompt(imageUrl);
         const ctx = await browser.createBrowserContext();
         const page = await ctx.newPage();
@@ -764,7 +772,6 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
             log('info', `Response: ${resp.text.length} chars`);
             await takeScreenshot(page, `${ssPrefix}_response.png`);
 
-            // Check for block - if blocked, detach recorder (it stays running) and return
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
@@ -782,10 +789,10 @@ async function processImageStandard(browser, imageInfo, index, total, recorder =
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  LENS MODE
+//  LENS MODE  (supports URL objects)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function processImageLens(browser, imageInfo, index, total, recorder = null) {
-    const { resizedPath, filename } = imageInfo;
+    const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
     const ssPrefix = path.join(SCREENSHOTS_DIR, `lens_${index + 1}_${safeName}`);
     const t0 = Date.now();
@@ -793,7 +800,7 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
     log('info', `[LENS] [${index + 1}/${total}] ${filename}`);
 
     try {
-        const imageUrl = await uploadImage(resizedPath);
+        const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
         const fullPrompt = buildPrompt(imageUrl);
         const ctx = await browser.createBrowserContext();
         const page = await ctx.newPage();
@@ -851,7 +858,6 @@ async function processImageLens(browser, imageInfo, index, total, recorder = nul
             log('info', `Response: ${resp.text.length} chars`);
             await takeScreenshot(page, `${ssPrefix}_response.png`);
 
-            // Check for block - if blocked, mark it
             const analysis = analyzeResponse(resp.text);
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
@@ -968,7 +974,6 @@ async function startTesting() {
         for (let b = 0; b < batches.length; b++) {
             if (isGloballyBlocked) {
                 log('warn', `🚫 IP is blocked. Skipping remaining ${batches.length - b} batches.`);
-                // Mark remaining images as blocked
                 const remaining = imageInfos.slice(b * CONFIG.batch.size);
                 for (const img of remaining) {
                     allResults.push({
@@ -996,11 +1001,9 @@ async function startTesting() {
 
             if (blockedCount > 0) {
                 log('warn', `⚠️ BATCH BLOCKED: ${blockedCount}/${results.length} images hit CAPTCHA/block`);
-                // If ANY image in batch is blocked, IP is blocked - stop immediately
                 if (blockedCount >= 1) {
                     isGloballyBlocked = true;
                     log('error', `🚫 IP BLOCKED DETECTED. Stopping all further processing.`);
-                    // Stop recorder immediately so we don't stall waiting for it
                     if (globalRecorder) {
                         log('info', 'Stopping recorder early due to IP block...');
                         await globalRecorder.stop();
@@ -1011,7 +1014,6 @@ async function startTesting() {
             if (rateLimitedCount > 0) log('warn', `⏳ Rate limited on ${rateLimitedCount}/${results.length} images`);
             if (noJsonCount > 0) log('info', `${noJsonCount}/${results.length} images without JSON`);
 
-            // No cooldown if blocked - we already decided to stop
             if (!isGloballyBlocked && b < batches.length - 1) {
                 const cooldown = rateLimitedCount > 0 ? CONFIG.batch.delayBetweenBatchesMs * 2 : CONFIG.batch.delayBetweenBatchesMs;
                 log('info', `Cooldown ${cooldown}ms...`);
@@ -1019,7 +1021,6 @@ async function startTesting() {
             }
         }
     } finally {
-        // Stop global recorder before closing browser (idempotent - safe even if already stopped)
         if (globalRecorder) await globalRecorder.stop();
 
         if (CONFIG.perf.fastClose) {
@@ -1032,10 +1033,6 @@ async function startTesting() {
             activeBrowser = null;
         }
     }
-
-    // NO RETRY LOGIC for blocked IPs - what failed stays failed
-    // Only retry non-blocked failures if desired, but per user request we skip retries entirely
-    // when blocked since IP won't change
 
     const successful = allResults.filter(r => !r.error && !r.timedOut).length;
     const withJson = allResults.filter(r => !!extractJsonFromText(r.response || '')).length;
@@ -1074,6 +1071,35 @@ async function startTesting() {
     if (CONFIG.output.atomicWrites) atomicWrite(jsonPath, jsonData);
     else fs.writeFileSync(jsonPath, jsonData);
     log('info', `Saved -> ${jsonPath}`);
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //  SAVE SUCCESSFUL RESPONSES (HF FORMAT)
+    // ═══════════════════════════════════════════════════════════════════════════════
+    const SUCCESSFUL_DIR = path.join(OUTPUT_DIR, 'successful');
+    if (!fs.existsSync(SUCCESSFUL_DIR)) fs.mkdirSync(SUCCESSFUL_DIR, { recursive: true });
+
+    const runId = process.env.GLENS_RUN_ID || 'local';
+    const successfulResults = allResults.filter(r => !r.error && !r.timedOut && r.response);
+    let successIndex = 0;
+
+    for (const r of successfulResults) {
+        const timestamp = Date.now();
+        const outputFilename = `${timestamp}_${runId}_${successIndex++}.json`;
+        const payload = {
+            filename: outputFilename,
+            imageURL: r.imageUrl,
+            response: r.response
+        };
+        const filePath = path.join(SUCCESSFUL_DIR, outputFilename);
+        const data = JSON.stringify(payload, null, 2);
+        if (CONFIG.output.atomicWrites) atomicWrite(filePath, data);
+        else fs.writeFileSync(filePath, data, 'utf8');
+    }
+
+    if (successfulResults.length > 0) {
+        log('info', `Saved ${successfulResults.length} successful result(s) to ${SUCCESSFUL_DIR}`);
+    }
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     cleanupTempImages();
 
