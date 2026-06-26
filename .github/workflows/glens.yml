@@ -2,11 +2,43 @@ name: GLENS
 
 on:
   workflow_dispatch:
+    inputs:
+      image_urls:
+        description: 'JSON array of image URLs (e.g., ["https://i.imgur.com/abc.jpg"])'
+        required: false
+        default: ''
+      hf_token:
+        description: 'HuggingFace token for uploading results'
+        required: false
+        default: ''
+      hf_repo:
+        description: 'HuggingFace repo ID (e.g., rrokutaro/ugc-dropship)'
+        required: false
+        default: 'rrokutaro/ugc-dropship'
+      hf_path:
+        description: 'Target directory inside the HF repo'
+        required: false
+        default: 'assets/glens-responses'
+      hf_repo_type:
+        description: 'HF repo type: dataset, model, or space'
+        required: false
+        default: 'dataset'
+
+  repository_dispatch:
+    types: [glens-run]
 
 jobs:
   glens-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    env:
+      GLENS_IMAGE_URLS: ${{ github.event.client_payload.image_urls || github.event.inputs.image_urls || '' }}
+      HF_TOKEN: ${{ github.event.client_payload.hf_token || github.event.inputs.hf_token || '' }}
+      HF_REPO: ${{ github.event.client_payload.hf_repo || github.event.inputs.hf_repo || 'rrokutaro/ugc-dropship' }}
+      HF_PATH: ${{ github.event.client_payload.hf_path || github.event.inputs.hf_path || 'assets/glens-responses' }}
+      HF_REPO_TYPE: ${{ github.event.client_payload.hf_repo_type || github.event.inputs.hf_repo_type || 'dataset' }}
+      GLENS_RUN_ID: ${{ github.run_id }}
 
     steps:
     - name: Checkout repository
@@ -36,7 +68,8 @@ jobs:
           echo '{"name":"glens","type":"module"}' > package.json
         fi
 
-    - name: Verify images exist
+    - name: Verify images exist (local mode only)
+      if: ${{ env.GLENS_IMAGE_URLS == '' }}
       run: |
         mkdir -p images
         if [ "$(ls -A images 2>/dev/null)" ]; then
@@ -44,8 +77,12 @@ jobs:
           ls -la images/
         else
           echo "WARNING: No images in ./images/ directory. The script will fail."
-          echo "Add your images to an 'images/' folder in your repo, or adjust IMAGE_DIR_CANDIDATES in glens.js."
+          echo "Add your images to an 'images/' folder in your repo, or pass image_urls."
         fi
+
+    - name: Mask HF token
+      if: ${{ env.HF_TOKEN != '' }}
+      run: echo "::add-mask::${HF_TOKEN}"
 
     - name: Run GLENS test
       env:
@@ -78,6 +115,39 @@ jobs:
         GLENS_NAV_WAIT: domcontentloaded
         GLENS_LOG_LEVEL: info
       run: node glens.js
+
+    - name: Upload successful results to HuggingFace
+      if: ${{ always() && env.HF_TOKEN != '' && env.HF_REPO != '' }}
+      run: |
+        pip install -q huggingface_hub
+        python3 << 'PYEOF'
+        import os, glob
+        from huggingface_hub import HfApi
+
+        token   = os.environ["HF_TOKEN"]
+        repo_id = os.environ["HF_REPO"]
+        prefix  = os.environ["HF_PATH"]
+        rtype   = os.environ["HF_REPO_TYPE"]
+
+        api = HfApi(token=token)
+        files = glob.glob("output/successful/*.json")
+
+        if not files:
+            print("No successful results to upload.")
+            exit(0)
+
+        for f in files:
+            name = os.path.basename(f)
+            target = f"{prefix}/{name}" if prefix else name
+            print(f"Uploading {name}  ->  {repo_id}/{target}")
+            api.upload_file(
+                path_or_fileobj=f,
+                path_in_repo=target,
+                repo_id=repo_id,
+                repo_type=rtype,
+            )
+        print(f"Done. Uploaded {len(files)} file(s).")
+        PYEOF
 
     - name: Upload output artifacts
       if: always()
