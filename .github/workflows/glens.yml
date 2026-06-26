@@ -157,4 +157,4 @@ jobs:
         path: |
           output/
           !output/tmp/
-        retention-days: 7
+        retention-days: 1
