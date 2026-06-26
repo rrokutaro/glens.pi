@@ -2,7 +2,7 @@
 
 ![](./assets/banner.gif)
 
-Automated pipeline that uploads images to Google Lens, extracts AI-generated product analysis (titles, brands, prices, sources, dropship viability, social appearances), and outputs structured JSON.
+Automated pipeline that uploads images to Google Lens, extracts AI-generated product analysis (titles, brands, prices, sources, dropship viability, social appearances), and outputs structured JSON. It does not rely manually clicking elements as it navigates to Urls, and extracts the returned JSON data in the DOM. This makes more robust and reliable, compared to manual UI clicks that can break at random. 
 
 Runs on **GitHub Actions** or locally with Node.js.
 
