@@ -25,20 +25,13 @@ on:
         default: 'dataset'
 
   repository_dispatch:
-    types: [glens-run]
+    types:
+      - glens-run
 
 jobs:
   glens-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    env:
-      GLENS_IMAGE_URLS: ${{ github.event.client_payload.image_urls || github.event.inputs.image_urls || '' }}
-      HF_TOKEN: ${{ github.event.client_payload.hf_token || github.event.inputs.hf_token || '' }}
-      HF_REPO: ${{ github.event.client_payload.hf_repo || github.event.inputs.hf_repo || 'rrokutaro/ugc-dropship' }}
-      HF_PATH: ${{ github.event.client_payload.hf_path || github.event.inputs.hf_path || 'assets/glens-responses' }}
-      HF_REPO_TYPE: ${{ github.event.client_payload.hf_repo_type || github.event.inputs.hf_repo_type || 'dataset' }}
-      GLENS_RUN_ID: ${{ github.run_id }}
 
     steps:
     - name: Checkout repository
@@ -69,7 +62,7 @@ jobs:
         fi
 
     - name: Verify images exist (local mode only)
-      if: ${{ env.GLENS_IMAGE_URLS == '' }}
+      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_urls == '' }}
       run: |
         mkdir -p images
         if [ "$(ls -A images 2>/dev/null)" ]; then
@@ -81,8 +74,10 @@ jobs:
         fi
 
     - name: Mask HF token
-      if: ${{ env.HF_TOKEN != '' }}
-      run: echo "::add-mask::${HF_TOKEN}"
+      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '' }}
+      env:
+        TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
+      run: echo "::add-mask::$TOKEN_TO_MASK"
 
     - name: Run GLENS test
       env:
@@ -114,10 +109,17 @@ jobs:
         GLENS_FAST_CLOSE: "true"
         GLENS_NAV_WAIT: domcontentloaded
         GLENS_LOG_LEVEL: info
+        GLENS_IMAGE_URLS: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.image_urls) || github.event.inputs.image_urls || '' }}
+        GLENS_RUN_ID: ${{ github.run_id }}
       run: node glens.js
 
     - name: Upload successful results to HuggingFace
-      if: ${{ always() && env.HF_TOKEN != '' && env.HF_REPO != '' }}
+      if: ${{ always() && (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '') }}
+      env:
+        HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
+        HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'rrokutaro/ugc-dropship' }}
+        HF_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_path || github.event.client_payload.hf_path || 'assets/glens-responses' }}
+        HF_REPO_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo_type || github.event.client_payload.hf_repo_type || 'dataset' }}
       run: |
         pip install -q huggingface_hub
         python3 << 'PYEOF'
