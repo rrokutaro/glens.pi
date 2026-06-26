@@ -18,7 +18,7 @@ on:
       hf_path:
         description: 'Target directory inside the HF repo'
         required: false
-        default: 'assets/glens-responses'
+        default: 'scraped-posts/glens-responses'
       hf_repo_type:
         description: 'HF repo type: dataset, model, or space'
         required: false
@@ -117,8 +117,8 @@ jobs:
       if: ${{ always() && (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '') }}
       env:
         HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
-        HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'rrokutaro/ugc-dropship' }}
-        HF_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_path || github.event.client_payload.hf_path || 'assets/glens-responses' }}
+        HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'hfusername/ugc-dropship' }}
+        HF_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_path || github.event.client_payload.hf_path || 'scraped-posts/glens-responses' }}
         HF_REPO_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo_type || github.event.client_payload.hf_repo_type || 'dataset' }}
       run: |
         pip install -q huggingface_hub
