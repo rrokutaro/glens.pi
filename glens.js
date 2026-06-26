@@ -89,12 +89,12 @@ function atomicWrite(filePath, data) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GLOBAL SCREEN RECORDER
+//  SCREEN RECORDER
 // ═══════════════════════════════════════════════════════════════════════════════
 class GlobalScreenRecorder {
     constructor(outputPath) {
         this.outputPath = outputPath;
-        this.framesDir = path.join(path.dirname(outputPath), '.frames_global');
+        this.framesDir = outputPath + '_frames';
         this.frameCount = 0;
         this.isRecording = false;
         this.client = null;
@@ -106,7 +106,6 @@ class GlobalScreenRecorder {
 
     async attach(page) {
         if (!CONFIG.recording.enabled) return;
-        // Prevent concurrent overwrites that leak CDP sessions in parallel batches
         if (this.page) return;
         this.page = page;
         this.startTime = Date.now();
@@ -157,7 +156,7 @@ class GlobalScreenRecorder {
 
         this.client = client;
         this.isRecording = true;
-        log('info', '🎬 Global recording started: ' + path.basename(this.outputPath) + ' @ ' + CONFIG.recording.fps + 'fps');
+        log('info', '🎬 Recording started: ' + path.basename(this.outputPath) + ' @ ' + CONFIG.recording.fps + 'fps');
     }
 
     async updateLabel(label, status) {
@@ -215,7 +214,7 @@ class GlobalScreenRecorder {
             const ffmpegPath = this._findFfmpeg();
             if (!ffmpegPath) {
                 log('warn', 'ffmpeg not found. Frames saved as image sequence.');
-                const frameList = path.join(this.framesDir, '..', 'global_frames.txt');
+                const frameList = path.join(this.framesDir, '..', path.basename(this.outputPath) + '_frames.txt');
                 fs.writeFileSync(frameList, 'Frames: ' + this.frameCount + '\nDir: ' + this.framesDir + '\nffmpeg command:\nffmpeg -framerate ' + CONFIG.recording.fps + ' -i ' + path.join(this.framesDir, 'frame_%06d.jpg') + ' -c:v libx264 -pix_fmt yuv420p -crf 23 ' + this.outputPath);
                 resolve();
                 return;
@@ -238,7 +237,15 @@ class GlobalScreenRecorder {
             const proc = spawn(ffmpegPath, args, { stdio: 'pipe' });
             let stderr = '';
             proc.stderr.on('data', d => { stderr += d; });
+
+            // Store the timeout ID so we can clear it once encoding resolves, preventing event loop stalls
+            const timeoutId = setTimeout(() => {
+                try { proc.kill('SIGKILL'); } catch(e) {}
+                resolve();
+            }, 120000);
+
             proc.on('close', (code) => {
+                clearTimeout(timeoutId);
                 if (code === 0) {
                     const stats = fs.statSync(this.outputPath);
                     log('info', '🎬 Video saved: ' + path.basename(this.outputPath) + ' (' + (stats.size / 1024 / 1024).toFixed(1) + 'MB, ' + this.frameCount + ' frames)');
@@ -248,14 +255,10 @@ class GlobalScreenRecorder {
                 resolve();
             });
             proc.on('error', (err) => {
+                clearTimeout(timeoutId);
                 log('warn', 'ffmpeg error: ' + err.message);
                 resolve();
             });
-
-            setTimeout(() => {
-                try { proc.kill('SIGKILL'); } catch(e) {}
-                resolve();
-            }, 120000);
         });
     }
 
@@ -710,13 +713,20 @@ async function takeScreenshot(page, ssPath) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STANDARD MODE
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImageStandard(browser, imageInfo, index, total, recorder) {
+async function processImageStandard(browser, imageInfo, index, total) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
     const ssPrefix = path.join(SCREENSHOTS_DIR, 'std_' + (index + 1) + '_' + safeName);
     const t0 = Date.now();
 
     log('info', '[STD] [' + (index + 1) + '/' + total + '] ' + filename);
+
+    let recorder = null;
+    if (CONFIG.recording.enabled) {
+        const vidPath = path.join(RECORDINGS_DIR, `std_${index + 1}_${safeName}.mp4`);
+        recorder = new GlobalScreenRecorder(vidPath);
+        activeRecorders.add(recorder);
+    }
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
@@ -771,10 +781,17 @@ async function processImageStandard(browser, imageInfo, index, total, recorder) 
 
             return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) await recorder.detach(page);
+            if (recorder) {
+                await recorder.stop();
+                activeRecorders.delete(recorder);
+            }
             await ctx.close();
         }
     } catch (err) {
+        if (recorder) {
+            await recorder.stop();
+            activeRecorders.delete(recorder);
+        }
         log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
@@ -783,13 +800,20 @@ async function processImageStandard(browser, imageInfo, index, total, recorder) 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LENS MODE
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImageLens(browser, imageInfo, index, total, recorder) {
+async function processImageLens(browser, imageInfo, index, total) {
     const { filename } = imageInfo;
     const safeName = filename.replace(/[^a-z0-9]/gi, '_');
     const ssPrefix = path.join(SCREENSHOTS_DIR, 'lens_' + (index + 1) + '_' + safeName);
     const t0 = Date.now();
 
     log('info', '[LENS] [' + (index + 1) + '/' + total + '] ' + filename);
+
+    let recorder = null;
+    if (CONFIG.recording.enabled) {
+        const vidPath = path.join(RECORDINGS_DIR, `lens_${index + 1}_${safeName}.mp4`);
+        recorder = new GlobalScreenRecorder(vidPath);
+        activeRecorders.add(recorder);
+    }
 
     try {
         const imageUrl = imageInfo.type === 'url' ? imageInfo.url : await uploadImage(imageInfo.resizedPath);
@@ -857,10 +881,17 @@ async function processImageLens(browser, imageInfo, index, total, recorder) {
 
             return { filename, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
         } finally {
-            if (recorder) await recorder.detach(page);
+            if (recorder) {
+                await recorder.stop();
+                activeRecorders.delete(recorder);
+            }
             await ctx.close();
         }
     } catch (err) {
+        if (recorder) {
+            await recorder.stop();
+            activeRecorders.delete(recorder);
+        }
         log('error', 'Fail ' + filename + ': ' + err.message);
         return { filename, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
     }
@@ -869,10 +900,10 @@ async function processImageLens(browser, imageInfo, index, total, recorder) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ROUTER
 // ═══════════════════════════════════════════════════════════════════════════════
-async function processImage(browser, imageInfo, index, total, recorder) {
+async function processImage(browser, imageInfo, index, total) {
     return CONFIG.mode === 'lens'
-        ? processImageLens(browser, imageInfo, index, total, recorder)
-        : processImageStandard(browser, imageInfo, index, total, recorder);
+        ? processImageLens(browser, imageInfo, index, total)
+        : processImageStandard(browser, imageInfo, index, total);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -887,15 +918,15 @@ async function jitteredDelay(baseMs) {
     await new Promise(r => setTimeout(r, baseMs + Math.random() * 200));
 }
 
-async function processBatch(browser, batch, batchIndex, totalBatches, offset, recorder) {
+async function processBatch(browser, batch, batchIndex, totalBatches, offset) {
     log('info', 'BATCH [' + (batchIndex + 1) + '/' + totalBatches + '] ' + batch.length + ' img [' + CONFIG.mode + ']');
     const results = [];
     if (CONFIG.batch.enabled) {
-        const promises = batch.map((img, i) => processImage(browser, img, offset + i, IMAGE_PATHS.length, recorder));
+        const promises = batch.map((img, i) => processImage(browser, img, offset + i, IMAGE_PATHS.length));
         results.push(...await Promise.all(promises));
     } else {
         for (let i = 0; i < batch.length; i++) {
-            results.push(await processImage(browser, batch[i], offset + i, IMAGE_PATHS.length, recorder));
+            results.push(await processImage(browser, batch[i], offset + i, IMAGE_PATHS.length));
             if (i < batch.length - 1) await jitteredDelay(CONFIG.batch.delayBetweenSearchesMs);
         }
     }
@@ -906,13 +937,14 @@ async function processBatch(browser, batch, batchIndex, totalBatches, offset, re
 //  GRACEFUL SHUTDOWN
 // ═══════════════════════════════════════════════════════════════════════════════
 let activeBrowser = null;
-let globalRecorder = null;
+const activeRecorders = new Set();
 let isShuttingDown = false;
+
 async function gracefulShutdown(sig) {
     if (isShuttingDown) return;
     isShuttingDown = true;
     log('warn', 'Signal ' + sig + '. Shutdown...');
-    if (globalRecorder) await globalRecorder.stop();
+    for (const rec of activeRecorders) await rec.stop();
     if (activeBrowser) {
         let closed = false;
         activeBrowser.close().then(() => { closed = true; }).catch(() => {});
@@ -945,7 +977,6 @@ async function startTesting() {
     log('info', 'CPUs: ' + os.cpus().length + ' | Mem: ' + (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) + 'GB');
 
     const tStart = Date.now();
-    const globalVideoPath = path.join(RECORDINGS_DIR, 'session_' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4');
 
     log('info', 'Resize...');
     const tResize = Date.now();
@@ -965,8 +996,6 @@ async function startTesting() {
         ]
     });
     log('info', 'Browser ' + ((Date.now() - tBrowser) / 1000).toFixed(1) + 's');
-
-    globalRecorder = new GlobalScreenRecorder(globalVideoPath);
 
     const allResults = [];
     let isGloballyBlocked = false;
@@ -993,7 +1022,7 @@ async function startTesting() {
             }
 
             const offset = b * CONFIG.batch.size;
-            const results = await processBatch(activeBrowser, batches[b], b, batches.length, offset, globalRecorder);
+            const results = await processBatch(activeBrowser, batches[b], b, batches.length, offset);
             allResults.push(...results);
 
             const analysis = results.map(r => analyzeResponse(r.response));
@@ -1006,10 +1035,6 @@ async function startTesting() {
                 if (blockedCount >= 1) {
                     isGloballyBlocked = true;
                     log('error', '🚫 IP BLOCKED DETECTED. Stopping all further processing.');
-                    if (globalRecorder) {
-                        log('info', 'Stopping recorder early due to IP block...');
-                        await globalRecorder.stop();
-                    }
                 }
             }
 
@@ -1023,15 +1048,13 @@ async function startTesting() {
             }
         }
     } finally {
-        if (globalRecorder) await globalRecorder.stop();
-
         if (CONFIG.perf.fastClose) {
             log('info', 'Close browser (async)...');
             let closed = false;
             activeBrowser.close().then(() => { closed = true; }).catch(() => {});
-            await new Promise(r => setTimeout(r, 5000));
+            // fastClose removes long wait and delegates to exit naturally if operations are completed
+            await new Promise(r => setTimeout(r, 10));
             if (!closed) {
-                log('warn', 'Browser close hung. Force killing...');
                 try {
                     const proc = activeBrowser.process && activeBrowser.process();
                     if (proc) proc.kill('SIGKILL');
@@ -1122,7 +1145,7 @@ async function startTesting() {
     const total = ((Date.now() - tStart) / 1000).toFixed(1);
     log('info', '═══════════════════════════════════════════════════════════════');
     log('info', 'DONE ' + total + 's | ' + successful + '/' + imageInfos.length + ' OK | ' + withJson + ' JSON | ' + blocked + ' BLOCKED | ' + skippedBlocked + ' SKIPPED | ' + rateLimited + ' RATE-LIMITED | ' + failed + ' FAIL');
-    if (CONFIG.recording.enabled) log('info', 'Recording: ' + globalVideoPath);
+    if (CONFIG.recording.enabled) log('info', 'Recordings saved in: ' + RECORDINGS_DIR);
     log('info', '═══════════════════════════════════════════════════════════════');
     if (blocked > 0) log('warn', 'Google detected unusual traffic. Retry on a different IP.');
     if (failed > 0) process.exitCode = 1;
@@ -1130,7 +1153,7 @@ async function startTesting() {
 
 startTesting().catch(err => {
     log('error', 'Fatal:', err.message);
-    if (globalRecorder) globalRecorder.stop().catch(() => {});
+    for (const rec of activeRecorders) rec.stop().catch(() => {});
     if (activeBrowser) {
         let closed = false;
         activeBrowser.close().then(() => { closed = true; }).catch(() => {});
