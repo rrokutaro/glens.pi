@@ -10,21 +10,39 @@ Runs on **GitHub Actions** (with optional HuggingFace upload) or locally with No
 
 ## What it does
 
-1. **Discovers** images from `./images/` (or from a JSON array of URLs)
+1. **Discovers** images from `./images/` (or from a JSON array of URLs, or from **MongoDB**)
 2. **Resizes** them for fast upload (configurable max dimension/quality)
 3. **Uploads** to a temporary image host (catbox.moe / litterbox)
 4. **Navigates** Google Lens with the image URL + structured prompt
 5. **Extracts** the AI response as clean JSON (with robust fallback parsing)
 6. **Records** the entire browser session as an MP4 (optional) and compiles all clips into a single session video
 7. **Saves** everything to `./output/` and optionally **pushes successful results to a HuggingFace repo**
+8. *(New)* **MongoDB mode**: Pulls reviewed posts from MongoDB, extracts video frames into a merged image, runs the pipeline, and writes successful responses back to the DB
 
 ---
 
 ## Launch Methods
 
-There are **three** supported ways to launch the workflow:
+There are **four** supported ways to launch the workflow:
 
-### 1. GitHub Actions — Manual Run (workflow_dispatch)
+### 1. GitHub Actions — MongoDB Mode (Recommended)
+Best for production pipelines connected to your scraped content database.
+
+1. Add your MongoDB URI to **Settings → Secrets and variables → Actions → New repository secret**:
+   - Name: `GLENS_MONGODB_URI`
+   - Value: `mongodb+srv://...`
+
+2. *(Optional)* Go to **Actions → GLENS → Run workflow** and adjust:
+   - `mongodb_db` — default `ugc-dropship`
+   - `mongodb_collection` — default `scraped-posts`
+
+3. The runner will:
+   - Query `{ reviewed: true }` from your collection
+   - For **images**: send the URL directly through the pipeline
+   - For **videos**: download the video, extract the specified frames, merge them vertically into one image, and send that through the pipeline
+   - Write successful AI responses back to `file_urls[i].response` in MongoDB
+
+### 2. GitHub Actions — Manual Run (workflow_dispatch)
 Best for one-off runs or testing.
 
 1. Fork or create a repo with these files:
@@ -45,20 +63,19 @@ Best for one-off runs or testing.
 
 4. Download artifacts from the completed run (`glens-output`) or find your files on HuggingFace.
 
-### 2. GitHub Actions — API / Webhook (repository_dispatch)
+### 3. GitHub Actions — API / Webhook (repository_dispatch)
 Best for triggering remotely from another service, script, or scheduler.
 
 Send a `POST` request to the GitHub Dispatches API:
 
 ```bash
-curl -X POST \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: token YOUR_PERSONAL_ACCESS_TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/dispatches \
-  -d '{
+curl -X POST   -H "Accept: application/vnd.github+json"   -H "Authorization: token YOUR_PERSONAL_ACCESS_TOKEN"   https://api.github.com/repos/OWNER/REPO/dispatches   -d '{
     "event_type": "glens-run",
     "client_payload": {
       "image_urls": ["https://example.com/shoe1.jpg", "https://example.com/bag2.jpg"],
+      "mongodb_uri": "mongodb+srv://...",
+      "mongodb_db": "ugc-dropship",
+      "mongodb_collection": "scraped-posts",
       "hf_token": "hf_xxxxxxxx",
       "hf_repo": "yourname/ugc-dropship",
       "hf_path": "assets/glens-responses",
@@ -69,20 +86,18 @@ curl -X POST \
 
 - `event_type` **must** be exactly `glens-run`.
 - All `client_payload` fields are optional; the workflow falls back to defaults if omitted.
-- If `image_urls` is omitted, the runner expects images in the `./images/` folder.
+- If `mongodb_uri` is provided, it takes precedence over `image_urls` and local folders.
 
-### 3. Local Execution
+### 4. Local Execution
 Best for development, debugging, or running on your own infrastructure.
 
 ```bash
 # 1. System deps (Ubuntu/Debian)
 sudo apt-get update
-sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 \
-  libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 \
-  libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
+sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0   libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1   libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
 
 # 2. Node deps
-npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp
+npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb
 
 # 3. Install stealth Chromium
 npx cloakbrowser install
@@ -96,8 +111,64 @@ export GLENS_MODE=lens
 export GLENS_BATCH_SIZE=3
 export GLENS_RECORDING=true
 # export GLENS_IMAGE_URLS='["https://i.imgur.com/abc.jpg"]'  # optional URL mode
+# export GLENS_MONGODB_URI='mongodb+srv://...'               # optional MongoDB mode
 node glens.js
 ```
+
+---
+
+## MongoDB Document Schema
+
+The pipeline expects documents in this shape (matching your scraped Instagram content):
+
+```json
+{
+  "post_id": "p/ABC",
+  "timestamp": 1719820800000,
+  "reviewed": true,
+  "file_urls": [
+    { "url": "https://hf.co/.../image1.jpg", "type": "image" },
+    { "url": "https://hf.co/.../image2.webp", "type": "image" },
+    {
+      "url": "https://hf.co/.../video1.mp4",
+      "type": "video",
+      "frames": [3.32, 23.55, 45.33]
+    }
+  ]
+}
+```
+
+**Reel example:**
+```json
+{
+  "post_id": "reel/ABC",
+  "timestamp": 1719820800000,
+  "reviewed": true,
+  "file_urls": [
+    {
+      "url": "https://hf.co/.../reel.mp4",
+      "type": "video",
+      "frames": [3.32, 23.55, 45.33]
+    }
+  ]
+}
+```
+
+**After a successful run**, the pipeline updates the document in-place:
+
+```json
+{
+  "post_id": "p/ABC",
+  "reviewed": true,
+  "file_urls": [
+    { "url": "...", "type": "image", "response": "{"products":[...]}" },
+    { "url": "...", "type": "image" },
+    { "url": "...", "type": "video", "frames": [3.32, 23.55, 45.33], "response": "{"products":[...]}" }
+  ]
+}
+```
+
+Only successful files get the `response` field. Failed or blocked files are left untouched so you can retry later.
 
 ---
 
@@ -136,6 +207,9 @@ All settings are controlled via environment variables:
 | `GLENS_NAV_WAIT` | `domcontentloaded` | Navigation wait condition |
 | `GLENS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `GLENS_IMAGE_URLS` | `""` | JSON array of image URLs to process instead of local files |
+| `GLENS_MONGODB_URI` | `""` | MongoDB connection string. If set, pulls from DB and ignores local/URL inputs |
+| `GLENS_MONGODB_DB` | `ugc-dropship` | MongoDB database name |
+| `GLENS_MONGODB_COLLECTION` | `scraped-posts` | MongoDB collection name |
 | `GLENS_RUN_ID` | `""` | Optional CI run ID (auto-set in GitHub Actions) |
 
 ---
@@ -177,13 +251,14 @@ output/
       "filename": "image.jpg",
       "originalId": "image.jpg",
       "imageUrl": "https://litter.catbox.moe/...",
-      "response": "{\"products\":[...]}",
+      "response": "{"products":[...]}",
       "duration": 12345,
       "error": null,
       "timedOut": false,
       "isBlocked": false,
       "isRateLimited": false,
-      "hasJson": true
+      "hasJson": true,
+      "mongoMeta": null
     }
   ]
 }
@@ -214,6 +289,15 @@ The token is masked in GitHub Actions logs for security.
 
 ## How it works
 
+### MongoDB Mode
+When `GLENS_MONGODB_URI` is provided, the pipeline:
+1. Connects to MongoDB and queries `{ reviewed: true }`
+2. For each `file_urls` entry:
+   - **Image**: passes the URL directly into the pipeline
+   - **Video**: downloads the MP4, uses `ffmpeg` to extract the specified frame timestamps, merges them vertically into a single JPG, and passes that merged image into the pipeline
+3. After all batches finish, iterates successful results and performs `$set: { "file_urls.N.response": "..." }` on the parent document
+4. Failed/blocked files are **not** updated, so you can retry them later
+
 ### Batch Processing & Global Block Detection
 Images are processed in parallel batches (default 3). If **any** image in a batch triggers a Google CAPTCHA or block page, the pipeline assumes the IP is burned and **skips all remaining batches** immediately. This prevents pointless retries and wasted runner minutes.
 
@@ -238,13 +322,14 @@ The script detects CAPTCHA, rate limits, and unusual-traffic pages by scanning r
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `No images found` | `images/` directory empty or wrong path; `GLENS_IMAGE_URLS` empty or malformed | Add images to `./images/`, or pass a valid JSON array to `GLENS_IMAGE_URLS` / workflow input |
+| `No images found` | `images/` directory empty or wrong path; `GLENS_IMAGE_URLS` empty or malformed; MongoDB has no `reviewed: true` posts | Add images, pass URLs, or check MongoDB documents |
 | `All uploads failed` | Upload services down/changed | Already handled by catbox.moe fallback |
 | `IP BLOCKED DETECTED` | Google flagged the runner IP | Wait and retry, or use a different runner/region |
 | `0 JSON` | Response didn't contain valid product data | Check `ai_responses.json` raw response for errors |
 | Workflow stalls after completion | ffmpeg encoding the session video | 2-minute timeout — will auto-kill if stuck |
 | `SyntaxError: Unexpected token '%'` | `%%writefile` from Colab left in file | Ensure first line is `import { launch }` |
 | HF upload fails | Token lacks write access or repo doesn't exist | Verify `hf_token` and `hf_repo` |
+| MongoDB connection fails | URI is invalid or IP not allowlisted | Check URI format and Atlas Network Access |
 
 ---
 
@@ -253,7 +338,8 @@ The script detects CAPTCHA, rate limits, and unusual-traffic pages by scanning r
 - **Node.js 24** + ES modules
 - **Puppeteer** (via CloakBrowser) for stealth automation
 - **Sharp** for image resizing
-- **ffmpeg** for session video encoding
+- **ffmpeg** for session video encoding and video frame extraction
+- **MongoDB Node.js driver** for database read/write
 - **GitHub Actions** `ubuntu-latest` runner
 - **HuggingFace Hub** for optional dataset persistence
 
