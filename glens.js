@@ -60,6 +60,7 @@ const CONFIG = {
         uri: process.env.GLENS_MONGODB_URI || '',
         db: process.env.GLENS_MONGODB_DB || 'ugc-dropship',
         collection: process.env.GLENS_MONGODB_COLLECTION || 'scraped-posts',
+        limit: parseInt(process.env.GLENS_MONGODB_LIMIT || '20', 10),
     },
 };
 
@@ -416,14 +417,30 @@ async function fetchFromMongoDB() {
     const db = client.db(CONFIG.mongodb.db);
     const collection = db.collection(CONFIG.mongodb.collection);
 
-    log('info', `MongoDB: querying ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection} for reviewed posts...`);
-    const posts = await collection.find({ reviewed: true }).toArray();
-    log('info', `MongoDB: found ${posts.length} reviewed post(s)`);
+    log('info', `MongoDB: querying ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection} for reviewed posts (limit: ${CONFIG.mongodb.limit})...`);
+
+    const posts = await collection
+        .find({
+            reviewed: true,
+            file_urls: {
+                $elemMatch: {
+                    $or: [
+                        { response: { $exists: false } },
+                        { response: null }
+                    ]
+                }
+            }
+        })
+        .limit(CONFIG.mongodb.limit)
+        .toArray();
+
+    log('info', `MongoDB: found ${posts.length} post(s) with unprocessed files`);
 
     const imagePaths = [];
     let imageCount = 0;
     let videoCount = 0;
     let skipCount = 0;
+    let alreadyHasResponse = 0;
 
     for (const post of posts) {
         if (!post.file_urls || !Array.isArray(post.file_urls)) {
@@ -435,6 +452,13 @@ async function fetchFromMongoDB() {
             const file = post.file_urls[i];
             if (!file || !file.url) {
                 skipCount++;
+                continue;
+            }
+
+            // ── SKIP files that already have a response ──
+            if (file.response) {
+                alreadyHasResponse++;
+                log('debug', `Skipping ${post.post_id || post._id} file[${i}] — already has response`);
                 continue;
             }
 
@@ -482,7 +506,7 @@ async function fetchFromMongoDB() {
     }
 
     await client.close();
-    log('info', `MongoDB: ${imageCount} image(s), ${videoCount} video(s), ${skipCount} skipped`);
+    log('info', `MongoDB: ${imageCount} image(s), ${videoCount} video(s), ${skipCount} skipped, ${alreadyHasResponse} already-responded`);
     return imagePaths;
 }
 
@@ -625,7 +649,7 @@ async function resizeImage(imgPathOrInfo) {
             const meta = await sharp(imgPath).metadata();
             const needs = meta.width > CONFIG.image.maxDimension || meta.height > CONFIG.image.maxDimension;
             const pipeline = needs
-                ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargargement: true })
+                ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargement: true })
                 : sharp(imgPath);
             await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
             log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
@@ -746,7 +770,7 @@ function extractBalancedJson(text, start) {
 
 function extractJsonFromText(text) {
     if (!text || text.length < 10) return null;
-    
+
     let searchArea = text;
     const promptMarker = 'Heres the image URL:';
     const promptIdx = text.lastIndexOf(promptMarker);
@@ -765,7 +789,7 @@ function extractJsonFromText(text) {
             pos++;
         }
     }
-    
+
     let pos = 0;
     while ((pos = searchArea.indexOf('{', pos)) !== -1) {
         const c = extractBalancedJson(searchArea, pos);
@@ -1130,7 +1154,7 @@ async function compileRecordings(recordingsDir) {
     if (!fs.existsSync(recordingsDir)) return;
     const files = fs.readdirSync(recordingsDir).filter(f => f.endsWith('.mp4') && !f.startsWith('session_'));
     if (files.length === 0) return;
-    
+
     const sessionName = 'session_' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4';
     const sessionPath = path.join(recordingsDir, sessionName);
 
@@ -1141,7 +1165,7 @@ async function compileRecordings(recordingsDir) {
     }
 
     const listPath = path.join(recordingsDir, 'concat_list.txt');
-    
+
     files.sort((a, b) => {
         const numA = parseInt(a.split('_')[1]) || 0;
         const numB = parseInt(b.split('_')[1]) || 0;
@@ -1152,7 +1176,7 @@ async function compileRecordings(recordingsDir) {
         const absolutePath = path.resolve(recordingsDir, f);
         return "file '" + absolutePath.replace(/'/g, "'\\''") + "'";
     }).join('\n') + '\n';
-    
+
     fs.writeFileSync(listPath, listContent);
 
     return new Promise((resolve) => {
@@ -1169,7 +1193,7 @@ async function compileRecordings(recordingsDir) {
 
         const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', sessionPath];
         const proc = spawn(ffmpegPath, args);
-        
+
         let stderr = '';
         if (proc.stderr) proc.stderr.on('data', d => stderr += d);
 
@@ -1427,7 +1451,7 @@ async function startTesting() {
         const identifier = r.originalId || r.filename;
         const hash = crypto.createHash('md5').update(identifier).digest('hex');
         const outputFilename = hash + '.json';
-        
+
         const payload = {
             originalId: identifier,
             filename: outputFilename,
