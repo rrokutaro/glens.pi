@@ -35,12 +35,15 @@ Best for production pipelines connected to your scraped content database.
 2. *(Optional)* Go to **Actions → GLENS → Run workflow** and adjust:
    - `mongodb_db` — default `ugc-dropship`
    - `mongodb_collection` — default `scraped-posts`
+   - `mongodb_limit` — default `20` (max posts per run)
 
 3. The runner will:
-   - Query `{ reviewed: true }` from your collection
+   - Query `{ reviewed: true }` from your collection, capped at the limit
+   - Only return posts that have at least one file without a `response`
    - For **images**: send the URL directly through the pipeline
    - For **videos**: download the video, extract the specified frames, merge them vertically into one image, and send that through the pipeline
    - Write successful AI responses back to `file_urls[i].response` in MongoDB
+   - Skip files that already have a `response` (never overwrite existing data)
 
 ### 2. GitHub Actions — Manual Run (workflow_dispatch)
 Best for one-off runs or testing.
@@ -69,13 +72,18 @@ Best for triggering remotely from another service, script, or scheduler.
 Send a `POST` request to the GitHub Dispatches API:
 
 ```bash
-curl -X POST   -H "Accept: application/vnd.github+json"   -H "Authorization: token YOUR_PERSONAL_ACCESS_TOKEN"   https://api.github.com/repos/OWNER/REPO/dispatches   -d '{
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: token YOUR_PERSONAL_ACCESS_TOKEN" \
+  https://api.github.com/repos/OWNER/REPO/dispatches \
+  -d '{
     "event_type": "glens-run",
     "client_payload": {
       "image_urls": ["https://example.com/shoe1.jpg", "https://example.com/bag2.jpg"],
       "mongodb_uri": "mongodb+srv://...",
       "mongodb_db": "ugc-dropship",
       "mongodb_collection": "scraped-posts",
+      "mongodb_limit": "20",
       "hf_token": "hf_xxxxxxxx",
       "hf_repo": "yourname/ugc-dropship",
       "hf_path": "assets/glens-responses",
@@ -94,7 +102,9 @@ Best for development, debugging, or running on your own infrastructure.
 ```bash
 # 1. System deps (Ubuntu/Debian)
 sudo apt-get update
-sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0   libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1   libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
+sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 \
+  libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 \
+  libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
 
 # 2. Node deps
 npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb
@@ -112,6 +122,7 @@ export GLENS_BATCH_SIZE=3
 export GLENS_RECORDING=true
 # export GLENS_IMAGE_URLS='["https://i.imgur.com/abc.jpg"]'  # optional URL mode
 # export GLENS_MONGODB_URI='mongodb+srv://...'               # optional MongoDB mode
+# export GLENS_MONGODB_LIMIT=20                               # optional limit
 node glens.js
 ```
 
@@ -161,14 +172,14 @@ The pipeline expects documents in this shape (matching your scraped Instagram co
   "post_id": "p/ABC",
   "reviewed": true,
   "file_urls": [
-    { "url": "...", "type": "image", "response": "{"products":[...]}" },
+    { "url": "...", "type": "image", "response": "{\"products\":[...]}" },
     { "url": "...", "type": "image" },
-    { "url": "...", "type": "video", "frames": [3.32, 23.55, 45.33], "response": "{"products":[...]}" }
+    { "url": "...", "type": "video", "frames": [3.32, 23.55, 45.33], "response": "{\"products\":[...]}" }
   ]
 }
 ```
 
-Only successful files get the `response` field. Failed or blocked files are left untouched so you can retry later.
+Only successful files get the `response` field. Failed or blocked files are left untouched so you can retry later. Files that already have a response are **never** re-processed or overwritten.
 
 ---
 
@@ -210,6 +221,7 @@ All settings are controlled via environment variables:
 | `GLENS_MONGODB_URI` | `""` | MongoDB connection string. If set, pulls from DB and ignores local/URL inputs |
 | `GLENS_MONGODB_DB` | `ugc-dropship` | MongoDB database name |
 | `GLENS_MONGODB_COLLECTION` | `scraped-posts` | MongoDB collection name |
+| `GLENS_MONGODB_LIMIT` | `20` | Max posts to pull from MongoDB per run |
 | `GLENS_RUN_ID` | `""` | Optional CI run ID (auto-set in GitHub Actions) |
 
 ---
@@ -251,7 +263,7 @@ output/
       "filename": "image.jpg",
       "originalId": "image.jpg",
       "imageUrl": "https://litter.catbox.moe/...",
-      "response": "{"products":[...]}",
+      "response": "{\"products\":[...]}",
       "duration": 12345,
       "error": null,
       "timedOut": false,
@@ -291,12 +303,13 @@ The token is masked in GitHub Actions logs for security.
 
 ### MongoDB Mode
 When `GLENS_MONGODB_URI` is provided, the pipeline:
-1. Connects to MongoDB and queries `{ reviewed: true }`
+1. Connects to MongoDB and queries `{ reviewed: true }` with `$elemMatch` for files missing a response, capped at `GLENS_MONGODB_LIMIT` (default 20)
 2. For each `file_urls` entry:
    - **Image**: passes the URL directly into the pipeline
    - **Video**: downloads the MP4, uses `ffmpeg` to extract the specified frame timestamps, merges them vertically into a single JPG, and passes that merged image into the pipeline
 3. After all batches finish, iterates successful results and performs `$set: { "file_urls.N.response": "..." }` on the parent document
 4. Failed/blocked files are **not** updated, so you can retry them later
+5. Files that already have a `response` are **never** re-processed or overwritten
 
 ### Batch Processing & Global Block Detection
 Images are processed in parallel batches (default 3). If **any** image in a batch triggers a Google CAPTCHA or block page, the pipeline assumes the IP is burned and **skips all remaining batches** immediately. This prevents pointless retries and wasted runner minutes.
@@ -322,7 +335,7 @@ The script detects CAPTCHA, rate limits, and unusual-traffic pages by scanning r
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `No images found` | `images/` directory empty or wrong path; `GLENS_IMAGE_URLS` empty or malformed; MongoDB has no `reviewed: true` posts | Add images, pass URLs, or check MongoDB documents |
+| `No images found` | `images/` directory empty or wrong path; `GLENS_IMAGE_URLS` empty or malformed; MongoDB has no `reviewed: true` posts with unprocessed files | Add images, pass URLs, or check MongoDB documents |
 | `All uploads failed` | Upload services down/changed | Already handled by catbox.moe fallback |
 | `IP BLOCKED DETECTED` | Google flagged the runner IP | Wait and retry, or use a different runner/region |
 | `0 JSON` | Response didn't contain valid product data | Check `ai_responses.json` raw response for errors |
