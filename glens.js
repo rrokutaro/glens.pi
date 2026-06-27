@@ -61,8 +61,24 @@ const CONFIG = {
         db: process.env.GLENS_MONGODB_DB || 'ugc-dropship',
         collection: process.env.GLENS_MONGODB_COLLECTION || 'scraped-posts',
         limit: parseInt(process.env.GLENS_MONGODB_LIMIT || '20', 10),
+        // ── Distributed locking (multi-instance safety) ──
+        // lockTtlMs: how long a claim is valid with no heartbeat before another
+        //   worker is allowed to steal it (i.e. assume we died).
+        // heartbeatIntervalMs: how often we refresh our own locks while still
+        //   working, so we can keep lockTtlMs low (fast recovery from a dead
+        //   runner) without losing a lock mid-way through a slow video/image.
+        lockTtlMs: parseInt(process.env.GLENS_MONGODB_LOCK_TTL_MS || '90000', 10),
+        heartbeatIntervalMs: parseInt(process.env.GLENS_MONGODB_HEARTBEAT_MS || '30000', 10),
     },
 };
+
+// Unique identity for this process. GLENS_RUN_ID comes from the GitHub Actions
+// workflow (github.run_id), so all claims from one job share a prefix — but we
+// add a random suffix too, since matrix jobs / repository_dispatch fan-out can
+// share a run id, and a single workflow could still spin up more than one node
+// process. WORKER_ID is what gets written to `lockedBy`, so we only ever
+// release or extend locks that we ourselves currently hold.
+const WORKER_ID = (process.env.GLENS_RUN_ID || 'local') + '_' + crypto.randomBytes(6).toString('hex');
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 function log(level, ...args) {
@@ -410,6 +426,249 @@ async function processVideoFrames(videoUrl, frames, name) {
     return mergedPath;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MONGODB DISTRIBUTED LOCKING (file-level)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Multiple GLENS instances can run concurrently (e.g. to get IP rotation across
+// GitHub Actions runners). Without locking, every instance's plain find() would
+// see the same "reviewed, unprocessed" posts and reprocess them in parallel —
+// duplicate uploads, duplicate model calls, and last-write-wins clobbering on
+// the `response` field.
+//
+// Locking happens at the FILE level (file_urls[i]), not the post level. A post
+// can have several unprocessed files, and we want those spread across workers
+// for max parallelism (that's the whole point of running multiple instances
+// for IP rotation) — locking the whole post would let one worker hog every
+// file in it while other workers sit idle with nothing left to claim.
+//
+// Each file_urls[i] element gets its own lockedBy/lockedAt/lockExpiresAt. A
+// file is claimable if it has no response, AND (no lock OR an expired lock).
+// The lock auto-expires (lockExpiresAt) so a killed runner doesn't permanently
+// orphan a file — but while a worker is alive and still working on it, it
+// extends its own locks periodically via a heartbeat, so lockTtlMs can stay
+// short (fast recovery) without the lock dying mid-video/image.
+//
+// Mongo can't atomically claim "exactly one array element across many
+// documents" in a single call the way findOneAndUpdate claims a whole
+// document — arrayFilters apply the update to every element in a document
+// that matches, which would claim every free file in a post at once. So we
+// do it in two atomic steps per claim:
+//   1) findOneAndUpdate with an $elemMatch filter just to atomically reserve
+//      the *document* (this only proves the doc has a single specific
+//      claimable file b/c we filter by exact index in step 2 below).
+//   2) Actually, simpler and fully correct: filter for a document that has a
+//      file at a SPECIFIC index claimable, using "file_urls.<i>.response"
+//      dot-path + "file_urls.<i>.lockedBy" dot-path directly in the filter,
+//      and $set the same dot-path in the update — both reference the exact
+//      same array index, so the whole find+update is one atomic operation
+//      per file, same as the original post-level version, just addressed by
+//      index instead of by document. We loop candidate (doc, index) pairs.
+
+function nowPlusMs(ms) {
+    return new Date(Date.now() + ms);
+}
+
+/**
+ * Look at posts that might have claimable files, and return a flat list of
+ * (docId, fileIndex) candidates to try claiming. This is a plain read (not
+ * atomic) — it's only used to discover *candidates*; the actual claim in
+ * claimFiles() is what's atomic, so seeing a stale candidate here just means
+ * the claim attempt below fails/no-ops and we move on. Over-fetching a bit
+ * (limit * 3 posts) gives us enough candidate files to reach `limit` even
+ * after some lose the race to other workers.
+ */
+async function findCandidatePosts(collection, fetchLimit) {
+    const now = new Date();
+    return collection
+        .find({
+            reviewed: true,
+            file_urls: {
+                $elemMatch: {
+                    $and: [
+                        { $or: [{ response: { $exists: false } }, { response: null }] },
+                        { $or: [{ lockedBy: { $exists: false } }, { lockedBy: null }, { lockExpiresAt: { $lt: now } }] }
+                    ]
+                }
+            }
+        })
+        .limit(fetchLimit)
+        .toArray();
+}
+
+/**
+ * Atomically claim up to `limit` individual FILES (not posts) across
+ * multiple documents. Returns an array of { post, fileIndex, file } for
+ * everything this worker successfully claimed.
+ *
+ * Each claim attempt targets one exact (docId, fileIndex) pair using the
+ * dot-path in both the filter and the update — e.g.
+ *   filter: { _id, "file_urls.3.response": null, "file_urls.3.lockedBy": null }
+ *   update: { $set: { "file_urls.3.lockedBy": WORKER_ID, ... } }
+ * That filter+update pair on the same exact path is what makes the claim
+ * atomic per file: if another worker already claimed file[3] on that doc,
+ * the filter no longer matches and our update simply does nothing.
+ */
+async function claimFiles(collection, limit) {
+    const now = new Date();
+    const claimed = [];
+    const seenDocIds = new Set();
+
+    // Over-fetch candidate posts so we have enough free files to try for
+    // even if several are lost to other workers between read and claim.
+    const candidatePosts = await findCandidatePosts(collection, limit * 3 + 5);
+
+    outer:
+    for (const post of candidatePosts) {
+        if (!Array.isArray(post.file_urls)) continue;
+
+        for (let i = 0; i < post.file_urls.length; i++) {
+            if (claimed.length >= limit) break outer;
+
+            const file = post.file_urls[i];
+            if (!file || !file.url) continue;
+            if (file.response) continue; // already done
+
+            const filter = {
+                _id: post._id,
+                [`file_urls.${i}.response`]: { $in: [null, undefined] },
+                $or: [
+                    { [`file_urls.${i}.lockedBy`]: { $exists: false } },
+                    { [`file_urls.${i}.lockedBy`]: null },
+                    { [`file_urls.${i}.lockExpiresAt`]: { $lt: now } },
+                ],
+            };
+
+            const update = {
+                $set: {
+                    [`file_urls.${i}.lockedBy`]: WORKER_ID,
+                    [`file_urls.${i}.lockedAt`]: now,
+                    [`file_urls.${i}.lockExpiresAt`]: nowPlusMs(CONFIG.mongodb.lockTtlMs),
+                },
+            };
+
+            let result;
+            try {
+                result = await collection.findOneAndUpdate(filter, update, { returnDocument: 'after' });
+            } catch (e) {
+                log('warn', `Claim attempt failed for ${post._id} file[${i}]: ${e.message}`);
+                continue;
+            }
+
+            // Driver version differences: some return the doc directly, some
+            // wrap it in { value }.
+            const doc = result && result.value !== undefined ? result.value : result;
+            if (!doc) continue; // someone else claimed it first — filter no longer matched
+
+            claimed.push({ post: doc, fileIndex: i, file: doc.file_urls[i] });
+            seenDocIds.add(String(post._id));
+        }
+    }
+
+    return claimed;
+}
+
+/**
+ * Refresh (extend) the lock expiry for files we're actively working on.
+ * Only extends locks that are still ours (lockedBy === WORKER_ID) — if for
+ * any reason our lock got stolen (e.g. clock skew + expiry), this becomes a
+ * no-op for that file instead of clobbering someone else's claim.
+ */
+async function heartbeatLocks(collection, claims) {
+    if (!claims || claims.length === 0) return;
+    try {
+        const ops = claims.map(({ post, fileIndex }) => ({
+            updateOne: {
+                filter: { _id: post._id, [`file_urls.${fileIndex}.lockedBy`]: WORKER_ID },
+                update: { $set: { [`file_urls.${fileIndex}.lockExpiresAt`]: nowPlusMs(CONFIG.mongodb.lockTtlMs) } },
+            },
+        }));
+        await collection.bulkWrite(ops, { ordered: false });
+        log('debug', `Heartbeat: extended lock on ${claims.length} file(s)`);
+    } catch (e) {
+        log('warn', 'Heartbeat failed: ' + e.message);
+    }
+}
+
+/**
+ * Release our lock on files we're done with (success or failure). Successful
+ * files also get `response` set elsewhere, which removes them from future
+ * claim filters anyway — but we still clear the lock fields so the doc isn't
+ * left in a locked-looking state, and so failed/skipped files (no response
+ * written) become immediately reclaimable instead of waiting out the TTL.
+ */
+async function releaseLocks(collection, claims) {
+    if (!claims || claims.length === 0) return;
+    try {
+        const ops = claims.map(({ post, fileIndex }) => ({
+            updateOne: {
+                filter: { _id: post._id, [`file_urls.${fileIndex}.lockedBy`]: WORKER_ID },
+                update: {
+                    $unset: {
+                        [`file_urls.${fileIndex}.lockedBy`]: '',
+                        [`file_urls.${fileIndex}.lockedAt`]: '',
+                        [`file_urls.${fileIndex}.lockExpiresAt`]: '',
+                    },
+                },
+            },
+        }));
+        await collection.bulkWrite(ops, { ordered: false });
+        log('debug', `Released lock on ${claims.length} file(s)`);
+    } catch (e) {
+        log('warn', 'Lock release failed: ' + e.message);
+    }
+}
+
+// Shared state so the heartbeat timer, the final MongoDB update phase, and
+// the shutdown/error handlers can all see the same open connection + claimed
+// (docId, fileIndex) pairs without threading them through every function
+// signature.
+const mongoLockState = {
+    client: null,
+    collection: null,
+    claimedFiles: [], // [{ post, fileIndex, file }]
+    heartbeatTimer: null,
+};
+
+function startLockHeartbeat() {
+    if (mongoLockState.heartbeatTimer) return; // already running
+    if (!mongoLockState.claimedFiles.length) return; // nothing to keep alive
+    mongoLockState.heartbeatTimer = setInterval(() => {
+        heartbeatLocks(mongoLockState.collection, mongoLockState.claimedFiles);
+    }, CONFIG.mongodb.heartbeatIntervalMs);
+    // Don't let this timer keep the process alive on its own.
+    if (mongoLockState.heartbeatTimer.unref) mongoLockState.heartbeatTimer.unref();
+}
+
+function stopLockHeartbeat() {
+    if (mongoLockState.heartbeatTimer) {
+        clearInterval(mongoLockState.heartbeatTimer);
+        mongoLockState.heartbeatTimer = null;
+    }
+}
+
+/**
+ * Release all of this worker's claimed file-locks and close the shared
+ * connection. Safe to call multiple times. Used both at the end of the
+ * normal flow and from shutdown/fatal-error handlers so a killed/cancelled
+ * run doesn't leave other instances waiting out the full lock TTL.
+ */
+async function releaseAllLocksAndClose() {
+    stopLockHeartbeat();
+    if (!mongoLockState.client) return;
+    try {
+        if (mongoLockState.claimedFiles.length > 0) {
+            await releaseLocks(mongoLockState.collection, mongoLockState.claimedFiles);
+        }
+        await mongoLockState.client.close();
+    } catch (e) {
+        log('warn', 'releaseAllLocksAndClose: ' + e.message);
+    } finally {
+        mongoLockState.client = null;
+        mongoLockState.collection = null;
+        mongoLockState.claimedFiles = [];
+    }
+}
+
 async function fetchFromMongoDB() {
     const { MongoClient } = await import('mongodb');
     const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 10000 });
@@ -418,95 +677,71 @@ async function fetchFromMongoDB() {
     const collection = db.collection(CONFIG.mongodb.collection);
 
     log('info', `MongoDB: querying ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection} for reviewed posts (limit: ${CONFIG.mongodb.limit})...`);
+    log('info', `MongoDB: worker id ${WORKER_ID} | lock TTL ${CONFIG.mongodb.lockTtlMs}ms | heartbeat ${CONFIG.mongodb.heartbeatIntervalMs}ms`);
 
-    const posts = await collection
-        .find({
-            reviewed: true,
-            file_urls: {
-                $elemMatch: {
-                    $or: [
-                        { response: { $exists: false } },
-                        { response: null }
-                    ]
-                }
-            }
-        })
-        .limit(CONFIG.mongodb.limit)
-        .toArray();
+    const claims = await claimFiles(collection, CONFIG.mongodb.limit);
 
-    log('info', `MongoDB: found ${posts.length} post(s) with unprocessed files`);
+    log('info', `MongoDB: claimed ${claims.length} file(s) across ${new Set(claims.map(c => String(c.post._id))).size} post(s)`);
+
+    // Keep the client + claimed file refs around globally so heartbeat/release
+    // can run from the main flow (between claiming and the final MongoDB
+    // update phase) and from shutdown/error handlers.
+    mongoLockState.client = client;
+    mongoLockState.collection = collection;
+    mongoLockState.claimedFiles = claims;
+    startLockHeartbeat();
 
     const imagePaths = [];
     let imageCount = 0;
     let videoCount = 0;
     let skipCount = 0;
-    let alreadyHasResponse = 0;
 
-    for (const post of posts) {
-        if (!post.file_urls || !Array.isArray(post.file_urls)) {
-            skipCount++;
-            continue;
-        }
+    for (const { post, fileIndex: i, file } of claims) {
+        const meta = {
+            docId: post._id,
+            postId: post.post_id || post._id.toString(),
+            fileIndex: i,
+            originalUrl: file.url,
+            type: file.type || 'unknown'
+        };
 
-        for (let i = 0; i < post.file_urls.length; i++) {
-            const file = post.file_urls[i];
-            if (!file || !file.url) {
-                skipCount++;
-                continue;
-            }
-
-            // ── SKIP files that already have a response ──
-            if (file.response) {
-                alreadyHasResponse++;
-                log('debug', `Skipping ${post.post_id || post._id} file[${i}] — already has response`);
-                continue;
-            }
-
-            const meta = {
-                docId: post._id,
-                postId: post.post_id || post._id.toString(),
-                fileIndex: i,
-                originalUrl: file.url,
-                type: file.type || 'unknown'
-            };
-
-            try {
-                if (file.type === 'image') {
-                    const urlObj = new URL(file.url);
-                    const basename = path.basename(urlObj.pathname) || 'image.jpg';
-                    imagePaths.push({
-                        type: 'url',
-                        url: file.url,
-                        filename: `mongo_${meta.postId}_${i}_${basename}`,
-                        mongoMeta: meta
-                    });
-                    imageCount++;
-                } else if (file.type === 'video') {
-                    if (!Array.isArray(file.frames) || file.frames.length === 0) {
-                        log('warn', `Video ${meta.postId} file[${i}] has no frames, skipping`);
-                        skipCount++;
-                        continue;
-                    }
-                    const mergedPath = await processVideoFrames(file.url, file.frames, `${meta.postId}_${i}`);
-                    imagePaths.push({
-                        type: 'local',
-                        originalPath: mergedPath,
-                        filename: `mongo_${meta.postId}_${i}_merged.jpg`,
-                        mongoMeta: meta
-                    });
-                    videoCount++;
-                } else {
+        try {
+            if (file.type === 'image') {
+                const urlObj = new URL(file.url);
+                const basename = path.basename(urlObj.pathname) || 'image.jpg';
+                imagePaths.push({
+                    type: 'url',
+                    url: file.url,
+                    filename: `mongo_${meta.postId}_${i}_${basename}`,
+                    mongoMeta: meta
+                });
+                imageCount++;
+            } else if (file.type === 'video') {
+                if (!Array.isArray(file.frames) || file.frames.length === 0) {
+                    log('warn', `Video ${meta.postId} file[${i}] has no frames, skipping`);
                     skipCount++;
+                    continue;
                 }
-            } catch (e) {
-                log('warn', `Failed to process ${meta.postId} file[${i}]: ${e.message.slice(0, 100)}`);
+                const mergedPath = await processVideoFrames(file.url, file.frames, `${meta.postId}_${i}`);
+                imagePaths.push({
+                    type: 'local',
+                    originalPath: mergedPath,
+                    filename: `mongo_${meta.postId}_${i}_merged.jpg`,
+                    mongoMeta: meta
+                });
+                videoCount++;
+            } else {
                 skipCount++;
             }
+        } catch (e) {
+            log('warn', `Failed to process ${meta.postId} file[${i}]: ${e.message.slice(0, 100)}`);
+            skipCount++;
         }
     }
 
-    await client.close();
-    log('info', `MongoDB: ${imageCount} image(s), ${videoCount} video(s), ${skipCount} skipped, ${alreadyHasResponse} already-responded`);
+    log('info', `MongoDB: ${imageCount} image(s), ${videoCount} video(s), ${skipCount} skipped`);
+    // NOTE: client is intentionally left open here (closed later, after the
+    // final update + release phase) — see mongoLockState.
     return imagePaths;
 }
 
@@ -1241,6 +1476,9 @@ async function gracefulShutdown(sig) {
             } catch(e) {}
         }
     }
+    // Release any MongoDB locks we're holding so other instances don't have
+    // to wait out the full lock TTL just because this one got cancelled.
+    await releaseAllLocksAndClose();
     cleanupTempImages();
     process.exit(0);
 }
@@ -1372,14 +1610,29 @@ async function startTesting() {
         }
     }
 
-    // ── Update MongoDB with successful responses ──
+    // ── Update MongoDB with successful responses, then release all locks ──
     if (CONFIG.mongodb.uri) {
         try {
-            const { MongoClient } = await import('mongodb');
-            const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 10000 });
-            await client.connect();
-            const db = client.db(CONFIG.mongodb.db);
-            const collection = db.collection(CONFIG.mongodb.collection);
+            // Reuse the connection opened during claiming (mongoLockState) so
+            // we don't pay for a second connect, and so the lock-release at
+            // the end happens against the same client. If for some reason it
+            // isn't open (e.g. fetchFromMongoDB was never called), fall back
+            // to opening one here.
+            let collection = mongoLockState.collection;
+            let ownClient = false;
+            if (!collection) {
+                const { MongoClient } = await import('mongodb');
+                const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 10000 });
+                await client.connect();
+                collection = client.db(CONFIG.mongodb.db).collection(CONFIG.mongodb.collection);
+                mongoLockState.client = client;
+                mongoLockState.collection = collection;
+                ownClient = true;
+            }
+
+            // Heartbeat off — we're about to do the final writes + release,
+            // no need to keep extending leases mid-shutdown.
+            stopLockHeartbeat();
 
             let updatedCount = 0;
             for (const r of allResults) {
@@ -1396,10 +1649,28 @@ async function startTesting() {
                     }
                 }
             }
-            await client.close();
             log('info', `MongoDB: Updated ${updatedCount} file(s) with responses`);
+
+            // Release every file we claimed this run — successful, failed,
+            // or skipped-due-to-block alike — so they're immediately
+            // reclaimable by another instance instead of waiting out the
+            // lock TTL. (Files that did get a `response` written above are
+            // already excluded from future claim filters regardless, but we
+            // still want the lock fields cleared for a clean doc state.)
+            await releaseLocks(collection, mongoLockState.claimedFiles);
+
+            if (ownClient) {
+                await mongoLockState.client.close();
+                mongoLockState.client = null;
+                mongoLockState.collection = null;
+            }
+            mongoLockState.claimedFiles = [];
         } catch (e) {
             log('error', 'MongoDB update phase failed: ' + e.message);
+        } finally {
+            // Belt-and-suspenders: make sure we don't leave a dangling
+            // connection open even if something above threw.
+            await releaseAllLocksAndClose();
         }
     }
 
@@ -1499,6 +1770,10 @@ startTesting().catch(err => {
             }
         }, 5000);
     }
-    cleanupTempImages();
-    process.exit(1);
+    // Best-effort: free up any claimed files so other instances don't have
+    // to wait out the full lock TTL after a fatal crash.
+    releaseAllLocksAndClose().catch(() => {}).finally(() => {
+        cleanupTempImages();
+        process.exit(1);
+    });
 });
