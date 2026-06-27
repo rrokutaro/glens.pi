@@ -7,6 +7,18 @@ on:
         description: 'JSON array of image URLs (e.g., ["https://i.imgur.com/abc.jpg"])'
         required: false
         default: ''
+      mongodb_uri:
+        description: 'MongoDB URI (or leave empty to use secrets.GLENS_MONGODB_URI)'
+        required: false
+        default: ''
+      mongodb_db:
+        description: 'MongoDB database name'
+        required: false
+        default: 'ugc-dropship'
+      mongodb_collection:
+        description: 'MongoDB collection name'
+        required: false
+        default: 'scraped-posts'
       hf_token:
         description: 'HuggingFace token for uploading results'
         required: false
@@ -48,7 +60,7 @@ jobs:
         sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
 
     - name: Install npm dependencies
-      run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp
+      run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb
 
     - name: Install CloakBrowser Chromium binary
       run: npx cloakbrowser install
@@ -62,7 +74,7 @@ jobs:
         fi
 
     - name: Verify images exist (local mode only)
-      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_urls == '' }}
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.image_urls == '' && github.event.inputs.mongodb_uri == ''
       run: |
         mkdir -p images
         if [ "$(ls -A images 2>/dev/null)" ]; then
@@ -70,11 +82,11 @@ jobs:
           ls -la images/
         else
           echo "WARNING: No images in ./images/ directory. The script will fail."
-          echo "Add your images to an 'images/' folder in your repo, or pass image_urls."
+          echo "Add your images to an 'images/' folder in your repo, or pass image_urls / mongodb_uri."
         fi
 
     - name: Mask HF token
-      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '' }}
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != ''
       env:
         TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
       run: echo "::add-mask::$TOKEN_TO_MASK"
@@ -110,11 +122,14 @@ jobs:
         GLENS_NAV_WAIT: domcontentloaded
         GLENS_LOG_LEVEL: info
         GLENS_IMAGE_URLS: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.image_urls) || github.event.inputs.image_urls || '' }}
+        GLENS_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri || secrets.GLENS_MONGODB_URI || '' }}
+        GLENS_MONGODB_DB: ${{ github.event.inputs.mongodb_db || github.event.client_payload.mongodb_db || 'ugc-dropship' }}
+        GLENS_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || github.event.client_payload.mongodb_collection || 'scraped-posts' }}
         GLENS_RUN_ID: ${{ github.run_id }}
       run: node glens.js
 
     - name: Upload successful results to HuggingFace
-      if: ${{ always() && (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '') }}
+      if: always() && (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '')
       env:
         HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
         HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'hfusername/ugc-dropship' }}
