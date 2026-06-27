@@ -56,6 +56,11 @@ const CONFIG = {
         navWaitUntil: process.env.GLENS_NAV_WAIT || 'domcontentloaded',
     },
     logLevel: process.env.GLENS_LOG_LEVEL || 'info',
+    mongodb: {
+        uri: process.env.GLENS_MONGODB_URI || '',
+        db: process.env.GLENS_MONGODB_DB || 'ugc-dropship',
+        collection: process.env.GLENS_MONGODB_COLLECTION || 'scraped-posts',
+    },
 };
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -339,6 +344,149 @@ const TMP_DIR = path.join(process.cwd(), 'tmp_resized');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  MONGODB + VIDEO FRAME HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+async function processVideoFrames(videoUrl, frames, name) {
+    const safeName = name.replace(/[^a-z0-9_-]/gi, '_');
+    const videoPath = path.join(TMP_DIR, `vid_${safeName}.mp4`);
+    const framesDir = path.join(TMP_DIR, `frames_${safeName}`);
+    fs.mkdirSync(framesDir, { recursive: true });
+
+    log('debug', `Downloading video for ${safeName}...`);
+    const resp = await fetch(videoUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} for video ${videoUrl.slice(0, 60)}`);
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(videoPath, buffer);
+    log('debug', `Video ${safeName}: ${(buffer.length / 1024 / 1024).toFixed(1)}MB`);
+
+    const framePaths = [];
+    for (let i = 0; i < frames.length; i++) {
+        const ts = frames[i];
+        const outFrame = path.join(framesDir, `frame_${i}.jpg`);
+        const cmd = `ffmpeg -y -ss ${ts} -i "${videoPath}" -vframes 1 -q:v 2 "${outFrame}"`;
+        try {
+            execSync(cmd, { stdio: 'ignore', timeout: 30000 });
+            if (fs.existsSync(outFrame)) {
+                framePaths.push(outFrame);
+            } else {
+                log('warn', `Frame ${i} at ${ts}s not created for ${safeName}`);
+            }
+        } catch (e) {
+            log('warn', `Frame extraction failed for ${safeName} at ${ts}s: ${e.message.slice(0, 100)}`);
+        }
+    }
+
+    if (framePaths.length === 0) {
+        fs.unlinkSync(videoPath);
+        fs.rmdirSync(framesDir);
+        throw new Error(`No frames extracted for ${safeName}`);
+    }
+
+    const mergedPath = path.join(TMP_DIR, `merged_${safeName}.jpg`);
+    if (framePaths.length === 1) {
+        fs.copyFileSync(framePaths[0], mergedPath);
+    } else {
+        const inputs = framePaths.map((p, i) => `-i "${p}"`).join(' ');
+        const filter = framePaths.map((_, i) => `[${i}:v]`).join('') + `vstack=inputs=${framePaths.length}`;
+        const cmd = `ffmpeg -y ${inputs} -filter_complex "${filter}" -frames:v 1 "${mergedPath}"`;
+        try {
+            execSync(cmd, { stdio: 'ignore', timeout: 60000 });
+            if (!fs.existsSync(mergedPath)) throw new Error('ffmpeg did not create merged image');
+        } catch (e) {
+            for (const fp of framePaths) try { fs.unlinkSync(fp); } catch(e) {}
+            fs.unlinkSync(videoPath);
+            fs.rmdirSync(framesDir);
+            throw new Error(`Frame merge failed: ${e.message}`);
+        }
+    }
+
+    try {
+        fs.unlinkSync(videoPath);
+        for (const fp of framePaths) fs.unlinkSync(fp);
+        fs.rmdirSync(framesDir);
+    } catch (e) { /* ignore cleanup errors */ }
+
+    return mergedPath;
+}
+
+async function fetchFromMongoDB() {
+    const { MongoClient } = await import('mongodb');
+    const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 10000 });
+    await client.connect();
+    const db = client.db(CONFIG.mongodb.db);
+    const collection = db.collection(CONFIG.mongodb.collection);
+
+    log('info', `MongoDB: querying ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection} for reviewed posts...`);
+    const posts = await collection.find({ reviewed: true }).toArray();
+    log('info', `MongoDB: found ${posts.length} reviewed post(s)`);
+
+    const imagePaths = [];
+    let imageCount = 0;
+    let videoCount = 0;
+    let skipCount = 0;
+
+    for (const post of posts) {
+        if (!post.file_urls || !Array.isArray(post.file_urls)) {
+            skipCount++;
+            continue;
+        }
+
+        for (let i = 0; i < post.file_urls.length; i++) {
+            const file = post.file_urls[i];
+            if (!file || !file.url) {
+                skipCount++;
+                continue;
+            }
+
+            const meta = {
+                docId: post._id,
+                postId: post.post_id || post._id.toString(),
+                fileIndex: i,
+                originalUrl: file.url,
+                type: file.type || 'unknown'
+            };
+
+            try {
+                if (file.type === 'image') {
+                    const urlObj = new URL(file.url);
+                    const basename = path.basename(urlObj.pathname) || 'image.jpg';
+                    imagePaths.push({
+                        type: 'url',
+                        url: file.url,
+                        filename: `mongo_${meta.postId}_${i}_${basename}`,
+                        mongoMeta: meta
+                    });
+                    imageCount++;
+                } else if (file.type === 'video') {
+                    if (!Array.isArray(file.frames) || file.frames.length === 0) {
+                        log('warn', `Video ${meta.postId} file[${i}] has no frames, skipping`);
+                        skipCount++;
+                        continue;
+                    }
+                    const mergedPath = await processVideoFrames(file.url, file.frames, `${meta.postId}_${i}`);
+                    imagePaths.push({
+                        type: 'local',
+                        originalPath: mergedPath,
+                        filename: `mongo_${meta.postId}_${i}_merged.jpg`,
+                        mongoMeta: meta
+                    });
+                    videoCount++;
+                } else {
+                    skipCount++;
+                }
+            } catch (e) {
+                log('warn', `Failed to process ${meta.postId} file[${i}]: ${e.message.slice(0, 100)}`);
+                skipCount++;
+            }
+        }
+    }
+
+    await client.close();
+    log('info', `MongoDB: ${imageCount} image(s), ${videoCount} video(s), ${skipCount} skipped`);
+    return imagePaths;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  IMAGE DISCOVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 const IMAGE_DIR_CANDIDATES = [
@@ -351,39 +499,41 @@ const IMAGE_DIR_CANDIDATES = [
 let IMAGE_PATHS = [];
 const ENV_URLS = process.env.GLENS_IMAGE_URLS;
 
-if (ENV_URLS && ENV_URLS.trim()) {
-    try {
-        const parsed = JSON.parse(ENV_URLS);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-            IMAGE_PATHS = parsed.map((url, i) => {
-                let basename = 'image.jpg';
-                try { basename = path.basename(new URL(url).pathname); } catch(e) {}
-                return {
-                    type: 'url',
-                    url: url,
-                    filename: 'url_' + i + '_' + basename
-                };
-            });
-            log('info', 'Using ' + parsed.length + ' provided URL(s)');
-        } else {
-            throw new Error('Empty or non-array');
+if (!CONFIG.mongodb.uri) {
+    if (ENV_URLS && ENV_URLS.trim()) {
+        try {
+            const parsed = JSON.parse(ENV_URLS);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                IMAGE_PATHS = parsed.map((url, i) => {
+                    let basename = 'image.jpg';
+                    try { basename = path.basename(new URL(url).pathname); } catch(e) {}
+                    return {
+                        type: 'url',
+                        url: url,
+                        filename: 'url_' + i + '_' + basename
+                    };
+                });
+                log('info', 'Using ' + parsed.length + ' provided URL(s)');
+            } else {
+                throw new Error('Empty or non-array');
+            }
+        } catch (e) {
+            log('error', 'GLENS_IMAGE_URLS must be a JSON array of strings. ' + e.message);
+            process.exit(1);
         }
-    } catch (e) {
-        log('error', 'GLENS_IMAGE_URLS must be a JSON array of strings. ' + e.message);
-        process.exit(1);
-    }
-} else {
-    for (const dir of IMAGE_DIR_CANDIDATES) {
-        if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir)
-                .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
-                .map(f => path.join(dir, f));
-            if (files.length > 0) { IMAGE_PATHS = files; log('info', 'Found ' + files.length + ' image(s)'); break; }
+    } else {
+        for (const dir of IMAGE_DIR_CANDIDATES) {
+            if (fs.existsSync(dir)) {
+                const files = fs.readdirSync(dir)
+                    .filter(f => /\.(png|jpg|jpe?g|gif|webp|bmp)$/i.test(f))
+                    .map(f => path.join(dir, f));
+                if (files.length > 0) { IMAGE_PATHS = files; log('info', 'Found ' + files.length + ' image(s)'); break; }
+            }
         }
     }
 }
 
-if (IMAGE_PATHS.length === 0) {
+if (IMAGE_PATHS.length === 0 && !CONFIG.mongodb.uri) {
     log('error', 'No images found');
     process.exit(1);
 }
@@ -458,10 +608,34 @@ function getVisibleTextDeep(root) {
 //  IMAGE RESIZE
 // ═══════════════════════════════════════════════════════════════════════════════
 async function resizeImage(imgPathOrInfo) {
+    const baseMeta = (typeof imgPathOrInfo === 'object' && imgPathOrInfo.mongoMeta)
+        ? { mongoMeta: imgPathOrInfo.mongoMeta }
+        : {};
+
     if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'url') {
-        imgPathOrInfo.originalId = imgPathOrInfo.url;
-        return imgPathOrInfo;
+        return { ...imgPathOrInfo, originalId: imgPathOrInfo.url, ...baseMeta };
     }
+
+    if (typeof imgPathOrInfo === 'object' && imgPathOrInfo.type === 'local') {
+        const imgPath = imgPathOrInfo.originalPath;
+        const filename = imgPathOrInfo.filename || path.basename(imgPath);
+        const outFilename = 'rsz_' + filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const outPath = path.join(TMP_DIR, outFilename);
+        try {
+            const meta = await sharp(imgPath).metadata();
+            const needs = meta.width > CONFIG.image.maxDimension || meta.height > CONFIG.image.maxDimension;
+            const pipeline = needs
+                ? sharp(imgPath).resize(CONFIG.image.maxDimension, CONFIG.image.maxDimension, { fit: 'inside', withoutEnlargargement: true })
+                : sharp(imgPath);
+            await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
+            log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
+            return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename, originalId: filename, ...baseMeta };
+        } catch (e) {
+            log('warn', 'Resize fail ' + filename + ': ' + e.message + '. Using original.');
+            return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename, originalId: filename, ...baseMeta };
+        }
+    }
+
     const imgPath = imgPathOrInfo;
     const filename = path.basename(imgPath, path.extname(imgPath)) + '.jpg';
     const outPath = path.join(TMP_DIR, filename);
@@ -474,10 +648,10 @@ async function resizeImage(imgPathOrInfo) {
             : sharp(imgPath);
         await pipeline.jpeg({ quality: CONFIG.image.quality, progressive: true }).toFile(outPath);
         log('debug', filename + ': ' + (fs.statSync(imgPath).size / 1024).toFixed(0) + 'KB -> ' + (fs.statSync(outPath).size / 1024).toFixed(0) + 'KB');
-        return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename, originalId };
+        return { type: 'local', originalPath: imgPath, resizedPath: outPath, filename, originalId, ...baseMeta };
     } catch (e) {
         log('warn', 'Resize fail ' + filename + ': ' + e.message + '. Using original.');
-        return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename, originalId };
+        return { type: 'local', originalPath: imgPath, resizedPath: imgPath, filename, originalId, ...baseMeta };
     }
 }
 
@@ -550,7 +724,6 @@ function buildPrompt(imageUrl) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function isRealProductData(s) {
     if (!s || !s.includes('"products"')) return false;
-    // Disqualify the literal schema template (which has literal "string" fields)
     if (s.includes('"title":"string"') || s.includes('"brand":"string"')) return false;
     return /"url":"https?:\/\//.test(s) || /"current":"[^"]*\d/.test(s) || /"brand":"(?!string)[^"]+"/.test(s);
 }
@@ -574,7 +747,6 @@ function extractBalancedJson(text, start) {
 function extractJsonFromText(text) {
     if (!text || text.length < 10) return null;
     
-    // 1. Isolate the AI's actual response area to ignore the prompt entirely
     let searchArea = text;
     const promptMarker = 'Heres the image URL:';
     const promptIdx = text.lastIndexOf(promptMarker);
@@ -585,7 +757,6 @@ function extractJsonFromText(text) {
         }
     }
 
-    // 2. Try perfectly balanced extraction first
     for (const sig of ['{"products":[', '{"products": [']) {
         let pos = 0;
         while ((pos = searchArea.indexOf(sig, pos)) !== -1) {
@@ -602,8 +773,6 @@ function extractJsonFromText(text) {
         pos++;
     }
 
-    // 3. Robust Fallback for when the AI hallucinates bad syntax (e.g. extra braces)
-    // Simply grab everything from the first `{` to the last `}` in the response area.
     const firstBrace = searchArea.indexOf('{');
     const lastBrace = searchArea.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -784,7 +953,11 @@ async function processImageStandard(browser, imageInfo, index, total) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
             }
 
-            return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
+            return {
+                filename, originalId: imageInfo.originalId, imageUrl, response: resp.text,
+                html: resp.html, duration: Date.now() - t0, error: null, timedOut: false,
+                jsonExtracted: resp.jsonExtracted, mongoMeta: imageInfo.mongoMeta || null
+            };
         } finally {
             if (recorder) {
                 await recorder.stop();
@@ -798,7 +971,11 @@ async function processImageStandard(browser, imageInfo, index, total) {
             activeRecorders.delete(recorder);
         }
         log('error', 'Fail ' + filename + ': ' + err.message);
-        return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
+        return {
+            filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '',
+            duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false,
+            mongoMeta: imageInfo.mongoMeta || null
+        };
     }
 }
 
@@ -884,7 +1061,11 @@ async function processImageLens(browser, imageInfo, index, total) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
             }
 
-            return { filename, originalId: imageInfo.originalId, imageUrl, response: resp.text, html: resp.html, duration: Date.now() - t0, error: null, timedOut: false, jsonExtracted: resp.jsonExtracted };
+            return {
+                filename, originalId: imageInfo.originalId, imageUrl, response: resp.text,
+                html: resp.html, duration: Date.now() - t0, error: null, timedOut: false,
+                jsonExtracted: resp.jsonExtracted, mongoMeta: imageInfo.mongoMeta || null
+            };
         } finally {
             if (recorder) {
                 await recorder.stop();
@@ -898,7 +1079,11 @@ async function processImageLens(browser, imageInfo, index, total) {
             activeRecorders.delete(recorder);
         }
         log('error', 'Fail ' + filename + ': ' + err.message);
-        return { filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '', duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false };
+        return {
+            filename, originalId: imageInfo.originalId, imageUrl: null, response: '', html: '',
+            duration: Date.now() - t0, error: err.message, timedOut: false, jsonExtracted: false,
+            mongoMeta: imageInfo.mongoMeta || null
+        };
     }
 }
 
@@ -957,14 +1142,12 @@ async function compileRecordings(recordingsDir) {
 
     const listPath = path.join(recordingsDir, 'concat_list.txt');
     
-    // Sort videos by the index (e.g., lens_1_xxx.mp4, lens_2_xxx.mp4) to stitch them sequentially
     files.sort((a, b) => {
         const numA = parseInt(a.split('_')[1]) || 0;
         const numB = parseInt(b.split('_')[1]) || 0;
         return numA - numB;
     });
 
-    // CRITICAL FIX: Use absolutely resolved, fully escaped paths to prevent ffmpeg silent failure
     const listContent = files.map(f => {
         const absolutePath = path.resolve(recordingsDir, f);
         return "file '" + absolutePath.replace(/'/g, "'\\''") + "'";
@@ -1053,6 +1236,16 @@ async function startTesting() {
     log('info', 'Recording: ' + (CONFIG.recording.enabled ? 'ON' : 'OFF') + ' | ' + CONFIG.recording.fps + 'fps | ' + CONFIG.recording.resolution);
     log('info', 'CPUs: ' + os.cpus().length + ' | Mem: ' + (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) + 'GB');
 
+    if (CONFIG.mongodb.uri) {
+        log('info', 'MongoDB source enabled. Pulling reviewed posts...');
+        IMAGE_PATHS = await fetchFromMongoDB();
+    }
+
+    if (IMAGE_PATHS.length === 0) {
+        log('error', 'No images found');
+        process.exit(1);
+    }
+
     const tStart = Date.now();
 
     log('info', 'Resize...');
@@ -1093,7 +1286,8 @@ async function startTesting() {
                         duration: 0,
                         error: 'Skipped: IP blocked',
                         timedOut: false,
-                        jsonExtracted: false
+                        jsonExtracted: false,
+                        mongoMeta: img.mongoMeta || null
                     });
                 }
                 break;
@@ -1154,6 +1348,37 @@ async function startTesting() {
         }
     }
 
+    // ── Update MongoDB with successful responses ──
+    if (CONFIG.mongodb.uri) {
+        try {
+            const { MongoClient } = await import('mongodb');
+            const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 10000 });
+            await client.connect();
+            const db = client.db(CONFIG.mongodb.db);
+            const collection = db.collection(CONFIG.mongodb.collection);
+
+            let updatedCount = 0;
+            for (const r of allResults) {
+                if (!r.error && !r.timedOut && r.response && r.mongoMeta) {
+                    try {
+                        await collection.updateOne(
+                            { _id: r.mongoMeta.docId },
+                            { $set: { [`file_urls.${r.mongoMeta.fileIndex}.response`]: r.response } }
+                        );
+                        updatedCount++;
+                        log('debug', `MongoDB updated: ${r.mongoMeta.postId} file[${r.mongoMeta.fileIndex}]`);
+                    } catch (e) {
+                        log('warn', `MongoDB update failed for ${r.mongoMeta.postId}: ${e.message}`);
+                    }
+                }
+            }
+            await client.close();
+            log('info', `MongoDB: Updated ${updatedCount} file(s) with responses`);
+        } catch (e) {
+            log('error', 'MongoDB update phase failed: ' + e.message);
+        }
+    }
+
     const successful = allResults.filter(r => !r.error && !r.timedOut).length;
     const withJson = allResults.filter(r => !!extractJsonFromText(r.response || '')).length;
     const blocked = allResults.filter(r => {
@@ -1182,6 +1407,7 @@ async function startTesting() {
                 isBlocked: a.isBlocked || a.isCaptchaHtml,
                 isRateLimited: a.isRateLimited,
                 hasJson: a.hasJson,
+                mongoMeta: r.mongoMeta || null,
             };
         }),
     };
