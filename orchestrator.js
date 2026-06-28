@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
 import { MongoClient } from 'mongodb';
+import { createHash } from 'crypto'; 
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONFIG
@@ -322,9 +323,7 @@ async function hfFetch(filePath) {
 }
 
 async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    // Dynamically import crypto to calculate the SHA256 (required for Git LFS)
-    const crypto = await import('crypto');
-    const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
 
     // Step 1: pre-upload the raw file blob to get an upload URL
     const preUploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/preupload/main`;
@@ -367,20 +366,17 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         }
     }
 
-    // Step 3: commit the file via the commit endpoint explicitly as an LFS pointer
-    const commitUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
-
-    // By leaving 'files' empty and placing the object in 'lfsFiles', 
-    // we prevent the "rejected because it contains binary files" hook error.
+    // Step 3: commit via LFS pointer
+    const commitUrl  = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
     const commitBody = {
         summary: `upload ${filename}`,
         files:   [],
         lfsFiles: [
             {
-                path:  repoFilePath,
-                oid:   sha256,
-                size:  fileBuffer.length,
-                algo:  'sha256',
+                path: repoFilePath,
+                oid:  sha256,
+                size: fileBuffer.length,
+                algo: 'sha-256',  // ← was 'sha256' (missing hyphen = 400 error)
             }
         ]
     };
@@ -401,7 +397,6 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
 
     return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
 }
-
 
 async function downloadToBuffer(url) {
     const resp = await fetch(url, { redirect: 'follow' });
