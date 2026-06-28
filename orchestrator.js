@@ -323,53 +323,63 @@ async function hfFetch(filePath) {
 }
 
 async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    // Hash the FULL buffer — sample bytes must be included in the hash
-    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
-    const sample = fileBuffer.subarray(0, 512).toString('base64'); // just for HF's inspection, doesn't affect hash
+    const sha256   = createHash('sha256').update(fileBuffer).digest('hex');
+    const filename = repoFilePath.split('/').pop();
 
-    const preUploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/preupload/main`;
-    const filename     = repoFilePath.split('/').pop();
-
-    const preResp = await fetch(preUploadUrl, {
+    // Step 1: LFS batch — always returns an upload URL if the blob is missing
+    const lfsResp = await fetch(`https://huggingface.co/datasets/${CONFIG.hf.repo}.git/info/lfs/objects/batch`, {
         method:  'POST',
         headers: {
             Authorization:  `Bearer ${CONFIG.hf.token}`,
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/vnd.git-lfs+json',
+            Accept:         'application/vnd.git-lfs+json',
         },
         body: JSON.stringify({
-            files: [{
-                path:   repoFilePath,
-                size:   fileBuffer.length,
-                sample: sample,
-                sha256: sha256,
-            }]
+            operation: 'upload',
+            transfers: ['basic'],
+            objects:   [{ oid: sha256, size: fileBuffer.length }],
         }),
     });
 
-    if (!preResp.ok) {
-        const body = await preResp.text().catch(() => '');
-        throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
+    if (!lfsResp.ok) {
+        const body = await lfsResp.text().catch(() => '');
+        throw new Error(`LFS batch failed (${lfsResp.status}): ${body.slice(0, 200)}`);
     }
-    
-    const preData   = await preResp.json();
-    log('info', `  HF preupload → ${JSON.stringify(preData)}`);  // ← add this
-    const fileEntry = preData.files?.[0];
 
-    // Step 2: PUT the full buffer to the presigned S3 URL
-    if (fileEntry?.uploadUrl) {
-        const upResp = await fetch(fileEntry.uploadUrl, {
+    const lfsData  = await lfsResp.json();
+    log('info', `  LFS batch → ${JSON.stringify(lfsData).slice(0, 300)}`);
+    const obj      = lfsData.objects?.[0];
+    const uploadUrl = obj?.actions?.upload?.href;
+
+    // Step 2: PUT to S3 — only if LFS says the blob is missing
+    if (uploadUrl) {
+        const upHeaders = obj.actions.upload.header || {};
+        const upResp = await fetch(uploadUrl, {
             method:  'PUT',
-            headers: { 'Content-Type': mimeType },
-            body:    fileBuffer,           // full buffer — matches the sha256 above
+            headers: { ...upHeaders, 'Content-Type': 'application/octet-stream' },
+            body:    fileBuffer,
         });
         if (!upResp.ok) {
             const body = await upResp.text().catch(() => '');
-            throw new Error(`HF blob upload failed (${upResp.status}): ${body.slice(0, 200)}`);
+            throw new Error(`LFS PUT failed (${upResp.status}): ${body.slice(0, 200)}`);
         }
+        log('info', `  LFS blob uploaded (${(fileBuffer.length / 1024).toFixed(0)} KB)`);
+
+        // Step 2b: verify if LFS gave us a verify URL
+        const verifyUrl    = obj?.actions?.verify?.href;
+        const verifyHeaders = obj?.actions?.verify?.header || {};
+        if (verifyUrl) {
+            await fetch(verifyUrl, {
+                method:  'POST',
+                headers: { ...verifyHeaders, 'Content-Type': 'application/vnd.git-lfs+json' },
+                body:    JSON.stringify({ oid: sha256, size: fileBuffer.length }),
+            }).catch(() => {});
+        }
+    } else {
+        log('info', `  LFS blob already exists on HF — skipping PUT`);
     }
 
-    // Step 3: commit
-    const commitUrl  = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
+    // Step 3: commit the LFS pointer
     const commitBody = {
         summary:  `upload ${filename}`,
         files:    [],
@@ -378,10 +388,10 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
             oid:  sha256,
             size: fileBuffer.length,
             algo: 'sha256',
-        }]
+        }],
     };
 
-    const commitResp = await fetch(commitUrl, {
+    const commitResp = await fetch(`https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`, {
         method:  'POST',
         headers: {
             Authorization:  `Bearer ${CONFIG.hf.token}`,
@@ -392,7 +402,7 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
 
     if (!commitResp.ok) {
         const body = await commitResp.text().catch(() => '');
-        throw new Error(`HF commit upload failed (${commitResp.status}): ${body.slice(0, 200)}`);
+        throw new Error(`HF commit failed (${commitResp.status}): ${body.slice(0, 200)}`);
     }
 
     return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
