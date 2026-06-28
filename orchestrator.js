@@ -406,12 +406,7 @@ class FastDLDownloader extends InstagramDownloader {
 
         log('info', `[FastDL] Processing ${postId}`);
 
-        await page.goto('https://fastdl.app/en3', { 
-            waitUntil: 'domcontentloaded', 
-            timeout: CONFIG.timeouts.navigation 
-        });
-
-        // Block heavy resources
+        // Block heavy resources before navigating
         await page.setRequestInterception(true);
         page.on('request', req => {
             const type = req.resourceType();
@@ -419,32 +414,39 @@ class FastDLDownloader extends InstagramDownloader {
             else req.continue().catch(() => {});
         });
 
-        // Fill input
+        await page.goto('https://fastdl.app/en3', {
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.timeouts.navigation,
+        });
+
+        // Find and fill the URL input
         const inputSel = '#search-form-input, input[placeholder*="instagram link" i], input[type="text"]';
-        await page.waitForSelector(inputSel, { timeout: 15000 });
-        
-        const input = await page.$(inputSel.split(',')[0]);
-        await input.click({ clickCount: 3 });
+        await page.waitForSelector(inputSel, { timeout: 15_000 });
+        await page.click(inputSel.split(',')[0]);
+        await page.keyboard.shortcut('Control', 'a');
         await page.keyboard.press('Backspace');
         await page.type(inputSel.split(',')[0], igUrl, { delay: 10 });
 
-        // Submit
+        // Submit via button
         const btnSel = '#searchFormButton, button[type="submit"], .search-form__button';
-        await page.waitForSelector(btnSel.split(',')[0], { timeout: 10000 });
+        await page.waitForSelector(btnSel, { timeout: 10_000 });
         await page.click(btnSel.split(',')[0]);
 
-        // Wait for results
+        log('debug', `[FastDL] Submitted: ${igUrl}`);
+
+        // Wait for result links to appear in the DOM
         await page.waitForFunction(() => {
-            return document.querySelector('.search-result') !== null ||
-                   document.querySelectorAll('a[href*="media.fastdl.app/get"]').length > 0;
+            return document.querySelectorAll('a[href*="media.fastdl.app/get"]').length > 0 ||
+                   document.querySelector('.search-result') !== null;
         }, { timeout: CONFIG.timeouts.downloaderIdle });
 
-        await page.waitForTimeout(4000);
+        // Small settle pause — lets carousel items finish rendering
+        await sleep(4000);
 
-        // Extract links — prefer 'uri' parameter
+        // Extract links in DOM order to preserve carousel sequence
         const results = await page.evaluate(() => {
             const items = [];
-            const seen = new Set();
+            const seen  = new Set();
 
             document.querySelectorAll('a[href*="media.fastdl.app/get"]').forEach(a => {
                 const href = a.href;
@@ -452,21 +454,19 @@ class FastDLDownloader extends InstagramDownloader {
                 seen.add(href);
 
                 let directUrl = href;
-                let uri = null;
-
+                let uri       = null;
                 try {
-                    const urlObj = new URL(href);
-                    const uriParam = urlObj.searchParams.get('uri');
+                    const uriParam = new URL(href).searchParams.get('uri');
                     if (uriParam) {
-                        uri = decodeURIComponent(uriParam);
-                        directUrl = uri;   // ← Prefer clean direct link
+                        uri       = decodeURIComponent(uriParam);
+                        directUrl = uri;
                     }
-                } catch (e) {}
+                } catch (_) {}
 
                 items.push({ directUrl, uri: uri || href });
             });
 
-            // Fallback: any other media links
+            // Fallback: bare media extension links
             if (items.length === 0) {
                 document.querySelectorAll('a[href]').forEach(a => {
                     const href = a.href;
@@ -480,17 +480,19 @@ class FastDLDownloader extends InstagramDownloader {
             return items;
         });
 
-        log('info', `[FastDL] ✅ Extracted ${results.length} link(s) for ${postId}`);
+        log('info', `[FastDL] ✅ ${results.length} link(s) for ${postId}`);
 
+        // Debug screenshot when nothing was found
         if (results.length === 0) {
-            await page.screenshot({ 
-                path: path.join(CONFIG.tmpDir || '/tmp', `fastdl-debug-\( {postId.replace(/[^a-z0-9]/gi, '')}- \){Date.now()}.png`) 
+            const safeName = postId.replace(/[^a-z0-9]/gi, '');
+            await page.screenshot({
+                path: path.join(CONFIG.tmpDir, `fastdl-debug-${safeName}-${Date.now()}.png`),
             }).catch(() => {});
         }
 
         return results;
     }
-} 
+}
 
 // Priority-ordered fallback chain — add more downloaders here
 const DOWNLOADERS = [new FastDLDownloader()];
