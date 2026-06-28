@@ -323,87 +323,20 @@ async function hfFetch(filePath) {
 }
 
 async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
+    const uploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/upload/main/${repoFilePath}`;
 
-    // Step 1: pre-upload the raw file blob to get an upload URL
-    const preUploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/preupload/main`;
-    const filename     = repoFilePath.split('/').pop();
-
-    const preResp = await fetch(preUploadUrl, {
+    const resp = await fetch(uploadUrl, {
         method:  'POST',
         headers: {
             Authorization:  `Bearer ${CONFIG.hf.token}`,
-            'Content-Type': 'application/json',
+            'Content-Type': mimeType,
         },
-        body: JSON.stringify({ 
-            files: [{ 
-                path: repoFilePath, 
-                size: fileBuffer.length,
-                sample: fileBuffer.subarray(0, 512).toString('base64'),
-                sha256: sha256 
-            }] 
-        }),
-    });
-    
-    if (!preResp.ok) {
-        const body = await preResp.text().catch(() => '');
-        throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
-    }
-    
-    const preData   = await preResp.json();
-    log('debug', `HF preupload response: ${JSON.stringify(preData).slice(0, 500)}`);
-    const fileEntry = preData.files?.[0];
-
-    // Guard: reject suspiciously small buffers (likely an error page, not real media)
-    if (fileBuffer.length < 1024) {
-        throw new Error(`Buffer too small (${fileBuffer.length} bytes) — likely a bad download, not real media`);
-    }
-
-    // Step 2: Upload directly to the Hub's presigned storage URL if the LFS blob isn't cached yet
-    if (fileEntry?.uploadUrl) {
-        log('debug', `HF blob upload → ${fileEntry.uploadUrl.slice(0, 80)}`);
-        const upResp = await fetch(fileEntry.uploadUrl, {
-            method:  'PUT',
-            headers: { 'Content-Type': mimeType },
-            body:    fileBuffer,
-        });
-        if (!upResp.ok) {
-            const body = await upResp.text().catch(() => '');
-            throw new Error(`HF blob upload failed (${upResp.status}): ${body.slice(0, 200)}`);
-        }
-    } else {
-        log('debug', 'HF blob already cached (no uploadUrl) — skipping PUT');
-    }
-
-    // Step 3: commit via LFS pointer
-    const commitUrl  = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
-    const commitBody = {
-        summary: `upload ${filename}`,
-        files:   [],
-        lfsFiles: [
-            {
-                path: repoFilePath,
-                oid:  sha256,
-                size: fileBuffer.length,
-                algo: 'sha256',
-            }
-        ]
-    };
-
-    log('debug', `HF commit body: ${JSON.stringify(commitBody)}`);
-
-    const commitResp = await fetch(commitUrl, {
-        method:  'POST',
-        headers: {
-            Authorization:  `Bearer ${CONFIG.hf.token}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(commitBody),
+        body: fileBuffer,
     });
 
-    if (!commitResp.ok) {
-        const body = await commitResp.text().catch(() => '');
-        throw new Error(`HF commit upload failed (${commitResp.status}): ${body.slice(0, 200)}`);
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        throw new Error(`HF upload failed (${resp.status}): ${body.slice(0, 200)}`);
     }
 
     return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
