@@ -498,12 +498,13 @@ class SnapInstaDownloader extends InstagramDownloader {
 
         log('info', `[SnapInsta] Processing ${postId}`);
 
-        await page.setRequestInterception(true);
+        /*await page.setRequestInterception(true);
         page.on('request', req => {
             const type = req.resourceType();
             if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
             else req.continue().catch(() => {});
         });
+        */
 
         await page.goto('https://snapinsta.to/en5', {
             waitUntil: 'domcontentloaded',
