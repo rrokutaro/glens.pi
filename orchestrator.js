@@ -490,8 +490,92 @@ class FastDLDownloader extends InstagramDownloader {
     }
 }                
 
-// Priority-ordered fallback chain — add more downloaders here
-const DOWNLOADERS = [new FastDLDownloader()];
+class SnapInstaDownloader extends InstagramDownloader {
+    constructor() { super('SnapInsta'); }
+
+    async extractLinks(page, postId) {
+        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\/+/g, '/');
+
+        log('info', `[SnapInsta] Processing ${postId}`);
+
+        await page.setRequestInterception(true);
+        page.on('request', req => {
+            const type = req.resourceType();
+            if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
+            else req.continue().catch(() => {});
+        });
+
+        await page.goto('https://snapinsta.to/en5', {
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.timeouts.navigation,
+        });
+
+        // Fill input and submit
+        await page.waitForSelector('#s_input', { timeout: 15_000 });
+        await page.evaluate(val => { document.querySelector('#s_input').value = val; }, igUrl);
+        await page.click('button[onclick*="ksearchvideo"]');
+
+        log('debug', `[SnapInsta] Submitted: ${igUrl}`);
+
+        // Wait for results list to appear — ul.download-box only exists after a successful response
+        await page.waitForFunction(() => {
+            return document.querySelector('#search-result ul.download-box') !== null;
+        }, { timeout: CONFIG.timeouts.downloaderIdle });
+
+        // Small settle for carousel items still appending
+        await sleep(1500);
+
+        const results = await page.evaluate(() => {
+            const items = [];
+            const seen  = new Set();
+
+            // Primary: the "Download Photo/Video" anchor — one per media item, highest quality
+            document.querySelectorAll('a.abutton.btn-premium[href*="dl.snapcdn.app"]').forEach(a => {
+                const href = a.href;
+                if (!href || seen.has(href)) return;
+                seen.add(href);
+                items.push({ directUrl: href, uri: href });
+            });
+
+            // Fallback 1: any dl.snapcdn.app link
+            if (items.length === 0) {
+                document.querySelectorAll('a[href*="dl.snapcdn.app"]').forEach(a => {
+                    const href = a.href;
+                    if (!href || seen.has(href)) return;
+                    seen.add(href);
+                    items.push({ directUrl: href, uri: href });
+                });
+            }
+
+            // Fallback 2: first <option> value from each quality selector (highest res)
+            if (items.length === 0) {
+                document.querySelectorAll('.download-items select.minimal').forEach(sel => {
+                    const first = sel.options[0]?.value;
+                    if (first && !seen.has(first)) {
+                        seen.add(first);
+                        items.push({ directUrl: first, uri: first });
+                    }
+                });
+            }
+
+            return items;
+        });
+
+        log('info', `[SnapInsta] ✅ ${results.length} link(s) for ${postId}`);
+
+        if (results.length === 0) {
+            const safeName = postId.replace(/[^a-z0-9]/gi, '');
+            await page.screenshot({
+                path: path.join(CONFIG.tmpDir, `snapinsta-debug-${safeName}-${Date.now()}.png`),
+            }).catch(() => {});
+        }
+
+        return results;
+    }
+}
+
+// Priority-ordered fallback chain
+const DOWNLOADERS = [new SnapInstaDownloader()]; 
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
