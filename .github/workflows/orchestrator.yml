@@ -30,7 +30,7 @@ on:
       batch_size:
         description: 'Max number of posts to download per run'
         required: false
-        default: '10'
+        default: '50'
       downloader_concurrency:
         description: 'How many posts to process in parallel during download'
         required: false
@@ -140,7 +140,7 @@ jobs:
           ORCH_HF_TOKEN: ${{ github.event.inputs.hf_token || github.event.client_payload.hf_token || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
           ORCH_HF_REPO: ${{ github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'rrokutaro/ugc-dropship' }}
           ORCH_HF_ASSETS_PATH: ${{ github.event.inputs.hf_assets_path || github.event.client_payload.hf_assets_path || 'scraped-posts/assets' }}
-          ORCH_BATCH_SIZE: ${{ github.event.inputs.batch_size || github.event.client_payload.batch_size || '10' }}
+          ORCH_BATCH_SIZE: ${{ github.event.inputs.batch_size || github.event.client_payload.batch_size || '50' }}
           ORCH_DOWNLOADER_CONCURRENCY: ${{ github.event.inputs.downloader_concurrency || github.event.client_payload.downloader_concurrency || '3' }}
           ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || github.event.client_payload.log_level || 'info' }}
           ORCH_RECORDING: ${{ github.event.inputs.recording || github.event.client_payload.recording || 'true' }}
