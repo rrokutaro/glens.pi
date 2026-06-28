@@ -351,10 +351,17 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
     }
     
     const preData   = await preResp.json();
+    log('debug', `HF preupload response: ${JSON.stringify(preData).slice(0, 500)}`);
     const fileEntry = preData.files?.[0];
+
+    // Guard: reject suspiciously small buffers (likely an error page, not real media)
+    if (fileBuffer.length < 1024) {
+        throw new Error(`Buffer too small (${fileBuffer.length} bytes) — likely a bad download, not real media`);
+    }
 
     // Step 2: Upload directly to the Hub's presigned storage URL if the LFS blob isn't cached yet
     if (fileEntry?.uploadUrl) {
+        log('debug', `HF blob upload → ${fileEntry.uploadUrl.slice(0, 80)}`);
         const upResp = await fetch(fileEntry.uploadUrl, {
             method:  'PUT',
             headers: { 'Content-Type': mimeType },
@@ -364,6 +371,8 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
             const body = await upResp.text().catch(() => '');
             throw new Error(`HF blob upload failed (${upResp.status}): ${body.slice(0, 200)}`);
         }
+    } else {
+        log('debug', 'HF blob already cached (no uploadUrl) — skipping PUT');
     }
 
     // Step 3: commit via LFS pointer
@@ -376,10 +385,12 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
                 path: repoFilePath,
                 oid:  sha256,
                 size: fileBuffer.length,
-                algo: 'sha-256',  // ← was 'sha256' (missing hyphen = 400 error)
+                algo: 'sha256',
             }
         ]
     };
+
+    log('debug', `HF commit body: ${JSON.stringify(commitBody)}`);
 
     const commitResp = await fetch(commitUrl, {
         method:  'POST',
@@ -402,8 +413,19 @@ async function downloadToBuffer(url) {
     const resp = await fetch(url, { redirect: 'follow' });
     if (!resp.ok) throw new Error(`Download failed (${resp.status}): ${url.slice(0, 80)}`);
     const buffer = Buffer.from(await resp.arrayBuffer());
-    const ct     = resp.headers.get('content-type') || '';
-    let ext      = '.bin';
+
+    // Reject suspiciously small responses — likely an error/redirect HTML page
+    if (buffer.length < 1024) {
+        throw new Error(`Downloaded only ${buffer.length} bytes from ${url.slice(0, 80)} — likely not real media`);
+    }
+
+    const ct = resp.headers.get('content-type') || '';
+    // Reject HTML responses (downloader returned an error page instead of media)
+    if (ct.includes('text/html')) {
+        throw new Error(`Got HTML instead of media from ${url.slice(0, 80)} — download link may have expired`);
+    }
+
+    let ext = '.bin';
     if      (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
     else if (ct.includes('png'))   ext = '.png';
     else if (ct.includes('webp'))  ext = '.webp';
@@ -413,8 +435,11 @@ async function downloadToBuffer(url) {
         const m = new URL(url).pathname.match(/\.(jpg|jpeg|png|webp|mp4|gif)$/i);
         if (m) ext = '.' + m[1].toLowerCase();
     }
+
+    log('debug', `Downloaded ${(buffer.length / 1024).toFixed(0)} KB  type=${ct}  ext=${ext}  url=${url.slice(0, 60)}`);
     return { buffer, ext, mimeType: ct.split(';')[0].trim() || 'application/octet-stream' };
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 1 — Sync data.json → MongoDB
