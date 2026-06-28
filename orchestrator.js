@@ -323,20 +323,75 @@ async function hfFetch(filePath) {
 }
 
 async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    const uploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/upload/main/${repoFilePath}`;
+    // Hash the FULL buffer — sample bytes must be included in the hash
+    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
+    const sample = fileBuffer.subarray(0, 512).toString('base64'); // just for HF's inspection, doesn't affect hash
 
-    const resp = await fetch(uploadUrl, {
+    const preUploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/preupload/main`;
+    const filename     = repoFilePath.split('/').pop();
+
+    const preResp = await fetch(preUploadUrl, {
         method:  'POST',
         headers: {
             Authorization:  `Bearer ${CONFIG.hf.token}`,
-            'Content-Type': mimeType,
+            'Content-Type': 'application/json',
         },
-        body: fileBuffer,
+        body: JSON.stringify({
+            files: [{
+                path:   repoFilePath,
+                size:   fileBuffer.length,
+                sample: sample,
+                sha256: sha256,
+            }]
+        }),
     });
 
-    if (!resp.ok) {
-        const body = await resp.text().catch(() => '');
-        throw new Error(`HF upload failed (${resp.status}): ${body.slice(0, 200)}`);
+    if (!preResp.ok) {
+        const body = await preResp.text().catch(() => '');
+        throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
+    }
+
+    const preData   = await preResp.json();
+    const fileEntry = preData.files?.[0];
+
+    // Step 2: PUT the full buffer to the presigned S3 URL
+    if (fileEntry?.uploadUrl) {
+        const upResp = await fetch(fileEntry.uploadUrl, {
+            method:  'PUT',
+            headers: { 'Content-Type': mimeType },
+            body:    fileBuffer,           // full buffer — matches the sha256 above
+        });
+        if (!upResp.ok) {
+            const body = await upResp.text().catch(() => '');
+            throw new Error(`HF blob upload failed (${upResp.status}): ${body.slice(0, 200)}`);
+        }
+    }
+
+    // Step 3: commit
+    const commitUrl  = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
+    const commitBody = {
+        summary:  `upload ${filename}`,
+        files:    [],
+        lfsFiles: [{
+            path: repoFilePath,
+            oid:  sha256,
+            size: fileBuffer.length,
+            algo: 'sha256',
+        }]
+    };
+
+    const commitResp = await fetch(commitUrl, {
+        method:  'POST',
+        headers: {
+            Authorization:  `Bearer ${CONFIG.hf.token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(commitBody),
+    });
+
+    if (!commitResp.ok) {
+        const body = await commitResp.text().catch(() => '');
+        throw new Error(`HF commit upload failed (${commitResp.status}): ${body.slice(0, 200)}`);
     }
 
     return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
@@ -345,18 +400,17 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
 async function downloadToBuffer(url) {
     const resp = await fetch(url, { redirect: 'follow' });
     if (!resp.ok) throw new Error(`Download failed (${resp.status}): ${url.slice(0, 80)}`);
+
     const buffer = Buffer.from(await resp.arrayBuffer());
+    const ct     = resp.headers.get('content-type') || '';
 
-    // Reject suspiciously small responses — likely an error/redirect HTML page
-    if (buffer.length < 1024) {
-        throw new Error(`Downloaded only ${buffer.length} bytes from ${url.slice(0, 80)} — likely not real media`);
-    }
+    // Catch error pages / empty responses before they reach HF
+    if (buffer.length < 1024)
+        throw new Error(`Too small (${buffer.length} bytes) — not real media: ${url.slice(0, 80)}`);
+    if (ct.includes('text/html'))
+        throw new Error(`Got HTML instead of media — link expired: ${url.slice(0, 80)}`);
 
-    const ct = resp.headers.get('content-type') || '';
-    // Reject HTML responses (downloader returned an error page instead of media)
-    if (ct.includes('text/html')) {
-        throw new Error(`Got HTML instead of media from ${url.slice(0, 80)} — download link may have expired`);
-    }
+    log('info', `  ✓ Downloaded ${(buffer.length / 1024).toFixed(0)} KB  ct=${ct}`);
 
     let ext = '.bin';
     if      (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
@@ -369,7 +423,6 @@ async function downloadToBuffer(url) {
         if (m) ext = '.' + m[1].toLowerCase();
     }
 
-    log('debug', `Downloaded ${(buffer.length / 1024).toFixed(0)} KB  type=${ct}  ext=${ext}  url=${url.slice(0, 60)}`);
     return { buffer, ext, mimeType: ct.split(';')[0].trim() || 'application/octet-stream' };
 }
 
