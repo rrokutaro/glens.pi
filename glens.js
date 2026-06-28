@@ -27,6 +27,14 @@ const CONFIG = {
         // imgbb requires a free API key (https://api.imgbb.com/). Optional —
         // if unset, the imgbb upload method is simply skipped in the fallback chain.
         imgbbApiKey: process.env.GLENS_IMGBB_API_KEY || '',
+        // Litterbox only accepts hour-granularity values: 1h, 12h, 24h, 72h.
+        // 1h is the shortest it offers — plenty for a pipeline that only
+        // needs the URL alive for a couple of minutes during a Lens lookup.
+        litterboxTime: process.env.GLENS_LITTERBOX_TIME || '1h',
+        // imgbb accepts second-granularity expiration (60-15552000s).
+        // Default 600s (10 min) — comfortably covers the lookup without
+        // leaving images sitting on a public host indefinitely.
+        imgbbExpirationSeconds: parseInt(process.env.GLENS_IMGBB_EXPIRATION_SECONDS || '600', 10),
     },
     retry: {
         uploadAttempts: parseInt(process.env.GLENS_UPLOAD_RETRIES || '2', 10),
@@ -952,7 +960,7 @@ async function uploadToLitterbox(filePath) {
     const blob = new Blob([buf]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
-    form.append('time', '72h');
+    form.append('time', CONFIG.upload.litterboxTime);
     form.append('fileToUpload', blob, path.basename(filePath));
     const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
         method: 'POST',
@@ -1003,7 +1011,7 @@ async function uploadToImgbb(filePath) {
     const blob = new Blob([buf]);
     const form = new FormData();
     form.append('image', blob, path.basename(filePath));
-    const res = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(CONFIG.upload.imgbbApiKey), {
+    const res = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(CONFIG.upload.imgbbApiKey) + '&expiration=' + CONFIG.upload.imgbbExpirationSeconds, {
         method: 'POST',
         body: form
     });
