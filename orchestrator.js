@@ -402,7 +402,7 @@ class FastDLDownloader extends InstagramDownloader {
     constructor() { super('FastDL'); }
 
     async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\\/+/g, '/');
+        const igUrl = `https://www.instagram.com/${postId}/`;
 
         log('info', `[FastDL] Processing ${postId}`);
 
@@ -490,7 +490,7 @@ class SnapInstaDownloader extends InstagramDownloader {
     constructor() { super('SnapInsta'); }
 
     async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\\/+/g, '/');
+        const igUrl = `https://www.instagram.com/${postId}/`;
 
         log('info', `[SnapInsta] Processing ${postId}`);
 
