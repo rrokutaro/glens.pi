@@ -1,0 +1,160 @@
+name: Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      mongodb_uri:
+        description: 'MongoDB URI (or leave empty to use secrets.ORCHESTRATOR_MONGODB_URI)'
+        required: false
+        default: ''
+      mongodb_db:
+        description: 'MongoDB database name'
+        required: false
+        default: 'ugc-dropship'
+      mongodb_collection:
+        description: 'MongoDB collection name'
+        required: false
+        default: 'scraped-posts'
+      hf_token:
+        description: 'HuggingFace write token (or leave empty to use secrets.ORCHESTRATOR_HF_TOKEN)'
+        required: false
+        default: ''
+      hf_repo:
+        description: 'HuggingFace repo ID (e.g., rrokutaro/ugc-dropship)'
+        required: false
+        default: 'rrokutaro/ugc-dropship'
+      hf_assets_path:
+        description: 'Path inside the HF repo for downloaded post assets'
+        required: false
+        default: 'scraped-posts/assets'
+      batch_size:
+        description: 'Max number of posts to download per run'
+        required: false
+        default: '10'
+      downloader_concurrency:
+        description: 'How many posts to process in parallel during download'
+        required: false
+        default: '3'
+      log_level:
+        description: 'Log verbosity: debug | info | warn | error'
+        required: false
+        default: 'info'
+      recording:
+        description: 'Enable screen recording of downloader sessions (true/false)'
+        required: false
+        default: 'true'
+      recording_fps:
+        description: 'Recording framerate'
+        required: false
+        default: '12'
+      recording_quality:
+        description: 'Recording JPEG quality (1-100)'
+        required: false
+        default: '60'
+      recording_res:
+        description: 'Recording resolution (WxH)'
+        required: false
+        default: '1280x800'
+
+  repository_dispatch:
+    types:
+      - orchestrator-run
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-orchestrator-${{ hashFiles('.github/workflows/orchestrator.yml') }}
+          restore-keys: |
+            apt-${{ runner.os }}-orchestrator-
+            apt-${{ runner.os }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 \
+            libpango-1.0-0 libcairo2 libxdamage1
+
+      - name: Install npm dependencies
+        run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib mongodb
+
+      - name: Get installed CloakBrowser version
+        id: cloakbrowser-version
+        run: echo "version=$(node -p "require('./node_modules/cloakbrowser/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CloakBrowser Chromium binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cloakbrowser
+          key: cloakbrowser-${{ runner.os }}-${{ steps.cloakbrowser-version.outputs.version }}
+
+      - name: Install CloakBrowser Chromium binary
+        run: npx cloakbrowser install
+
+      - name: Create package.json type module
+        run: |
+          if [ -f package.json ]; then
+            node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.type='module'; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n'); console.log('Updated package.json with type:module');"
+          else
+            echo '{"name":"orchestrator","type":"module"}' > package.json
+          fi
+
+      - name: Mask HF token
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '') ||
+          (github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '')
+        env:
+          TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
+        run: echo "::add-mask::$TOKEN_TO_MASK"
+
+      - name: Mask MongoDB URI
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.mongodb_uri != '') ||
+          (github.event_name == 'repository_dispatch' && github.event.client_payload.mongodb_uri != '')
+        env:
+          TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri }}
+        run: echo "::add-mask::$TOKEN_TO_MASK"
+
+      - name: Run Orchestrator
+        env:
+          ORCH_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI || '' }}
+          ORCH_MONGODB_DB: ${{ github.event.inputs.mongodb_db || github.event.client_payload.mongodb_db || 'ugc-dropship' }}
+          ORCH_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || github.event.client_payload.mongodb_collection || 'scraped-posts' }}
+          ORCH_HF_TOKEN: ${{ github.event.inputs.hf_token || github.event.client_payload.hf_token || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
+          ORCH_HF_REPO: ${{ github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'rrokutaro/ugc-dropship' }}
+          ORCH_HF_ASSETS_PATH: ${{ github.event.inputs.hf_assets_path || github.event.client_payload.hf_assets_path || 'scraped-posts/assets' }}
+          ORCH_BATCH_SIZE: ${{ github.event.inputs.batch_size || github.event.client_payload.batch_size || '10' }}
+          ORCH_DOWNLOADER_CONCURRENCY: ${{ github.event.inputs.downloader_concurrency || github.event.client_payload.downloader_concurrency || '3' }}
+          ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || github.event.client_payload.log_level || 'info' }}
+          ORCH_RECORDING: ${{ github.event.inputs.recording || github.event.client_payload.recording || 'true' }}
+          ORCH_RECORDING_FPS: ${{ github.event.inputs.recording_fps || github.event.client_payload.recording_fps || '12' }}
+          ORCH_RECORDING_QUALITY: ${{ github.event.inputs.recording_quality || github.event.client_payload.recording_quality || '60' }}
+          ORCH_RECORDING_RES: ${{ github.event.inputs.recording_res || github.event.client_payload.recording_res || '1280x800' }}
+          ORCH_RUN_ID: ${{ github.run_id }}
+        run: node orchestrator.js
+
+      - name: Upload output artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrator-output
+          path: |
+            orchestrator-output/
+          retention-days: 1
