@@ -402,100 +402,95 @@ class FastDLDownloader extends InstagramDownloader {
     constructor() { super('FastDL'); }
 
     async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`;
+        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\/+/g, '/');
 
-        log('debug', `[FastDL] Navigating for ${postId}`);
-        await page.goto('https://fastdl.app/en2', { waitUntil: 'domcontentloaded', timeout: CONFIG.timeouts.navigation });
+        log('info', `[FastDL] Processing ${postId}`);
 
-        // Block images/media to speed up link discovery
+        await page.goto('https://fastdl.app/en3', { 
+            waitUntil: 'domcontentloaded', 
+            timeout: CONFIG.timeouts.navigation 
+        });
+
+        // Block heavy resources
         await page.setRequestInterception(true);
         page.on('request', req => {
-            const rt = req.resourceType();
-            if (rt === 'image' || rt === 'media' || rt === 'font') req.abort().catch(() => {});
+            const type = req.resourceType();
+            if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
             else req.continue().catch(() => {});
         });
 
-        // Find the URL input
-        const inputSel = [
-            'input[type="text"][placeholder*="link" i]',
-            'input[type="text"][placeholder*="paste" i]',
-            'input[type="text"][placeholder*="insert" i]',
-            'input[type="url"]',
-        ].join(', ');
-        await page.waitForSelector(inputSel, { timeout: 15_000 });
-        await page.evaluate((sel, val) => { document.querySelector(sel).value = val; }, inputSel, igUrl);
-        await page.keyboard.press('Enter');
+        // Fill input
+        const inputSel = '#search-form-input, input[placeholder*="instagram link" i], input[type="text"]';
+        await page.waitForSelector(inputSel, { timeout: 15000 });
+        
+        const input = await page.$(inputSel.split(',')[0]);
+        await input.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await page.type(inputSel.split(',')[0], igUrl, { delay: 10 });
 
-        log('debug', `[FastDL] Submitted: ${igUrl}`);
+        // Submit
+        const btnSel = '#searchFormButton, button[type="submit"], .search-form__button';
+        await page.waitForSelector(btnSel.split(',')[0], { timeout: 10000 });
+        await page.click(btnSel.split(',')[0]);
 
-        // Collect links with idle-reset strategy
-        const PATTERN = /https:\/\/media\.fastdl\.app\/get/;
-        const collected = new Set();
-        let idleTimer = null;
-        let resolve, reject;
-        const waitP = new Promise((res, rej) => { resolve = res; reject = rej; });
+        // Wait for results
+        await page.waitForFunction(() => {
+            return document.querySelector('.search-result') !== null ||
+                   document.querySelectorAll('a[href*="media.fastdl.app/get"]').length > 0;
+        }, { timeout: CONFIG.timeouts.downloaderIdle });
 
-        const resetIdle = () => {
-            clearTimeout(idleTimer);
-            idleTimer = setTimeout(() => resolve(), CONFIG.timeouts.idleReset);
-        };
+        await page.waitForTimeout(4000);
 
-        // Hard deadline — fail if nothing at all appears
-        const deadline = setTimeout(() => {
-            if (collected.size === 0) reject(new Error('[FastDL] Timeout: no download links found'));
-            else resolve();
-        }, CONFIG.timeouts.downloaderIdle);
+        // Extract links — prefer 'uri' parameter
+        const results = await page.evaluate(() => {
+            const items = [];
+            const seen = new Set();
 
-        const poll = setInterval(async () => {
-            try {
-                const found = await page.evaluate(pat => {
-                    return [...document.querySelectorAll('a[href]')]
-                        .map(a => a.href)
-                        .filter(h => new RegExp(pat).test(h));
-                }, PATTERN.source);
-                let newFound = false;
-                for (const link of found) {
-                    if (!collected.has(link)) { collected.add(link); newFound = true; }
-                }
-                if (newFound) {
-                    log('debug', `[FastDL] ${collected.size} link(s) so far for ${postId}`);
-                    resetIdle();
-                }
-            } catch (_) {}
-        }, 500);
+            document.querySelectorAll('a[href*="media.fastdl.app/get"]').forEach(a => {
+                const href = a.href;
+                if (!href || seen.has(href)) return;
+                seen.add(href);
 
-        try {
-            await waitP;
-        } finally {
-            clearInterval(poll);
-            clearTimeout(deadline);
-            clearTimeout(idleTimer);
+                let directUrl = href;
+                let uri = null;
+
+                try {
+                    const urlObj = new URL(href);
+                    const uriParam = urlObj.searchParams.get('uri');
+                    if (uriParam) {
+                        uri = decodeURIComponent(uriParam);
+                        directUrl = uri;   // ← Prefer clean direct link
+                    }
+                } catch (e) {}
+
+                items.push({ directUrl, uri: uri || href });
+            });
+
+            // Fallback: any other media links
+            if (items.length === 0) {
+                document.querySelectorAll('a[href]').forEach(a => {
+                    const href = a.href;
+                    if (/\.(mp4|jpg|jpeg|png|webp)/i.test(href) && !seen.has(href)) {
+                        seen.add(href);
+                        items.push({ directUrl: href, uri: href });
+                    }
+                });
+            }
+
+            return items;
+        });
+
+        log('info', `[FastDL] ✅ Extracted ${results.length} link(s) for ${postId}`);
+
+        if (results.length === 0) {
+            await page.screenshot({ 
+                path: path.join(CONFIG.tmpDir || '/tmp', `fastdl-debug-\( {postId.replace(/[^a-z0-9]/gi, '')}- \){Date.now()}.png`) 
+            }).catch(() => {});
         }
 
-        // Re-query in DOM order to preserve carousel sequence
-        const ordered = await page.evaluate(pat => {
-            return [...document.querySelectorAll('a[href]')]
-                .map(a => a.href)
-                .filter(h => new RegExp(pat).test(h));
-        }, PATTERN.source);
-
-        const seen = new Set();
-        const results = [];
-        for (const href of ordered) {
-            if (seen.has(href)) continue;
-            seen.add(href);
-            let uri = null;
-            try {
-                const raw = new URL(href).searchParams.get('uri');
-                if (raw) uri = decodeURIComponent(raw);
-            } catch (_) {}
-            results.push({ directUrl: href, uri });
-        }
-
-        log('info', `[FastDL] ${results.length} link(s) for ${postId}`);
         return results;
     }
-}
+} 
 
 // Priority-ordered fallback chain — add more downloaders here
 const DOWNLOADERS = [new FastDLDownloader()];
