@@ -12,7 +12,7 @@ Runs on **GitHub Actions** (with optional HuggingFace upload) or locally with No
 
 1. **Discovers** images from `./images/` (or from a JSON array of URLs, or from **MongoDB**)
 2. **Resizes** them for fast upload (configurable max dimension/quality)
-3. **Uploads** to a temporary image host (catbox.moe / litterbox)
+3. **Uploads** to a temporary image host, falling back through a chain (catbox.moe → litterbox → uguu.se → storage.to → imgbb)
 4. **Navigates** Google Lens with the image URL + structured prompt
 5. **Extracts** the AI response as clean JSON (with robust fallback parsing)
 6. **Records** the entire browser session as an MP4 (optional) and compiles all clips into a single session video
@@ -198,6 +198,7 @@ All settings are controlled via environment variables:
 | `GLENS_JSON_IDLE_MS` | `800` | How long JSON must be stable before considered complete |
 | `GLENS_UPLOAD_TIMEOUT` | `10000` | Image upload timeout (ms) |
 | `GLENS_UPLOAD_RETRIES` | `2` | Upload retry attempts per provider |
+| `GLENS_IMGBB_API_KEY` | `""` | Optional free API key for imgbb.com (https://api.imgbb.com/). If unset, imgbb is skipped in the upload fallback chain |
 | `GLENS_NAV_RETRIES` | `2` | Navigation retry attempts |
 | `GLENS_MAX_RETRIES` | `1` | Max image-level retries |
 | `GLENS_BACKOFF_BASE_MS` | `300` | Base retry backoff |
@@ -315,10 +316,15 @@ When `GLENS_MONGODB_URI` is provided, the pipeline:
 Images are processed in parallel batches (default 3). If **any** image in a batch triggers a Google CAPTCHA or block page, the pipeline assumes the IP is burned and **skips all remaining batches** immediately. This prevents pointless retries and wasted runner minutes.
 
 ### Upload Providers
-- **Primary:** catbox.moe (permanent, anonymous)
-- **Fallback:** litterbox.catbox.moe (72h temporary, anonymous)
+Each image is sent up a fallback chain until one provider succeeds — if a host is down, rate-limited, or rejects the upload, the pipeline automatically moves to the next:
 
-Both are free, require no API keys, and work from GitHub Actions runners.
+1. **catbox.moe** (permanent, anonymous)
+2. **litterbox.catbox.moe** (72h temporary, anonymous)
+3. **uguu.se** (temporary, anonymous)
+4. **storage.to** (3-7 day expiry, anonymous, via its ShareX one-shot endpoint)
+5. **imgbb.com** (permanent — *requires* a free API key, see [Configuration](#configuration); skipped automatically if no key is set)
+
+The first four require no API keys and work from GitHub Actions runners as-is. imgbb only joins the chain once `GLENS_IMGBB_API_KEY` is set — without it, that step is skipped with no effect on the rest of the chain.
 
 ### Screen Recording & Compilation
 Each browser context records its own clip. When the run finishes (success, failure, or block), all clips are stitched into a single `session_*.mp4` via ffmpeg. If compilation fails, individual clips are preserved.
