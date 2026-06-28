@@ -407,12 +407,13 @@ class FastDLDownloader extends InstagramDownloader {
         log('info', `[FastDL] Processing ${postId}`);
 
         // Block heavy resources before navigating
-        await page.setRequestInterception(true);
+        /*await page.setRequestInterception(true);
         page.on('request', req => {
             const type = req.resourceType();
             if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
             else req.continue().catch(() => {});
         });
+        */
 
         await page.goto('https://fastdl.app/en3', {
             waitUntil: 'domcontentloaded',
