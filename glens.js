@@ -23,6 +23,11 @@ const CONFIG = {
         jsonIdle: parseInt(process.env.GLENS_JSON_IDLE_MS || '800', 10),
         upload: parseInt(process.env.GLENS_UPLOAD_TIMEOUT || '10000', 10),
     },
+    upload: {
+        // imgbb requires a free API key (https://api.imgbb.com/). Optional —
+        // if unset, the imgbb upload method is simply skipped in the fallback chain.
+        imgbbApiKey: process.env.GLENS_IMGBB_API_KEY || '',
+    },
     retry: {
         uploadAttempts: parseInt(process.env.GLENS_UPLOAD_RETRIES || '2', 10),
         navigationAttempts: parseInt(process.env.GLENS_NAV_RETRIES || '2', 10),
@@ -958,10 +963,65 @@ async function uploadToLitterbox(filePath) {
     return url;
 }
 
+async function uploadToUguu(filePath) {
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
+    const form = new FormData();
+    form.append('files[]', blob, path.basename(filePath));
+    const res = await fetch('https://uguu.se/upload', {
+        method: 'POST',
+        body: form
+    });
+    const text = (await res.text()).trim();
+    let json;
+    try { json = JSON.parse(text); } catch (e) { throw new Error('Uguu: bad JSON: ' + text.slice(0, 80)); }
+    const url = json && Array.isArray(json.files) && json.files[0] && json.files[0].url;
+    if (!url || !url.startsWith('http')) throw new Error('Uguu: ' + text.slice(0, 80));
+    return url;
+}
+
+async function uploadToStorageTo(filePath) {
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
+    const form = new FormData();
+    form.append('file', blob, path.basename(filePath));
+    const res = await fetch('https://storage.to/api/sharex/upload', {
+        method: 'POST',
+        body: form
+    });
+    const json = await res.json();
+    const url = json && (json.raw_url || json.url);
+    if (!json || !json.success || !url || !url.startsWith('http')) {
+        throw new Error('storage.to: ' + JSON.stringify(json).slice(0, 80));
+    }
+    return url;
+}
+
+async function uploadToImgbb(filePath) {
+    if (!CONFIG.upload.imgbbApiKey) throw new Error('imgbb: no API key configured (GLENS_IMGBB_API_KEY)');
+    const buf = fs.readFileSync(filePath);
+    const blob = new Blob([buf]);
+    const form = new FormData();
+    form.append('image', blob, path.basename(filePath));
+    const res = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(CONFIG.upload.imgbbApiKey), {
+        method: 'POST',
+        body: form
+    });
+    const json = await res.json();
+    const url = json && json.data && (json.data.url || json.data.display_url);
+    if (!json || !json.success || !url || !url.startsWith('http')) {
+        throw new Error('imgbb: ' + JSON.stringify(json).slice(0, 80));
+    }
+    return url;
+}
+
 async function uploadImage(filePath) {
     const methods = [
         { name: 'catbox.moe', fn: async (p) => uploadToCatbox(p) },
         { name: 'litterbox.catbox.moe', fn: async (p) => uploadToLitterbox(p) },
+        { name: 'uguu.se', fn: async (p) => uploadToUguu(p) },
+        { name: 'storage.to', fn: async (p) => uploadToStorageTo(p) },
+        { name: 'imgbb.com', fn: async (p) => uploadToImgbb(p) },
     ];
     for (const m of methods) {
         try {
