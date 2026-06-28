@@ -646,7 +646,7 @@ class SnapInstaDownloader extends InstagramDownloader {
 }
 
 // Priority-ordered fallback chain
-const DOWNLOADERS = [new SnapInstaDownloader(), new FastDLDownloader()]; 
+const DOWNLOADERS = [new FastDLDownloader(), new SnapInstaDownloader()]; 
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
