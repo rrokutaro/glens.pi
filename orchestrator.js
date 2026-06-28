@@ -455,7 +455,16 @@ async function syncDataJsonToMongo(collection) {
     }
     log('info', `data.json contains ${postIds.length} post(s).`);
 
-    const docs = postIds.map(pid => ({ post_id: pid, timestamp: Date.now() }));
+    const existing = await collection.distinct('post_id', { post_id: { $in: postIds } });
+    const existingSet = new Set(existing);
+    const newPostIds = postIds.filter(pid => !existingSet.has(pid));
+    
+    if (newPostIds.length === 0) {
+        log('info', 'Sync complete. 0 new post(s) — all post_ids already in MongoDB.');
+        return 0;
+    }
+    
+    const docs = newPostIds.map(pid => ({ post_id: pid, timestamp: Date.now() }));
     let inserted = 0;
     try {
         const result = await collection.insertMany(docs, { ordered: false });
@@ -465,8 +474,8 @@ async function syncDataJsonToMongo(collection) {
             inserted = err.result?.nInserted ?? err.insertedCount ?? 0;
         } else { throw err; }
     }
-
-    log('info', `Sync complete. ${inserted} new post(s) inserted (duplicates ignored).`);
+    
+    log('info', `Sync complete. ${inserted} new post(s) inserted (${postIds.length - newPostIds.length} already existed).`);
     return inserted;
 }
 
