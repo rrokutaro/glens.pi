@@ -332,8 +332,15 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
             Authorization:  `Bearer ${CONFIG.hf.token}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ files: [{ path: repoFilePath, sample: null }] }),
+        body: JSON.stringify({ 
+            files: [{ 
+                path: repoFilePath, 
+                size: fileBuffer.length,
+                sample: fileBuffer.subarray(0, 512).toString('base64') 
+            }] 
+        }),
     });
+    
     if (!preResp.ok) {
         const body = await preResp.text().catch(() => '');
         throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
