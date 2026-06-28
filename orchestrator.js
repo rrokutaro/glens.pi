@@ -402,18 +402,10 @@ class FastDLDownloader extends InstagramDownloader {
     constructor() { super('FastDL'); }
 
     async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\/+/g, '/');
+        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\\/+/g, '/');
 
         log('info', `[FastDL] Processing ${postId}`);
 
-        /*await page.setRequestInterception(true);
-        page.on('request', req => {
-            const type = req.resourceType();
-            if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
-            else req.continue().catch(() => {});
-        });
-        */
-        
         await page.goto('https://fastdl.app/en3', {
             waitUntil: 'domcontentloaded',
             timeout: CONFIG.timeouts.navigation,
@@ -421,38 +413,42 @@ class FastDLDownloader extends InstagramDownloader {
 
         const inputSel = '#search-form-input';
         await page.waitForSelector(inputSel, { timeout: 15_000 });
-        await page.evaluate(sel => { document.querySelector(sel).value = ''; }, inputSel);
+
+        // Click to focus, select all existing text, then delete it — fires real events
+        await page.click(inputSel, { clickCount: 3 });
+        await page.keyboard.press('Backspace');
+
+        // Type the URL character-by-character so input/change events fire correctly
         await page.type(inputSel, igUrl, { delay: 10 });
+
+        // Dispatch a native input event in case the site uses a framework listener
+        await page.evaluate(sel => {
+            const el = document.querySelector(sel);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, inputSel);
+
         await page.click('#searchFormButton');
 
         log('debug', `[FastDL] Submitted: ${igUrl}`);
 
-        // Wait for any of these signals — most specific first, fallbacks after.
-        // If the site changes class names, the href pattern alone will still catch it.
         await page.waitForFunction(() => {
-            // Signal 1: known download button class with media domain (most specific)
             if (document.querySelectorAll('a.button__download[href*="media.fastdl.app"]').length > 0) return true;
-            // Signal 2: any anchor with the media domain (class-name agnostic)
             if (document.querySelectorAll('a[href*="media.fastdl.app/get"]').length > 0) return true;
-            // Signal 3: output list has at least one list item populated (structure agnostic)
             const items = document.querySelectorAll('.output-list__item');
             if (items.length > 0 && items[0].querySelector('a[href]')) return true;
             return false;
         }, { timeout: CONFIG.timeouts.downloaderIdle });
 
-        // Settle for carousels — remaining items may still be appending
         await sleep(2000);
 
         const results = await page.evaluate(() => {
             const items = [];
             const seen  = new Set();
 
-            // Strategy 1: known button class
             let anchors = [...document.querySelectorAll('a.button__download[href*="media.fastdl.app"]')];
-            // Strategy 2: any media.fastdl.app link
             if (anchors.length === 0)
                 anchors = [...document.querySelectorAll('a[href*="media.fastdl.app/get"]')];
-            // Strategy 3: any anchor inside output list items
             if (anchors.length === 0)
                 anchors = [...document.querySelectorAll('.output-list__item a[href]')];
 
@@ -488,49 +484,51 @@ class FastDLDownloader extends InstagramDownloader {
 
         return results;
     }
-}                
+}
 
 class SnapInstaDownloader extends InstagramDownloader {
     constructor() { super('SnapInsta'); }
 
     async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\/+/g, '/');
+        const igUrl = `https://www.instagram.com/${postId}/`.replace(/\\/+/g, '/');
 
         log('info', `[SnapInsta] Processing ${postId}`);
-
-        /*await page.setRequestInterception(true);
-        page.on('request', req => {
-            const type = req.resourceType();
-            if (['image', 'media', 'font', 'stylesheet'].includes(type)) req.abort().catch(() => {});
-            else req.continue().catch(() => {});
-        });
-        */
 
         await page.goto('https://snapinsta.to/en5', {
             waitUntil: 'domcontentloaded',
             timeout: CONFIG.timeouts.navigation,
         });
 
-        // Fill input and submit
         await page.waitForSelector('#s_input', { timeout: 15_000 });
-        await page.evaluate(val => { document.querySelector('#s_input').value = val; }, igUrl);
+
+        // Triple-click to select any pre-existing value, then delete it — fires real events
+        await page.click('#s_input', { clickCount: 3 });
+        await page.keyboard.press('Backspace');
+
+        // Type character-by-character so the site's input listeners track the value
+        await page.type('#s_input', igUrl, { delay: 10 });
+
+        // Dispatch native input/change events for framework-based validation
+        await page.evaluate(() => {
+            const el = document.querySelector('#s_input');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
         await page.click('button[onclick*="ksearchvideo"]');
 
         log('debug', `[SnapInsta] Submitted: ${igUrl}`);
 
-        // Wait for results list to appear — ul.download-box only exists after a successful response
         await page.waitForFunction(() => {
             return document.querySelector('#search-result ul.download-box') !== null;
         }, { timeout: CONFIG.timeouts.downloaderIdle });
 
-        // Small settle for carousel items still appending
         await sleep(1500);
 
         const results = await page.evaluate(() => {
             const items = [];
             const seen  = new Set();
 
-            // Primary: the "Download Photo/Video" anchor — one per media item, highest quality
             document.querySelectorAll('a.abutton.btn-premium[href*="dl.snapcdn.app"]').forEach(a => {
                 const href = a.href;
                 if (!href || seen.has(href)) return;
@@ -538,7 +536,6 @@ class SnapInstaDownloader extends InstagramDownloader {
                 items.push({ directUrl: href, uri: href });
             });
 
-            // Fallback 1: any dl.snapcdn.app link
             if (items.length === 0) {
                 document.querySelectorAll('a[href*="dl.snapcdn.app"]').forEach(a => {
                     const href = a.href;
@@ -548,7 +545,6 @@ class SnapInstaDownloader extends InstagramDownloader {
                 });
             }
 
-            // Fallback 2: first <option> value from each quality selector (highest res)
             if (items.length === 0) {
                 document.querySelectorAll('.download-items select.minimal').forEach(sel => {
                     const first = sel.options[0]?.value;
@@ -576,7 +572,7 @@ class SnapInstaDownloader extends InstagramDownloader {
 }
 
 // Priority-ordered fallback chain
-const DOWNLOADERS = [new SnapInstaDownloader()]; 
+const DOWNLOADERS = [new SnapInstaDownloader(), new FastDLDownloader()]; 
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
