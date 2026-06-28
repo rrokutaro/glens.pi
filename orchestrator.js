@@ -322,7 +322,11 @@ async function hfFetch(filePath) {
 }
 
 async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    // Step 1: pre-upload the raw file blob to get an upload URL / LFS OID
+    // Dynamically import crypto to calculate the SHA256 (required for Git LFS)
+    const crypto = await import('crypto');
+    const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    // Step 1: pre-upload the raw file blob to get an upload URL
     const preUploadUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/preupload/main`;
     const filename     = repoFilePath.split('/').pop();
 
@@ -336,7 +340,8 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
             files: [{ 
                 path: repoFilePath, 
                 size: fileBuffer.length,
-                sample: fileBuffer.subarray(0, 512).toString('base64') 
+                sample: fileBuffer.subarray(0, 512).toString('base64'),
+                sha256: sha256 
             }] 
         }),
     });
@@ -345,10 +350,11 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         const body = await preResp.text().catch(() => '');
         throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
     }
+    
     const preData   = await preResp.json();
     const fileEntry = preData.files?.[0];
 
-    // If the hub says upload directly (small file / LFS not required), use the upload URL
+    // Step 2: Upload directly to the Hub's presigned storage URL if the LFS blob isn't cached yet
     if (fileEntry?.uploadUrl) {
         const upResp = await fetch(fileEntry.uploadUrl, {
             method:  'PUT',
@@ -361,35 +367,23 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         }
     }
 
-    // Step 2: commit the file via the commit endpoint
+    // Step 3: commit the file via the commit endpoint explicitly as an LFS pointer
     const commitUrl = `https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`;
 
-    // Build the commit payload — base64-encode small buffers, reference LFS OID for large ones
-    const base64Data = fileBuffer.toString('base64');
-
+    // By leaving 'files' empty and placing the object in 'lfsFiles', 
+    // we prevent the "rejected because it contains binary files" hook error.
     const commitBody = {
         summary: `upload ${filename}`,
-        files:   [
-            {
-                path:     repoFilePath,
-                encoding: 'base64',
-                content:  base64Data,
-            },
-        ],
-    };
-
-    // If the preupload gave us an LFS OID, use that instead of inline base64
-    if (fileEntry?.lfsOid) {
-        commitBody.lfsFiles = [
+        files:   [],
+        lfsFiles: [
             {
                 path:  repoFilePath,
-                oid:   fileEntry.lfsOid,
+                oid:   sha256,
                 size:  fileBuffer.length,
                 algo:  'sha256',
-            },
-        ];
-        commitBody.files = []; // file goes via LFS, not inline
-    }
+            }
+        ]
+    };
 
     const commitResp = await fetch(commitUrl, {
         method:  'POST',
@@ -402,11 +396,12 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
 
     if (!commitResp.ok) {
         const body = await commitResp.text().catch(() => '');
-        throw new Error(`HF upload failed (${commitResp.status}): ${body.slice(0, 200)}`);
+        throw new Error(`HF commit upload failed (${commitResp.status}): ${body.slice(0, 200)}`);
     }
 
     return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
 }
+
 
 async function downloadToBuffer(url) {
     const resp = await fetch(url, { redirect: 'follow' });
