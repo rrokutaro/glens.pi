@@ -350,8 +350,9 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         const body = await preResp.text().catch(() => '');
         throw new Error(`HF preupload failed (${preResp.status}): ${body.slice(0, 200)}`);
     }
-
+    
     const preData   = await preResp.json();
+    log('info', `  HF preupload → ${JSON.stringify(preData)}`);  // ← add this
     const fileEntry = preData.files?.[0];
 
     // Step 2: PUT the full buffer to the presigned S3 URL
