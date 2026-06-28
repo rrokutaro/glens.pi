@@ -419,18 +419,17 @@ class FastDLDownloader extends InstagramDownloader {
             timeout: CONFIG.timeouts.navigation,
         });
 
-        // Find and fill the URL input
+        // Find, clear, and fill the URL input
         const inputSel = '#search-form-input, input[placeholder*="instagram link" i], input[type="text"]';
         await page.waitForSelector(inputSel, { timeout: 15_000 });
-        await page.click(inputSel.split(',')[0]);
-        await page.keyboard.shortcut('Control', 'a');
-        await page.keyboard.press('Backspace');
-        await page.type(inputSel.split(',')[0], igUrl, { delay: 10 });
+        const firstInput = inputSel.split(',')[0].trim();
+        await page.evaluate(sel => { document.querySelector(sel).value = ''; }, firstInput);
+        await page.type(firstInput, igUrl, { delay: 10 });
 
         // Submit via button
         const btnSel = '#searchFormButton, button[type="submit"], .search-form__button';
         await page.waitForSelector(btnSel, { timeout: 10_000 });
-        await page.click(btnSel.split(',')[0]);
+        await page.click(btnSel.split(',')[0].trim());
 
         log('debug', `[FastDL] Submitted: ${igUrl}`);
 
