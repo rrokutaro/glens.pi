@@ -23,6 +23,10 @@ on:
         description: 'Max number of MongoDB posts to process per run'
         required: false
         default: '20'
+      imgbb_api_key:
+        description: 'imgbb.com API key (or leave empty to use secrets.GLENS_IMGBB_API_KEY). Optional â€” imgbb is skipped in the upload fallback chain if unset'
+        required: false
+        default: ''
       hf_token:
         description: 'HuggingFace token for uploading results'
         required: false
@@ -95,6 +99,12 @@ jobs:
         TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
       run: echo "::add-mask::$TOKEN_TO_MASK"
 
+    - name: Mask imgbb API key
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.imgbb_api_key != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.imgbb_api_key != ''
+      env:
+        TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.imgbb_api_key || github.event.client_payload.imgbb_api_key }}
+      run: echo "::add-mask::$TOKEN_TO_MASK"
+
     - name: Run GLENS test
       env:
         GLENS_MODE: lens
@@ -106,6 +116,7 @@ jobs:
         GLENS_JSON_IDLE_MS: 800
         GLENS_UPLOAD_TIMEOUT: 10000
         GLENS_UPLOAD_RETRIES: 2
+        GLENS_IMGBB_API_KEY: ${{ github.event.inputs.imgbb_api_key || github.event.client_payload.imgbb_api_key || secrets.GLENS_IMGBB_API_KEY || '' }}
         GLENS_NAV_RETRIES: 2
         GLENS_MAX_RETRIES: 1
         GLENS_BACKOFF_BASE_MS: 300
