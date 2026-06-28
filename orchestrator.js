@@ -656,8 +656,87 @@ class SnapInstaDownloader extends InstagramDownloader {
     }
 }
 
+class InSaverDownloader extends InstagramDownloader {
+    constructor() { super('InSaver'); }
+
+    async extractLinks(page, postId) {
+        const igUrl = `https://www.instagram.com/${postId}/`;
+
+        log('info', `[InSaver] Processing ${postId}`);
+
+        await page.goto('https://insaver.to/en', {
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.timeouts.navigation,
+        });
+
+        await page.waitForSelector('#s_input', { timeout: 15_000 });
+
+        await page.click('#s_input', { clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await page.type('#s_input', igUrl, { delay: 10 });
+
+        await page.evaluate(() => {
+            const el = document.querySelector('#s_input');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        await page.click('button[onclick*="ksearchvideo"]');
+
+        log('debug', `[InSaver] Submitted: ${igUrl}`);
+
+        await page.waitForFunction(() => {
+            return document.querySelector('#search-result ul.download-box') !== null
+                && document.querySelector('#search-result ul.download-box li') !== null;
+        }, { timeout: CONFIG.timeouts.downloaderIdle });
+
+        await sleep(1500);
+
+        const results = await page.evaluate(() => {
+            const items = [];
+            const seen  = new Set();
+
+            document.querySelectorAll('#search-result .download-items').forEach(item => {
+                // For photos: grab the highest-res option (first <option> value)
+                const select = item.querySelector('.photo-option select.minimal');
+                if (select && select.options.length > 0) {
+                    const href = select.options[0].value;
+                    if (href && !seen.has(href)) {
+                        seen.add(href);
+                        items.push({ directUrl: href, uri: href });
+                    }
+                    return;
+                }
+
+                // For videos: grab the btn-premium href
+                const btn = item.querySelector('a.btn-premium[href*="dl.snapcdn.app"]');
+                if (btn) {
+                    const href = btn.href;
+                    if (href && !seen.has(href)) {
+                        seen.add(href);
+                        items.push({ directUrl: href, uri: href });
+                    }
+                }
+            });
+
+            return items;
+        });
+
+        log('info', `[InSaver] ✅ ${results.length} link(s) for ${postId}`);
+
+        if (results.length === 0) {
+            const safeName = postId.replace(/[^a-z0-9]/gi, '');
+            await page.screenshot({
+                path: path.join(CONFIG.tmpDir, `insaver-debug-${safeName}-${Date.now()}.png`),
+            }).catch(() => {});
+        }
+
+        return results;
+    }
+}
+
 // Priority-ordered fallback chain
-const DOWNLOADERS = [new FastDLDownloader(), new SnapInstaDownloader()]; 
+const DOWNLOADERS = [new SnapInstaDownloader(), new InSaverDownloader(), new FastDLDownloader()];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
