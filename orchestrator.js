@@ -57,6 +57,11 @@ const CONFIG = {
         rateLimitCooldownMs: parseInt(process.env.ORCH_GEMINI_RATE_LIMIT_COOLDOWN_MS || String(10 * 60 * 1000), 10),
         lockStaleMs:      parseInt(process.env.ORCH_GEMINI_LOCK_STALE_MS || String(5 * 60 * 1000), 10),
         maxRetries:       parseInt(process.env.ORCH_GEMINI_MAX_RETRIES || '3', 10),
+        // Debug aid: save every collage JPEG sent to Gemini into the output
+        // artifacts dir so you can visually verify layout/ref alignment
+        // against the review_reason Gemini gave back. Off by default since
+        // it adds files to the run artifact; flip on to debug bad reviews.
+        saveCollages:     process.env.ORCH_REVIEW_SAVE_COLLAGES === 'true',
     },
     timeouts: {
         navigation:     45_000,
@@ -78,6 +83,7 @@ const CONFIG = {
 };
 
 const RECORDINGS_DIR = path.join(CONFIG.outputDir, 'recordings');
+const COLLAGES_DIR    = path.join(CONFIG.outputDir, 'review-collages');
 
 // ─── Logging ───────────────────────────────────────────────────────────────────
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -987,6 +993,33 @@ async function runReviewStage(db, collection) {
 
         results.collages++;
 
+        // Debug aid: persist the exact JPEG bytes sent to Gemini so you can
+        // visually cross-check layout/ref alignment against the
+        // review_reason it returns. Saved BEFORE the Gemini call so the
+        // artifact exists even if that call fails. Does not affect review
+        // logic at all — purely a side-effect write to disk.
+        if (CONFIG.review.saveCollages) {
+            try {
+                fs.mkdirSync(COLLAGES_DIR, { recursive: true });
+                const collageFilename = `collage_${CONFIG.runId}_${String(i + 1).padStart(2, '0')}.jpg`;
+                fs.writeFileSync(path.join(COLLAGES_DIR, collageFilename), collageBuffer);
+
+                // Sidecar JSON: ref -> which post/file this frame actually is,
+                // so you can cross-check Gemini's reason text against ground
+                // truth without guessing from pixel position alone.
+                const refMapJson = {};
+                for (const [ref, item] of refMap.entries()) {
+                    refMapJson[ref] = { postId: item.postId, fileIndex: item.fileIndex, url: item.url };
+                }
+                const sidecarFilename = `collage_${CONFIG.runId}_${String(i + 1).padStart(2, '0')}.refmap.json`;
+                fs.writeFileSync(path.join(COLLAGES_DIR, sidecarFilename), JSON.stringify(refMapJson, null, 2));
+
+                log('info', `Review: saved collage artifact → ${collageFilename} (+ refmap)`);
+            } catch (err) {
+                log('warn', `Review: failed to save collage artifact for collage ${i + 1}: ${err.message.slice(0, 150)}`);
+            }
+        }
+
         let kept;
         try {
             kept = await reviewCollageWithGemini(db, collageBuffer);
@@ -1646,6 +1679,7 @@ async function main() {
     log('info', `  Download: ${downloadResults.ok} OK | ${downloadResults.fail} FAIL out of ${posts.length} post(s)`);
     if (CONFIG.recording.enabled) log('info', `  Recording: ${RECORDINGS_DIR}`);
     if (CONFIG.review.enabled) log('info', `  Review:   ${reviewResults.reviewed} reviewed | ${reviewResults.kept} kept | ${reviewResults.rejected} rejected | ${reviewResults.collages} collage(s) | ${reviewResults.failed} failed`);
+    if (CONFIG.review.enabled && CONFIG.review.saveCollages) log('info', `  Collages: ${COLLAGES_DIR}`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
     fs.writeFileSync(
@@ -1659,6 +1693,7 @@ async function main() {
             elapsedSeconds: parseFloat(elapsed),
             recording: CONFIG.recording.enabled,
             review: CONFIG.review.enabled ? reviewResults : null,
+            collagesSaved: CONFIG.review.enabled && CONFIG.review.saveCollages,
         }, null, 2)
     );
 
