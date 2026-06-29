@@ -79,6 +79,10 @@ on:
         description: 'Comma-separated Google Gemini API keys (or leave empty to use secrets.ORCHESTRATOR_GEMINI_API_KEYS)'
         required: false
         default: ''
+      review_save_collages:
+        description: 'Save every review collage JPEG (+ ref map) to the output artifacts for debugging (true/false)'
+        required: false
+        default: 'false'
 
   repository_dispatch:
     types:
@@ -187,6 +191,7 @@ jobs:
           ORCH_REVIEW_MAX_COLS: ${{ github.event.inputs.review_max_cols || github.event.client_payload.review_max_cols || '5' }}
           ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || github.event.client_payload.gemini_model || 'gemini-3.5-flash-lite' }}
           ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
+          ORCH_REVIEW_SAVE_COLLAGES: ${{ github.event.inputs.review_save_collages || github.event.client_payload.review_save_collages || 'false' }}
           ORCH_RUN_ID: ${{ github.run_id }}
         run: node orchestrator.js
 
