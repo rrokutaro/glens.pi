@@ -15,7 +15,9 @@ import fs from 'fs';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
 import { MongoClient } from 'mongodb';
-import { createHash } from 'crypto'; 
+import { createHash } from 'crypto';
+import os from 'os';
+import sharp from 'sharp';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONFIG
@@ -36,6 +38,24 @@ const CONFIG = {
     batch: {
         size:        parseInt(process.env.ORCH_BATCH_SIZE             || '10', 10),
         concurrency: parseInt(process.env.ORCH_DOWNLOADER_CONCURRENCY || '3',  10),
+    },
+    review: {
+        enabled:          process.env.ORCH_REVIEW_ENABLED !== 'false', // on by default
+        // How many individual file_urls entries (images only) to pull from
+        // MongoDB and run through the Gemini reviewer in this run.
+        fetchLimit:       parseInt(process.env.ORCH_REVIEW_FETCH_LIMIT     || '60',  10),
+        // Collage constraints (mirrors the Infinite Collage Maker tool).
+        maxRowsPerCollage: parseInt(process.env.ORCH_REVIEW_MAX_ROWS       || '4',   10),
+        targetRowHeight:   parseInt(process.env.ORCH_REVIEW_ROW_HEIGHT     || '480', 10),
+        collageMaxWidth:   parseInt(process.env.ORCH_REVIEW_COLLAGE_WIDTH  || '1600',10),
+        jpegQuality:       parseInt(process.env.ORCH_REVIEW_JPEG_QUALITY   || '82',  10),
+        // Gemini model + keys (comma-separated list of API keys to rotate across).
+        model:            process.env.ORCH_GEMINI_MODEL    || 'gemini-3.5-flash-lite',
+        apiKeys:          (process.env.ORCH_GEMINI_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean),
+        quotaCollection:  process.env.ORCH_GEMINI_QUOTA_COLLECTION || 'gemini_quotas',
+        rateLimitCooldownMs: parseInt(process.env.ORCH_GEMINI_RATE_LIMIT_COOLDOWN_MS || String(10 * 60 * 1000), 10),
+        lockStaleMs:      parseInt(process.env.ORCH_GEMINI_LOCK_STALE_MS || String(5 * 60 * 1000), 10),
+        maxRetries:       parseInt(process.env.ORCH_GEMINI_MAX_RETRIES || '3', 10),
     },
     timeouts: {
         navigation:     45_000,
@@ -70,6 +90,74 @@ function log(level, ...args) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Gemini reviewer prompt ──────────────────────────────────────────────────
+const GEMINI_REVIEW_PROMPT = `You are an expert visual content curator for Instagram e-commerce. Your task is to analyze a collage image containing multiple frames/screenshots from Instagram posts and identify which individual frames should be sent to Google Lens for product identification.
+
+## 1. SCOPE & ELIGIBILITY
+Only select frames that **clearly and prominently display physical products** intended for wear, use, or personal adornment. Eligible categories include, but are not limited to: clothing, footwear, handbags, jewelry, watches, eyewear, hats, belts, cosmetics, skincare, tech accessories, and lifestyle gadgets.
+
+**Reject frames that contain:**
+- Pure text, memes, quotes, or infographics
+- Food, drinks, or consumables (unless they are the packaging/brand object itself)
+- Landscapes, architecture, or scenery without a clear product focus
+- Blurry, overexposed, or extremely dark images where the product is unidentifiable
+- User faces or body parts with no visible product
+- Screenshots of UI elements, comments, or captions only
+
+## 1.5. APPAREL CONTEXT & CONTENT SAFETY OVERRIDE
+You are operating in a **professional fashion and e-commerce context**. All forms of clothing and wearable items are legitimate products for review, regardless of how much skin they reveal. You must analyze and score the following exactly as you would a jacket or pair of jeans:
+- Swimwear, bikinis, one-piece swimsuits, board shorts, rash guards
+- Lingerie, bras, underwear, bodysuits, hosiery, sleepwear
+- Athletic wear, leggings, sports bras, compression gear
+- Form-fitting or bodycon dresses, crop tops, sheer fabrics
+
+**Do NOT skip, censor, or refuse to process any frame solely because the model is wearing minimal clothing, swimwear, or undergarments.** If the product is clearly visible and identifiable, it must be reviewed, scored, and included in the output. Treat the human body in these frames as a mannequin or model whose purpose is to display the garment.
+
+## 2. DEDUPLICATION RULE (CAROUSELS / SAME POST)
+If multiple frames from the same Instagram post show the **exact same product from the same angle** (e.g., carousel duplicates or nearly identical shots), you must:
+- Keep only the **single best frame** from that series.
+- Choose based on: highest resolution, best lighting, clearest product visibility, and least cropping.
+- In the \`reason\` field, note that it was selected from a duplicate set.
+
+## 3. SCORING CRITERIA: \`stunning_score\`
+Rate every **kept** frame from 0.00 to 1.00 based on overall visual appeal and commercial attractiveness. Use this rubric:
+
+| Score | Description |
+|-------|-------------|
+| 0.90–1.00 | Exceptional: magazine-quality composition, perfect lighting, highly aesthetic, immediately eye-catching |
+| 0.70–0.89 | Strong: well-composed, good lighting, attractive styling, clearly professional or high-quality UGC |
+| 0.50–0.69 | Average: decent visibility, acceptable quality, but plain or cluttered background |
+| 0.30–0.49 | Weak: poor lighting, awkward crop, distracting elements, but product is still identifiable |
+| 0.00–0.29 | Poor: grainy, badly framed, or unappealing, but technically meets the eligibility threshold |
+
+**Be discriminating.** A score of 0.8+ should be rare. Most standard Instagram product shots should fall in the 0.5–0.7 range.
+
+## 4. OUTPUT FORMAT
+Return a single JSON array. Each object represents one frame to be kept.
+
+**Coordinate System:** Use zero-based indexing \`col:row\` relative to the collage grid.
+- \`0:0\` = Column 0, Row 0 (top-left)
+- \`1:2\` = Column 1, Row 2
+
+\`\`\`json
+[
+  {
+    "ref": "0:2",
+    "reason": "Clear full-body shot of a model wearing a trench coat and leather boots. Product is centered and well-lit. Selected as the best frame from a 3-image duplicate carousel.",
+    "stunning_score": 0.82
+  }
+]
+\`\`\`
+
+**Rules for the JSON:**
+- \`ref\`: string, required. Must use the exact \`col:row\` format.
+- \`reason\`: string, required. 1–2 sentences. State what product is visible and why it was kept (or why it was chosen over duplicates).
+- \`stunning_score\`: number, required. Float with exactly two decimal places (e.g., \`0.75\`, not \`.75\` or \`0.750\`).
+- If **no frames** meet the eligibility criteria, return an empty array: \`[]\`
+- Do not include rejected frames in the output.
+- Do not wrap the JSON in markdown code blocks. Return raw JSON only.`;
+
 
 // Ensure required dirs exist
 [CONFIG.outputDir, CONFIG.tmpDir, RECORDINGS_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
@@ -322,9 +410,16 @@ async function hfFetch(filePath) {
     return resp;
 }
 
-async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-stream') {
-    const sha256   = createHash('sha256').update(fileBuffer).digest('hex');
-    const filename = repoFilePath.split('/').pop();
+/**
+ * Upload a single file's bytes to the HF LFS blob store WITHOUT committing it
+ * to the repo tree. This lets us push the bytes for many files first, and
+ * only perform ONE git commit at the very end (avoids hitting the per-hour
+ * commit rate limit when downloading many posts).
+ *
+ * @returns {Promise<{path:string, oid:string, size:number, url:string}>}
+ */
+async function hfUploadBlob(fileBuffer, repoFilePath) {
+    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
 
     // Step 1: LFS batch — always returns an upload URL if the blob is missing
     const lfsResp = await fetch(`https://huggingface.co/datasets/${CONFIG.hf.repo}.git/info/lfs/objects/batch`, {
@@ -346,9 +441,9 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         throw new Error(`LFS batch failed (${lfsResp.status}): ${body.slice(0, 200)}`);
     }
 
-    const lfsData  = await lfsResp.json();
+    const lfsData   = await lfsResp.json();
     log('info', `  LFS batch → ${JSON.stringify(lfsData).slice(0, 300)}`);
-    const obj      = lfsData.objects?.[0];
+    const obj       = lfsData.objects?.[0];
     const uploadUrl = obj?.actions?.upload?.href;
 
     // Step 2: PUT to S3 — only if LFS says the blob is missing
@@ -366,7 +461,7 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         log('info', `  LFS blob uploaded (${(fileBuffer.length / 1024).toFixed(0)} KB)`);
 
         // Step 2b: verify if LFS gave us a verify URL
-        const verifyUrl    = obj?.actions?.verify?.href;
+        const verifyUrl     = obj?.actions?.verify?.href;
         const verifyHeaders = obj?.actions?.verify?.header || {};
         if (verifyUrl) {
             await fetch(verifyUrl, {
@@ -379,16 +474,30 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         log('info', `  LFS blob already exists on HF — skipping PUT`);
     }
 
-    // Step 3: commit the LFS pointer
+    return {
+        path: repoFilePath,
+        oid:  sha256,
+        size: fileBuffer.length,
+        url:  `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`,
+    };
+}
+
+/**
+ * Commit a batch of already-uploaded LFS blobs (see hfUploadBlob) to the repo
+ * tree in a SINGLE git commit. This is what actually consumes the HF
+ * "commits per hour" rate limit, so callers should batch as many files as
+ * possible into one call instead of committing per-file.
+ *
+ * @param {Array<{path:string, oid:string, size:number}>} lfsFiles
+ * @param {string} summary
+ */
+async function hfCommitFiles(lfsFiles, summary) {
+    if (!lfsFiles.length) return;
+
     const commitBody = {
-        summary:  `upload ${filename}`,
+        summary,
         files:    [],
-        lfsFiles: [{
-            path: repoFilePath,
-            oid:  sha256,
-            size: fileBuffer.length,
-            algo: 'sha256',
-        }],
+        lfsFiles: lfsFiles.map(f => ({ path: f.path, oid: f.oid, size: f.size, algo: 'sha256' })),
     };
 
     const commitResp = await fetch(`https://huggingface.co/api/datasets/${CONFIG.hf.repo}/commit/main`, {
@@ -405,7 +514,7 @@ async function hfUpload(fileBuffer, repoFilePath, mimeType = 'application/octet-
         throw new Error(`HF commit failed (${commitResp.status}): ${body.slice(0, 200)}`);
     }
 
-    return `https://huggingface.co/datasets/${CONFIG.hf.repo}/resolve/main/${repoFilePath}`;
+    log('info', `  📦 HF commit: ${lfsFiles.length} file(s) — "${summary}"`);
 }
 
 async function downloadToBuffer(url) {
@@ -437,6 +546,491 @@ async function downloadToBuffer(url) {
     return { buffer, ext, mimeType: ct.split(';')[0].trim() || 'application/octet-stream' };
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GEMINI API KEY ROTATION  (multi-instance safe, backed by MongoDB)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Mirrors the locking strategy from the user's existing code: each key has a
+// quota doc in `gemini_quotas`. We lock the least-recently-used, non-rate-
+// limited key, use it, then release the lock (and record rate_limited_until
+// on 429s) when done.
+
+function getRandomKeyFallback() {
+    const keys = CONFIG.review.apiKeys;
+    if (!keys.length) return null;
+    return keys[Math.floor(Math.random() * keys.length)];
+}
+
+/** Ensure every configured API key has a quota doc in MongoDB (idempotent). */
+async function ensureGeminiQuotaDocs(db) {
+    if (!CONFIG.review.apiKeys.length) return;
+    const quotaCollection = db.collection(CONFIG.review.quotaCollection);
+    try {
+        await quotaCollection.createIndex({ key_hash: 1 }, { unique: true });
+    } catch (e) {
+        log('warn', 'MongoDB gemini_quotas index: ' + e.message);
+    }
+    for (const key of CONFIG.review.apiKeys) {
+        const keyHash = createHash('sha256').update(key).digest('hex').slice(0, 16);
+        await quotaCollection.updateOne(
+            { key_hash: keyHash },
+            {
+                $setOnInsert: {
+                    key_hash:   keyHash,
+                    api_key:    key,
+                    locked_by:  null,
+                    locked_at:  null,
+                    'quota.last_used': 0,
+                    'quota.uses':      0,
+                    rate_limited_until: 0,
+                },
+            },
+            { upsert: true }
+        );
+    }
+}
+
+/**
+ * Lock and return the best available Gemini API key (least-recently-used,
+ * not currently locked by another instance, not rate-limited).
+ * @returns {Promise<{keyHash:string, apiKey:string} | null>}
+ */
+async function getBestGeminiApiKey(db) {
+    const quotaCollection = db.collection(CONFIG.review.quotaCollection);
+    const instanceId = process.env.INSTANCE_ID || os.hostname();
+    const staleThreshold = Date.now() - CONFIG.review.lockStaleMs;
+
+    const result = await quotaCollection.findOneAndUpdate(
+        {
+            $and: [
+                {
+                    $or: [
+                        { locked_by: null },
+                        { locked_by: { $exists: false } },
+                        { locked_at: { $lt: staleThreshold } },
+                    ],
+                },
+                {
+                    $or: [
+                        { rate_limited_until: { $exists: false } },
+                        { rate_limited_until: { $lt: Date.now() } },
+                    ],
+                },
+            ],
+        },
+        { $set: { locked_by: instanceId, locked_at: Date.now() } },
+        { sort: { 'quota.last_used': 1 }, returnDocument: 'after' }
+    );
+
+    if (!result) {
+        log('warn', 'Gemini: no available DB key (all locked/rate-limited) — falling back to random config key');
+        const fallback = getRandomKeyFallback();
+        return fallback ? { keyHash: null, apiKey: fallback } : null;
+    }
+
+    log('debug', `Gemini: locked key ${result.key_hash}`);
+    return { keyHash: result.key_hash, apiKey: result.api_key };
+}
+
+/** Release a key's lock and bump its usage stats. */
+async function releaseGeminiApiKey(db, keyHash) {
+    if (!keyHash) return;
+    const quotaCollection = db.collection(CONFIG.review.quotaCollection);
+    await quotaCollection.updateOne(
+        { key_hash: keyHash },
+        {
+            $set:  { locked_by: null, locked_at: null, 'quota.last_used': Date.now() },
+            $inc:  { 'quota.uses': 1 },
+        }
+    ).catch(err => log('warn', `Gemini: failed to release key ${keyHash}: ${err.message}`));
+}
+
+/** Mark a key as rate-limited for a cooldown period and release its lock. */
+async function markGeminiKeyRateLimited(db, keyHash) {
+    if (!keyHash) return;
+    const quotaCollection = db.collection(CONFIG.review.quotaCollection);
+    await quotaCollection.updateOne(
+        { key_hash: keyHash },
+        {
+            $set: {
+                locked_by: null,
+                locked_at: null,
+                rate_limited_until: Date.now() + CONFIG.review.rateLimitCooldownMs,
+            },
+        }
+    ).catch(err => log('warn', `Gemini: failed to flag key ${keyHash} as rate-limited: ${err.message}`));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  COLLAGE BUILDER  (ports the Infinite Collage Maker's justified-row layout)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Same algorithm as calculateLayout()/renderToCanvas() in the collage tool:
+// greedily fill a row by accumulating width/height ratios until the row's
+// projected height drops to the target, then justify (stretch) that row to
+// exactly fill the canvas width. The final, incomplete row is left
+// unjustified at natural size. Rows are additionally capped at
+// CONFIG.review.maxRowsPerCollage — once the cap is hit, remaining images
+// spill into a new collage entirely.
+
+/** @returns {Array<{images: Array<{item:any, ratio:number}>, height:number, isJustified:boolean}>} */
+function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows) {
+    const rows = [];
+    let currentRow = [];
+    let currentRatioSum = 0;
+
+    for (const item of items) {
+        if (rows.length >= maxRows) break; // row cap reached — caller starts a new collage with leftovers
+
+        const ratio = item.width / item.height;
+        currentRow.push({ item, ratio });
+        currentRatioSum += ratio;
+        const projectedHeight = containerWidth / currentRatioSum;
+        if (projectedHeight <= targetRowHeight) {
+            rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
+            currentRow = [];
+            currentRatioSum = 0;
+        }
+    }
+
+    if (currentRow.length > 0 && rows.length < maxRows) {
+        rows.push({ images: currentRow, height: targetRowHeight, isJustified: false });
+    }
+
+    return rows;
+}
+
+/**
+ * Split `items` (each needs .width/.height/.buffer) into chunks that each fit
+ * within maxRowsPerCollage, mirroring the same greedy row-fill logic so the
+ * chunk boundaries match exactly where a real collage would start a new row
+ * beyond the cap.
+ */
+function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows) {
+    const collages = [];
+    let remaining = items.slice();
+
+    while (remaining.length > 0) {
+        const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows);
+        const used = rows.reduce((sum, r) => sum + r.images.length, 0);
+        if (used === 0) break; // safety guard against infinite loop
+        collages.push({ rows, items: remaining.slice(0, used) });
+        remaining = remaining.slice(used);
+    }
+
+    return collages;
+}
+
+/**
+ * Render one collage (a set of justified rows) to a JPEG buffer using sharp,
+ * and return a map of `col:row` → original item, so the caller can translate
+ * Gemini's refs back to file_urls/post_id.
+ *
+ * @returns {Promise<{buffer: Buffer, refMap: Map<string, any>}>}
+ */
+async function renderCollage(rows, containerWidth, quality) {
+    const totalHeight = Math.round(rows.reduce((sum, r) => sum + r.height, 0));
+    const refMap = new Map();
+    const composites = [];
+
+    let y = 0;
+    for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
+        let x = 0;
+        for (let colIdx = 0; colIdx < row.images.length; colIdx++) {
+            const { item, ratio } = row.images[colIdx];
+            let w = row.height * ratio;
+            const drawX = Math.floor(x);
+            const drawY = Math.floor(y);
+            let drawW = Math.ceil(w);
+            const drawH = Math.ceil(row.height);
+            if (row.isJustified && colIdx === row.images.length - 1) {
+                drawW = Math.ceil(containerWidth - x);
+            }
+
+            const resized = await sharp(item.buffer)
+                .resize(Math.max(1, drawW), Math.max(1, drawH), { fit: 'fill' })
+                .toBuffer();
+
+            composites.push({ input: resized, left: drawX, top: drawY });
+            refMap.set(`${colIdx}:${rowIdx}`, item);
+
+            x += w;
+        }
+        y += row.height;
+    }
+
+    const buffer = await sharp({
+        create: {
+            width:      Math.round(containerWidth),
+            height:     totalHeight,
+            channels:   3,
+            background: { r: 13, g: 13, b: 13 }, // matches --bg: #0d0d0d
+        },
+    })
+        .composite(composites)
+        .jpeg({ quality })
+        .toBuffer();
+
+    return { buffer, refMap };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GEMINI REVIEWER CALL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Send one collage image to Gemini with the review prompt, rotating API keys
+ * via MongoDB-backed locking, with retry on 429 (rotates to a different key).
+ * @returns {Promise<Array<{ref:string, reason:string, stunning_score:number}>>}
+ */
+async function reviewCollageWithGemini(db, collageBuffer) {
+    const base64 = collageBuffer.toString('base64');
+    let lastErr = null;
+
+    for (let attempt = 0; attempt < CONFIG.review.maxRetries; attempt++) {
+        const keyInfo = await getBestGeminiApiKey(db);
+        if (!keyInfo || !keyInfo.apiKey) {
+            throw new Error('No Gemini API key available (none configured or all rate-limited)');
+        }
+
+        const { keyHash, apiKey } = keyInfo;
+        try {
+            const resp = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.review.model}:generateContent?key=${apiKey}`,
+                {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: GEMINI_REVIEW_PROMPT },
+                                { inline_data: { mime_type: 'image/jpeg', data: base64 } },
+                            ],
+                        }],
+                        generationConfig: {
+                            temperature: 0.2,
+                            responseMimeType: 'application/json',
+                        },
+                    }),
+                }
+            );
+
+            if (resp.status === 429) {
+                log('warn', `Gemini: 429 rate-limited on key ${keyHash ?? '(fallback)'} — rotating`);
+                await markGeminiKeyRateLimited(db, keyHash);
+                lastErr = new Error('Gemini 429 rate limited');
+                continue;
+            }
+
+            if (!resp.ok) {
+                const body = await resp.text().catch(() => '');
+                await releaseGeminiApiKey(db, keyHash);
+                throw new Error(`Gemini API error (${resp.status}): ${body.slice(0, 300)}`);
+            }
+
+            const data = await resp.json();
+            await releaseGeminiApiKey(db, keyHash);
+
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error('Gemini response missing text content');
+
+            const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+            const parsed = JSON.parse(cleaned);
+            if (!Array.isArray(parsed)) throw new Error('Gemini response was not a JSON array');
+            return parsed;
+        } catch (err) {
+            if (err.message?.includes('429')) continue; // already rotated above
+            lastErr = err;
+            log('warn', `Gemini: attempt ${attempt + 1}/${CONFIG.review.maxRetries} failed: ${err.message.slice(0, 200)}`);
+        }
+    }
+
+    throw lastErr || new Error('Gemini review failed after retries');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REVIEW STAGE — fetch unreviewed images, collage, send to Gemini, reconcile
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Pull up to `limit` individual image file_urls entries (across any posts)
+ * that have not yet been reviewed (no `reviewed:true` on the entry itself),
+ * tagged with their parent post_id and their index within that post's
+ * file_urls array, so we can map results back after review.
+ *
+ * @returns {Promise<Array<{postId:string, postObjectId:any, fileIndex:number, url:string, type:string}>>}
+ */
+async function fetchUnreviewedFiles(collection, limit) {
+    const cursor = collection.aggregate([
+        { $match: { file_urls: { $exists: true, $ne: [] } } },
+        { $project: { post_id: 1, file_urls: 1 } },
+        { $unwind: { path: '$file_urls', includeArrayIndex: 'fileIndex' } },
+        { $match: {
+            'file_urls.type': 'image',
+            'file_urls.reviewed': { $ne: true },
+        } },
+        { $limit: limit },
+    ]);
+
+    const docs = await cursor.toArray();
+    return docs.map(d => ({
+        postId:       d.post_id,
+        postObjectId: d._id,
+        fileIndex:    d.fileIndex,
+        url:          d.file_urls.url,
+        type:         d.file_urls.type,
+    }));
+}
+
+/** Download an image file's bytes + dimensions for collage building. */
+async function fetchImageForCollage(fileEntry) {
+    const resp = await fetch(fileEntry.url, { redirect: 'follow' });
+    if (!resp.ok) throw new Error(`Failed to fetch image for review (${resp.status}): ${fileEntry.url.slice(0, 80)}`);
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    const meta = await sharp(buffer).metadata();
+    return { ...fileEntry, buffer, width: meta.width || 1, height: meta.height || 1 };
+}
+
+/**
+ * Run the full review stage:
+ *  1. Fetch up to fetchLimit unreviewed image file_urls (across posts).
+ *  2. Download bytes + build collages respecting maxRowsPerCollage.
+ *  3. Send each collage to Gemini; mark kept refs reviewed:true immediately.
+ *  4. After ALL collages are processed, remove every file_urls entry that
+ *     was part of this batch but NOT kept, in one bulk operation.
+ */
+async function runReviewStage(db, collection) {
+    log('info', '── Review Stage: Fetching unreviewed images ──');
+
+    await ensureGeminiQuotaDocs(db);
+
+    const candidates = await fetchUnreviewedFiles(collection, CONFIG.review.fetchLimit);
+    log('info', `Found ${candidates.length} unreviewed image file(s) (limit=${CONFIG.review.fetchLimit}).`);
+
+    const results = { reviewed: 0, kept: 0, rejected: 0, collages: 0, failed: 0 };
+    if (candidates.length === 0) return results;
+
+    if (!CONFIG.review.apiKeys.length) {
+        log('warn', 'No Gemini API keys configured (ORCH_GEMINI_API_KEYS) — skipping review stage.');
+        return results;
+    }
+
+    // Download all candidate image bytes + dimensions up front.
+    const downloaded = [];
+    for (const fileEntry of candidates) {
+        try {
+            downloaded.push(await fetchImageForCollage(fileEntry));
+        } catch (err) {
+            log('warn', `Review: skipping unfetchable image — ${err.message.slice(0, 150)}`);
+            results.failed++;
+        }
+    }
+
+    const collages = chunkItemsIntoCollages(
+        downloaded,
+        CONFIG.review.collageMaxWidth,
+        CONFIG.review.targetRowHeight,
+        CONFIG.review.maxRowsPerCollage
+    );
+    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows each).`);
+
+    // Track every entry that went through review, so we know what to remove
+    // at the end if it wasn't explicitly kept.
+    const allProcessed = []; // { postObjectId, postId, fileIndex, url }
+    const keptKeys = new Set(); // `${postObjectId}:${fileIndex}`
+
+    for (let i = 0; i < collages.length; i++) {
+        const { rows, items } = collages[i];
+        log('info', `Review: collage ${i + 1}/${collages.length} — ${items.length} image(s), ${rows.length} row(s)`);
+
+        for (const item of items) allProcessed.push(item);
+
+        let refMap;
+        let collageBuffer;
+        try {
+            const rendered = await renderCollage(rows, CONFIG.review.collageMaxWidth, CONFIG.review.jpegQuality);
+            collageBuffer = rendered.buffer;
+            refMap = rendered.refMap;
+        } catch (err) {
+            log('error', `Review: failed to render collage ${i + 1}: ${err.message.slice(0, 200)}`);
+            results.failed += items.length;
+            continue;
+        }
+
+        results.collages++;
+
+        let kept;
+        try {
+            kept = await reviewCollageWithGemini(db, collageBuffer);
+        } catch (err) {
+            log('error', `Review: Gemini call failed for collage ${i + 1}: ${err.message.slice(0, 200)}`);
+            results.failed += items.length;
+            continue;
+        }
+
+        for (const decision of kept) {
+            const item = refMap.get(decision.ref);
+            if (!item) {
+                log('warn', `Review: Gemini returned unknown ref "${decision.ref}" — ignoring`);
+                continue;
+            }
+
+            const key = `${item.postObjectId}:${item.fileIndex}`;
+            keptKeys.add(key);
+
+            // Mark kept file immediately as reviewed:true on its post document.
+            try {
+                await collection.updateOne(
+                    { _id: item.postObjectId },
+                    { $set: {
+                        [`file_urls.${item.fileIndex}.reviewed`]:       true,
+                        [`file_urls.${item.fileIndex}.stunning_score`]: decision.stunning_score,
+                        [`file_urls.${item.fileIndex}.review_reason`]:  decision.reason,
+                    } }
+                );
+                results.kept++;
+            } catch (err) {
+                log('error', `Review: failed to mark kept file reviewed (post ${item.postId}, idx ${item.fileIndex}): ${err.message}`);
+            }
+        }
+
+        results.reviewed += items.length;
+        log('info', `Review: collage ${i + 1} — ${kept.length}/${items.length} frame(s) kept`);
+    }
+
+    // ── Remove every processed-but-not-kept file_urls entry, in one pass ──
+    const rejected = allProcessed.filter(item => !keptKeys.has(`${item.postObjectId}:${item.fileIndex}`));
+    log('info', `Review: ${rejected.length} rejected file(s) to remove across affected posts.`);
+
+    if (rejected.length > 0) {
+        // Group rejected file URLs by post so we can $pull all of them for a
+        // post in a single update (file_urls.url is unique per post here).
+        const byPost = new Map();
+        for (const item of rejected) {
+            if (!byPost.has(String(item.postObjectId))) byPost.set(String(item.postObjectId), { postObjectId: item.postObjectId, urls: [] });
+            byPost.get(String(item.postObjectId)).urls.push(item.url);
+        }
+
+        const bulkOps = [...byPost.values()].map(({ postObjectId, urls }) => ({
+            updateOne: {
+                filter: { _id: postObjectId },
+                update: { $pull: { file_urls: { url: { $in: urls } } } },
+            },
+        }));
+
+        try {
+            await collection.bulkWrite(bulkOps, { ordered: false });
+            results.rejected = rejected.length;
+            log('info', `Review: removed ${rejected.length} rejected file(s) across ${bulkOps.length} post(s) in one bulk operation.`);
+        } catch (err) {
+            log('error', `Review: bulk removal of rejected files failed: ${err.message}`);
+        }
+    }
+
+    return results;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 1 — Sync data.json → MongoDB
@@ -776,8 +1370,14 @@ function mimeToType(mimeType, ext) {
 }
 
 /**
- * Process one post: navigate downloader → collect links → download → upload HF.
+ * Process one post: navigate downloader → collect links → download → upload HF blob.
  * The page passed in already has a ScreenRecorder attached.
+ *
+ * NOTE: this uploads file bytes to HF's LFS store but does NOT commit them to
+ * the repo tree yet — that happens once, in a single batched commit, after
+ * ALL posts in this run have finished downloading (see processBatch/main).
+ *
+ * @returns {Promise<{fileUrls: Array<{url:string,type:string}>, lfsFiles: Array<{path:string,oid:string,size:number}>}>}
  */
 async function processPost(postDoc, page, recorder) {
     const postId = postDoc.post_id;
@@ -799,6 +1399,7 @@ async function processPost(postDoc, page, recorder) {
     await recorder.updateLabel(postId, 'DOWNLOADING');
 
     const fileUrls = [];
+    const lfsFiles = [];
     for (let i = 0; i < links.length; i++) {
         const { directUrl, uri } = links[i];
         const downloadUrl = uri || directUrl;
@@ -819,23 +1420,31 @@ async function processPost(postDoc, page, recorder) {
         const type     = mimeToType(mimeType, ext);
 
         await recorder.updateLabel(postId, `UPLOADING [${i + 1}/${links.length}]`);
-        log('debug', `  Uploading: ${repoPath} (${(buffer.length / 1024).toFixed(0)} KB)`);
-        const hfUrl = await hfUpload(buffer, repoPath, mimeType);
+        log('debug', `  Uploading blob: ${repoPath} (${(buffer.length / 1024).toFixed(0)} KB)`);
+        const blob = await hfUploadBlob(buffer, repoPath);
 
-        fileUrls.push({ url: hfUrl, type });
-        log('info', `  ✓ [${i}] ${type}: ${hfUrl}`);
+        fileUrls.push({ url: blob.url, type });
+        lfsFiles.push({ path: blob.path, oid: blob.oid, size: blob.size });
+        log('info', `  ✓ [${i}] ${type}: ${blob.url}`);
     }
 
     await recorder.updateLabel(postId, 'DONE');
-    return fileUrls;
+    return { fileUrls, lfsFiles };
 }
 
 /**
  * Process posts in parallel chunks.  Each page gets its own ScreenRecorder.
+ *
+ * All file blobs are uploaded to HF during this pass, but the repo commit and
+ * the MongoDB `downloaded:true` update are both deferred until every post has
+ * been attempted — see the comment in main(). This guarantees we only ever
+ * make ONE HF commit per run (avoiding the commits-per-hour rate limit) and
+ * that MongoDB is only updated for posts whose assets are confirmed committed.
  */
 async function processBatch(posts, browser, collection) {
     const concurrency = Math.min(CONFIG.batch.concurrency, posts.length);
-    const results     = { ok: 0, fail: 0 };
+    const results      = { ok: 0, fail: 0 };
+    const pendingCommit = []; // { postDoc, fileUrls, lfsFiles }
 
     for (let offset = 0; offset < posts.length; offset += concurrency) {
         const chunk = posts.slice(offset, offset + concurrency);
@@ -850,14 +1459,11 @@ async function processBatch(posts, browser, collection) {
                 await recorder.attach(page);
                 await recorder.updateLabel(postDoc.post_id, 'STARTING');
 
-                const fileUrls = await processPost(postDoc, page, recorder);
+                const { fileUrls, lfsFiles } = await processPost(postDoc, page, recorder);
 
-                await collection.updateOne(
-                    { _id: postDoc._id },
-                    { $set: { downloaded: true, file_urls: fileUrls } }
-                );
+                pendingCommit.push({ postDoc, fileUrls, lfsFiles });
 
-                log('info', `✅ ${postDoc.post_id} — ${fileUrls.length} file(s) saved`);
+                log('info', `✅ ${postDoc.post_id} — ${fileUrls.length} file(s) uploaded (pending commit)`);
                 results.ok++;
             } catch (err) {
                 log('error', `❌ ${postDoc.post_id} — ${err.message.slice(0, 200)}`);
@@ -871,6 +1477,36 @@ async function processBatch(posts, browser, collection) {
         }));
 
         if (offset + concurrency < posts.length) await sleep(2000);
+    }
+
+    // ── Single batched HF commit for every uploaded file across all posts ──
+    const allLfsFiles = pendingCommit.flatMap(p => p.lfsFiles);
+    if (allLfsFiles.length > 0) {
+        log('info', `── Committing ${allLfsFiles.length} file(s) across ${pendingCommit.length} post(s) to HuggingFace in ONE commit ──`);
+        try {
+            await hfCommitFiles(allLfsFiles, `orchestrator: add assets for ${pendingCommit.length} post(s) [run ${CONFIG.runId}]`);
+
+            // Commit succeeded — now (and only now) mark posts as downloaded in MongoDB.
+            for (const { postDoc, fileUrls } of pendingCommit) {
+                try {
+                    await collection.updateOne(
+                        { _id: postDoc._id },
+                        { $set: { downloaded: true, file_urls: fileUrls } }
+                    );
+                } catch (err) {
+                    log('error', `MongoDB update failed for ${postDoc.post_id} after successful HF commit: ${err.message}`);
+                    results.ok--;
+                    results.fail++;
+                }
+            }
+        } catch (err) {
+            // Commit failed — do NOT mark any of these posts as downloaded, since
+            // their assets are not actually committed on HF yet. They'll be
+            // retried (re-downloaded) on the next run.
+            log('error', `HF batch commit failed — MongoDB will NOT be updated for this run's ${pendingCommit.length} post(s): ${err.message}`);
+            results.ok -= pendingCommit.length;
+            results.fail += pendingCommit.length;
+        }
     }
 
     return results;
@@ -960,6 +1596,19 @@ async function main() {
         await compileRecordings();
     }
 
+    // ── Step 6 — AI Review (Gemini) ──────────────────────────────────────────
+    let reviewResults = { reviewed: 0, kept: 0, rejected: 0, collages: 0, failed: 0 };
+    if (CONFIG.review.enabled) {
+        log('info', '── Step 6: AI Review (Gemini) ──');
+        try {
+            reviewResults = await runReviewStage(db, collection);
+        } catch (err) {
+            log('error', `Review stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'Review stage disabled (ORCH_REVIEW_ENABLED=false) — skipping.');
+    }
+
     // ── MongoDB close ────────────────────────────────────────────────────────
     await mongoClient.close();
 
@@ -970,6 +1619,7 @@ async function main() {
     log('info', `  Sync:     data.json → MongoDB (see logs above)`);
     log('info', `  Download: ${downloadResults.ok} OK | ${downloadResults.fail} FAIL out of ${posts.length} post(s)`);
     if (CONFIG.recording.enabled) log('info', `  Recording: ${RECORDINGS_DIR}`);
+    if (CONFIG.review.enabled) log('info', `  Review:   ${reviewResults.reviewed} reviewed | ${reviewResults.kept} kept | ${reviewResults.rejected} rejected | ${reviewResults.collages} collage(s) | ${reviewResults.failed} failed`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
     fs.writeFileSync(
@@ -982,6 +1632,7 @@ async function main() {
             failed: downloadResults.fail,
             elapsedSeconds: parseFloat(elapsed),
             recording: CONFIG.recording.enabled,
+            review: CONFIG.review.enabled ? reviewResults : null,
         }, null, 2)
     );
 
