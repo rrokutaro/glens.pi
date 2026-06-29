@@ -50,6 +50,13 @@ const CONFIG = {
         targetRowHeight:   parseInt(process.env.ORCH_REVIEW_ROW_HEIGHT     || '480', 10),
         collageMaxWidth:   parseInt(process.env.ORCH_REVIEW_COLLAGE_WIDTH  || '2200',10),
         jpegQuality:       parseInt(process.env.ORCH_REVIEW_JPEG_QUALITY   || '82',  10),
+        // Each cell is forced to a fixed aspect ratio (width/height) so the
+        // collage grid is uniform and the LLM sees consistently-sized frames.
+        // Default 3:4 (portrait) = 0.75.  Set to 0 to use each image's
+        // natural ratio (old behaviour).
+        cellAspectRatio:  parseFloat(process.env.ORCH_REVIEW_CELL_ASPECT_RATIO || '0.75'),
+        // White gutter (px) between cells and rows.  Set to 0 to disable.
+        collageGutter:    parseInt(process.env.ORCH_REVIEW_COLLAGE_GUTTER  || '8',   10),
         // Gemini model + keys (comma-separated list of API keys to rotate across).
         model:            process.env.ORCH_GEMINI_MODEL    || 'gemini-3.5-flash-lite',
         apiKeys:          (process.env.ORCH_GEMINI_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean),
@@ -673,56 +680,76 @@ async function markGeminiKeyRateLimited(db, keyHash) {
 //  COLLAGE BUILDER  (ports the Infinite Collage Maker's justified-row layout)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Same algorithm as calculateLayout()/renderToCanvas() in the collage tool:
-// greedily fill a row by accumulating width/height ratios until the row's
-// projected height drops to the target, then justify (stretch) that row to
-// exactly fill the canvas width. The final, incomplete row is left
-// unjustified at natural size.
+// When CONFIG.review.cellAspectRatio > 0 (default 0.75 = 3:4 portrait) every
+// cell is treated as if it had that fixed ratio for layout purposes.  The
+// actual image is rendered into that cell with fit:'cover' so the subject is
+// never distorted — excess area is centre-cropped.  This gives the LLM a
+// perfectly uniform grid (same-sized boxes, white gutter between them) which
+// dramatically reduces mis-identification caused by wildly different frame
+// shapes competing for attention.
 //
-// UNLIKE the original HTML tool (which only optimizes for a nice-looking
-// visual grid and lets a row hold as many images as fit the height target),
-// this version ALSO caps columns per row at CONFIG.review.maxColsPerRow.
-// Without that cap, narrow/portrait images can pack 6-7+ frames into a single
-// row while still satisfying the height target — each frame then shrinks to
-// a sliver too small for the AI to actually make out any product detail.
-// Rows are capped at maxRowsPerCollage AND maxColsPerRow — once either cap is
-// hit, remaining images spill into a new collage entirely.
+// When cellAspectRatio === 0 the original behaviour is preserved: each image
+// uses its natural width/height ratio and rows are justified to fill the
+// canvas width.
+//
+// Rows are still capped at maxRowsPerCollage AND maxColsPerRow — once either
+// cap is hit, remaining images spill into a new collage entirely.
 
 /** @returns {Array<{images: Array<{item:any, ratio:number}>, height:number, isJustified:boolean}>} */
-function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows, maxCols) {
+function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter) {
     const rows = [];
     let currentRow = [];
-    let currentRatioSum = 0;
+
+    // When a fixed cell ratio is active every cell in the same row is identical
+    // in size, so the layout simplifies to: pack up to maxCols cells per row,
+    // compute the row height from the cell width, and never justify (cells are
+    // already uniform).
+    const fixedRatio = (cellAspectRatio > 0) ? cellAspectRatio : 0;
 
     for (const item of items) {
         if (rows.length >= maxRows) break; // row cap reached — caller starts a new collage with leftovers
 
-        const ratio = item.width / item.height;
-        currentRow.push({ item, ratio });
-        currentRatioSum += ratio;
-        const projectedHeight = containerWidth / currentRatioSum;
+        if (fixedRatio > 0) {
+            // Fixed-cell mode — all cells the same size.
+            currentRow.push({ item, ratio: fixedRatio });
 
-        // Close the row once it's either (a) hit the target height, justified,
-        // OR (b) hit the max-columns cap — whichever comes first. Without the
-        // column cap, a row of many narrow/portrait images can satisfy the
-        // height target while packing in far too many frames to be visually
-        // distinguishable (e.g. 6-7+ images crammed into one 1600px-wide row).
-        if (projectedHeight <= targetRowHeight) {
-            rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
-            currentRow = [];
-            currentRatioSum = 0;
-        } else if (currentRow.length >= maxCols) {
-            // Hit the column cap before reaching the target height — justify
-            // anyway (stretches slightly taller than targetRowHeight) so we
-            // never exceed maxCols frames in a single row.
-            rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
-            currentRow = [];
-            currentRatioSum = 0;
+            if (currentRow.length >= maxCols) {
+                // Row is full.  Cell width = (containerWidth - gutters) / maxCols.
+                const totalGutter = gutter * (maxCols - 1);
+                const cellW = (containerWidth - totalGutter) / maxCols;
+                const cellH = cellW / fixedRatio;
+                rows.push({ images: currentRow, height: cellH, isJustified: false });
+                currentRow = [];
+            }
+        } else {
+            // Natural-ratio mode — original justified-row algorithm.
+            const ratio = item.width / item.height;
+            currentRow.push({ item, ratio });
+            const currentRatioSum = currentRow.reduce((s, c) => s + c.ratio, 0);
+            const projectedHeight = containerWidth / currentRatioSum;
+
+            if (projectedHeight <= targetRowHeight) {
+                rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
+                currentRow = [];
+            } else if (currentRow.length >= maxCols) {
+                rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
+                currentRow = [];
+            }
         }
     }
 
+    // Flush the last partial row.
     if (currentRow.length > 0 && rows.length < maxRows) {
-        rows.push({ images: currentRow, height: targetRowHeight, isJustified: false });
+        if (fixedRatio > 0) {
+            const cols = currentRow.length;
+            // Keep the same cell size as full rows so partial rows don't look inflated.
+            const totalGutter = gutter * (maxCols - 1);
+            const cellW = (containerWidth - totalGutter) / maxCols;
+            const cellH = cellW / fixedRatio;
+            rows.push({ images: currentRow, height: cellH, isJustified: false });
+        } else {
+            rows.push({ images: currentRow, height: targetRowHeight, isJustified: false });
+        }
     }
 
     return rows;
@@ -734,12 +761,12 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows,
  * row-fill logic so the chunk boundaries match exactly where a real collage
  * would start a new row beyond either cap.
  */
-function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows, maxCols) {
+function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter) {
     const collages = [];
     let remaining = items.slice();
 
     while (remaining.length > 0) {
-        const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows, maxCols);
+        const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter);
         const used = rows.reduce((sum, r) => sum + r.images.length, 0);
         if (used === 0) break; // safety guard against infinite loop
         collages.push({ rows, items: remaining.slice(0, used) });
@@ -750,57 +777,120 @@ function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows,
 }
 
 /**
- * Render one collage (a set of justified rows) to a JPEG buffer using sharp,
- * and return a map of `col:row` → original item, so the caller can translate
+ * Render one collage (a set of rows) to a JPEG buffer using sharp,
+ * and return a map of `col:row` → original item so the caller can translate
  * Gemini's refs back to file_urls/post_id.
+ *
+ * When CONFIG.review.cellAspectRatio > 0 every cell is a fixed-size box
+ * (width/height = cellAspectRatio) rendered with fit:'cover' so the image
+ * fills the cell without distortion (centre-cropped).  White gutters of
+ * CONFIG.review.collageGutter pixels are placed between cells and rows.
+ *
+ * When cellAspectRatio === 0 the original variable-width justified layout is
+ * used (no gutters — original behaviour preserved).
  *
  * @returns {Promise<{buffer: Buffer, refMap: Map<string, any>}>}
  */
-async function renderCollage(rows, containerWidth, quality) {
-    const totalHeight = Math.round(rows.reduce((sum, r) => sum + r.height, 0));
+async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gutter) {
+    const fixedRatio = (cellAspectRatio > 0) ? cellAspectRatio : 0;
     const refMap = new Map();
     const composites = [];
 
-    let y = 0;
-    for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-        const row = rows[rowIdx];
-        let x = 0;
-        for (let colIdx = 0; colIdx < row.images.length; colIdx++) {
-            const { item, ratio } = row.images[colIdx];
-            let w = row.height * ratio;
-            const drawX = Math.floor(x);
-            const drawY = Math.floor(y);
-            let drawW = Math.ceil(w);
-            const drawH = Math.ceil(row.height);
-            if (row.isJustified && colIdx === row.images.length - 1) {
-                drawW = Math.ceil(containerWidth - x);
+    if (fixedRatio > 0) {
+        // ── Fixed-cell mode ─────────────────────────────────────────────────
+        // All cells have the same pixel dimensions.  We derive cellW from the
+        // widest row (which will be maxCols wide) so every partial row uses
+        // the same cell size.
+        const maxCols = Math.max(...rows.map(r => r.images.length));
+        const totalGutterW = gutter * (maxCols - 1);
+        const cellW = Math.max(1, Math.round((containerWidth - totalGutterW) / maxCols));
+        const cellH = Math.max(1, Math.round(cellW / fixedRatio));
+
+        // Total canvas dimensions include gutters between rows too.
+        const numRows = rows.length;
+        const totalGutterH = gutter * (numRows - 1);
+        const canvasW = cellW * maxCols + gutter * (maxCols - 1);
+        const canvasH = cellH * numRows + totalGutterH;
+
+        let y = 0;
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const row = rows[rowIdx];
+            let x = 0;
+            for (let colIdx = 0; colIdx < row.images.length; colIdx++) {
+                const { item } = row.images[colIdx];
+
+                // Resize + centre-crop to exact cell dimensions (no distortion).
+                const resized = await sharp(item.buffer)
+                    .resize(cellW, cellH, { fit: 'cover', position: 'centre' })
+                    .toBuffer();
+
+                composites.push({ input: resized, left: x, top: y });
+                refMap.set(`${colIdx}:${rowIdx}`, item);
+
+                x += cellW + (colIdx < row.images.length - 1 ? gutter : 0);
             }
-
-            const resized = await sharp(item.buffer)
-                .resize(Math.max(1, drawW), Math.max(1, drawH), { fit: 'fill' })
-                .toBuffer();
-
-            composites.push({ input: resized, left: drawX, top: drawY });
-            refMap.set(`${colIdx}:${rowIdx}`, item);
-
-            x += w;
+            y += cellH + (rowIdx < rows.length - 1 ? gutter : 0);
         }
-        y += row.height;
+
+        const buffer = await sharp({
+            create: {
+                width:      canvasW,
+                height:     canvasH,
+                channels:   3,
+                background: { r: 255, g: 255, b: 255 }, // white gutter/background
+            },
+        })
+            .composite(composites)
+            .jpeg({ quality })
+            .toBuffer();
+
+        return { buffer, refMap };
+
+    } else {
+        // ── Natural-ratio mode — original justified-row algorithm ────────────
+        const totalHeight = Math.round(rows.reduce((sum, r) => sum + r.height, 0));
+
+        let y = 0;
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const row = rows[rowIdx];
+            let x = 0;
+            for (let colIdx = 0; colIdx < row.images.length; colIdx++) {
+                const { item, ratio } = row.images[colIdx];
+                let w = row.height * ratio;
+                const drawX = Math.floor(x);
+                const drawY = Math.floor(y);
+                let drawW = Math.ceil(w);
+                const drawH = Math.ceil(row.height);
+                if (row.isJustified && colIdx === row.images.length - 1) {
+                    drawW = Math.ceil(containerWidth - x);
+                }
+
+                const resized = await sharp(item.buffer)
+                    .resize(Math.max(1, drawW), Math.max(1, drawH), { fit: 'fill' })
+                    .toBuffer();
+
+                composites.push({ input: resized, left: drawX, top: drawY });
+                refMap.set(`${colIdx}:${rowIdx}`, item);
+
+                x += w;
+            }
+            y += row.height;
+        }
+
+        const buffer = await sharp({
+            create: {
+                width:      Math.round(containerWidth),
+                height:     totalHeight,
+                channels:   3,
+                background: { r: 13, g: 13, b: 13 }, // matches --bg: #0d0d0d
+            },
+        })
+            .composite(composites)
+            .jpeg({ quality })
+            .toBuffer();
+
+        return { buffer, refMap };
     }
-
-    const buffer = await sharp({
-        create: {
-            width:      Math.round(containerWidth),
-            height:     totalHeight,
-            channels:   3,
-            background: { r: 13, g: 13, b: 13 }, // matches --bg: #0d0d0d
-        },
-    })
-        .composite(composites)
-        .jpeg({ quality })
-        .toBuffer();
-
-    return { buffer, refMap };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -964,9 +1054,11 @@ async function runReviewStage(db, collection) {
         CONFIG.review.collageMaxWidth,
         CONFIG.review.targetRowHeight,
         CONFIG.review.maxRowsPerCollage,
-        CONFIG.review.maxColsPerRow
+        CONFIG.review.maxColsPerRow,
+        CONFIG.review.cellAspectRatio,
+        CONFIG.review.collageGutter
     );
-    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each).`);
+    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each, cell ratio ${CONFIG.review.cellAspectRatio > 0 ? CONFIG.review.cellAspectRatio.toFixed(2) : 'natural'}, gutter ${CONFIG.review.collageGutter}px).`);
 
     // Track every entry that went through review, so we know what to remove
     // at the end if it wasn't explicitly kept.
@@ -982,7 +1074,7 @@ async function runReviewStage(db, collection) {
         let refMap;
         let collageBuffer;
         try {
-            const rendered = await renderCollage(rows, CONFIG.review.collageMaxWidth, CONFIG.review.jpegQuality);
+            const rendered = await renderCollage(rows, CONFIG.review.collageMaxWidth, CONFIG.review.jpegQuality, CONFIG.review.cellAspectRatio, CONFIG.review.collageGutter);
             collageBuffer = rendered.buffer;
             refMap = rendered.refMap;
         } catch (err) {
