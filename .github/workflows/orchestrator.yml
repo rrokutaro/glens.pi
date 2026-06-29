@@ -71,6 +71,14 @@ on:
         description: 'Max columns per row in a review collage (keeps frames large enough for the AI to inspect)'
         required: false
         default: '5'
+      review_cell_aspect_ratio:
+        description: 'Fixed width/height ratio for every collage cell (e.g. 0.75 = 3:4 portrait). Set to 0 to use each image''s natural ratio.'
+        required: false
+        default: '0.75'
+      review_collage_gutter:
+        description: 'White gutter (px) between cells and rows in the review collage. Set to 0 to disable.'
+        required: false
+        default: '8'
       gemini_model:
         description: 'Google Gemini model to use for review'
         required: false
@@ -189,6 +197,8 @@ jobs:
           ORCH_REVIEW_FETCH_LIMIT: ${{ github.event.inputs.review_fetch_limit || github.event.client_payload.review_fetch_limit || '60' }}
           ORCH_REVIEW_MAX_ROWS: ${{ github.event.inputs.review_max_rows || github.event.client_payload.review_max_rows || '4' }}
           ORCH_REVIEW_MAX_COLS: ${{ github.event.inputs.review_max_cols || github.event.client_payload.review_max_cols || '5' }}
+          ORCH_REVIEW_CELL_ASPECT_RATIO: ${{ github.event.inputs.review_cell_aspect_ratio || github.event.client_payload.review_cell_aspect_ratio || '0.75' }}
+          ORCH_REVIEW_COLLAGE_GUTTER: ${{ github.event.inputs.review_collage_gutter || github.event.client_payload.review_collage_gutter || '8' }}
           ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || github.event.client_payload.gemini_model || 'gemini-3.5-flash-lite' }}
           ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
           ORCH_REVIEW_SAVE_COLLAGES: ${{ github.event.inputs.review_save_collages || github.event.client_payload.review_save_collages || 'false' }}
