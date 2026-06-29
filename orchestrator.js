@@ -886,7 +886,11 @@ async function fetchUnreviewedFiles(collection, limit) {
 
 /** Download an image file's bytes + dimensions for collage building. */
 async function fetchImageForCollage(fileEntry) {
-    const resp = await fetch(fileEntry.url, { redirect: 'follow' });
+    // file_urls point at our own HuggingFace dataset repo, which may be
+    // private — send the same bearer token used for upload/commit, mirroring
+    // hfFetch(). Harmless to send on public repos too.
+    const headers = CONFIG.hf.token ? { Authorization: `Bearer ${CONFIG.hf.token}` } : {};
+    const resp = await fetch(fileEntry.url, { redirect: 'follow', headers });
     if (!resp.ok) throw new Error(`Failed to fetch image for review (${resp.status}): ${fileEntry.url.slice(0, 80)}`);
     const buffer = Buffer.from(await resp.arrayBuffer());
     const meta = await sharp(buffer).metadata();
