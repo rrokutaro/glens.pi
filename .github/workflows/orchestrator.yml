@@ -67,6 +67,10 @@ on:
         description: 'Max rows per review collage'
         required: false
         default: '4'
+      review_max_cols:
+        description: 'Max columns per row in a review collage (keeps frames large enough for the AI to inspect)'
+        required: false
+        default: '5'
       gemini_model:
         description: 'Google Gemini model to use for review'
         required: false
@@ -180,6 +184,7 @@ jobs:
           ORCH_REVIEW_ENABLED: ${{ github.event.inputs.review_enabled || github.event.client_payload.review_enabled || 'true' }}
           ORCH_REVIEW_FETCH_LIMIT: ${{ github.event.inputs.review_fetch_limit || github.event.client_payload.review_fetch_limit || '60' }}
           ORCH_REVIEW_MAX_ROWS: ${{ github.event.inputs.review_max_rows || github.event.client_payload.review_max_rows || '4' }}
+          ORCH_REVIEW_MAX_COLS: ${{ github.event.inputs.review_max_cols || github.event.client_payload.review_max_cols || '5' }}
           ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || github.event.client_payload.gemini_model || 'gemini-3.5-flash-lite' }}
           ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
           ORCH_RUN_ID: ${{ github.run_id }}
