@@ -55,6 +55,26 @@ on:
         description: 'Recording resolution (WxH)'
         required: false
         default: '1280x800'
+      review_enabled:
+        description: 'Enable the AI (Gemini) review stage (true/false)'
+        required: false
+        default: 'true'
+      review_fetch_limit:
+        description: 'Max number of unreviewed image file_urls to fetch and review per run'
+        required: false
+        default: '60'
+      review_max_rows:
+        description: 'Max rows per review collage'
+        required: false
+        default: '4'
+      gemini_model:
+        description: 'Google Gemini model to use for review'
+        required: false
+        default: 'gemini-3.5-flash-lite'
+      gemini_api_keys:
+        description: 'Comma-separated Google Gemini API keys (or leave empty to use secrets.ORCHESTRATOR_GEMINI_API_KEYS)'
+        required: false
+        default: ''
 
   repository_dispatch:
     types:
@@ -93,7 +113,7 @@ jobs:
             libpango-1.0-0 libcairo2 libxdamage1
 
       - name: Install npm dependencies
-        run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib mongodb
+        run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib mongodb sharp
 
       - name: Get installed CloakBrowser version
         id: cloakbrowser-version
@@ -132,6 +152,16 @@ jobs:
           TOKEN_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri }}
         run: echo "::add-mask::$TOKEN_TO_MASK"
 
+      - name: Mask Gemini API keys
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.gemini_api_keys != '') ||
+          (github.event_name == 'repository_dispatch' && github.event.client_payload.gemini_api_keys != '')
+        env:
+          KEYS_TO_MASK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys }}
+        run: |
+          IFS=',' read -ra KEYS <<< "$KEYS_TO_MASK"
+          for k in "${KEYS[@]}"; do echo "::add-mask::$k"; done
+
       - name: Run Orchestrator
         env:
           ORCH_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI || '' }}
@@ -147,6 +177,11 @@ jobs:
           ORCH_RECORDING_FPS: ${{ github.event.inputs.recording_fps || github.event.client_payload.recording_fps || '12' }}
           ORCH_RECORDING_QUALITY: ${{ github.event.inputs.recording_quality || github.event.client_payload.recording_quality || '60' }}
           ORCH_RECORDING_RES: ${{ github.event.inputs.recording_res || github.event.client_payload.recording_res || '1280x800' }}
+          ORCH_REVIEW_ENABLED: ${{ github.event.inputs.review_enabled || github.event.client_payload.review_enabled || 'true' }}
+          ORCH_REVIEW_FETCH_LIMIT: ${{ github.event.inputs.review_fetch_limit || github.event.client_payload.review_fetch_limit || '60' }}
+          ORCH_REVIEW_MAX_ROWS: ${{ github.event.inputs.review_max_rows || github.event.client_payload.review_max_rows || '4' }}
+          ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || github.event.client_payload.gemini_model || 'gemini-3.5-flash-lite' }}
+          ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
           ORCH_RUN_ID: ${{ github.run_id }}
         run: node orchestrator.js
 
