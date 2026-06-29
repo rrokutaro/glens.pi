@@ -46,8 +46,9 @@ const CONFIG = {
         fetchLimit:       parseInt(process.env.ORCH_REVIEW_FETCH_LIMIT     || '60',  10),
         // Collage constraints (mirrors the Infinite Collage Maker tool).
         maxRowsPerCollage: parseInt(process.env.ORCH_REVIEW_MAX_ROWS       || '4',   10),
+        maxColsPerRow:     parseInt(process.env.ORCH_REVIEW_MAX_COLS       || '5',   10),
         targetRowHeight:   parseInt(process.env.ORCH_REVIEW_ROW_HEIGHT     || '480', 10),
-        collageMaxWidth:   parseInt(process.env.ORCH_REVIEW_COLLAGE_WIDTH  || '1600',10),
+        collageMaxWidth:   parseInt(process.env.ORCH_REVIEW_COLLAGE_WIDTH  || '2200',10),
         jpegQuality:       parseInt(process.env.ORCH_REVIEW_JPEG_QUALITY   || '82',  10),
         // Gemini model + keys (comma-separated list of API keys to rotate across).
         model:            process.env.ORCH_GEMINI_MODEL    || 'gemini-3.5-flash-lite',
@@ -670,12 +671,19 @@ async function markGeminiKeyRateLimited(db, keyHash) {
 // greedily fill a row by accumulating width/height ratios until the row's
 // projected height drops to the target, then justify (stretch) that row to
 // exactly fill the canvas width. The final, incomplete row is left
-// unjustified at natural size. Rows are additionally capped at
-// CONFIG.review.maxRowsPerCollage — once the cap is hit, remaining images
-// spill into a new collage entirely.
+// unjustified at natural size.
+//
+// UNLIKE the original HTML tool (which only optimizes for a nice-looking
+// visual grid and lets a row hold as many images as fit the height target),
+// this version ALSO caps columns per row at CONFIG.review.maxColsPerRow.
+// Without that cap, narrow/portrait images can pack 6-7+ frames into a single
+// row while still satisfying the height target — each frame then shrinks to
+// a sliver too small for the AI to actually make out any product detail.
+// Rows are capped at maxRowsPerCollage AND maxColsPerRow — once either cap is
+// hit, remaining images spill into a new collage entirely.
 
 /** @returns {Array<{images: Array<{item:any, ratio:number}>, height:number, isJustified:boolean}>} */
-function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows) {
+function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows, maxCols) {
     const rows = [];
     let currentRow = [];
     let currentRatioSum = 0;
@@ -687,7 +695,20 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows)
         currentRow.push({ item, ratio });
         currentRatioSum += ratio;
         const projectedHeight = containerWidth / currentRatioSum;
+
+        // Close the row once it's either (a) hit the target height, justified,
+        // OR (b) hit the max-columns cap — whichever comes first. Without the
+        // column cap, a row of many narrow/portrait images can satisfy the
+        // height target while packing in far too many frames to be visually
+        // distinguishable (e.g. 6-7+ images crammed into one 1600px-wide row).
         if (projectedHeight <= targetRowHeight) {
+            rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
+            currentRow = [];
+            currentRatioSum = 0;
+        } else if (currentRow.length >= maxCols) {
+            // Hit the column cap before reaching the target height — justify
+            // anyway (stretches slightly taller than targetRowHeight) so we
+            // never exceed maxCols frames in a single row.
             rows.push({ images: currentRow, height: projectedHeight, isJustified: true });
             currentRow = [];
             currentRatioSum = 0;
@@ -703,16 +724,16 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows)
 
 /**
  * Split `items` (each needs .width/.height/.buffer) into chunks that each fit
- * within maxRowsPerCollage, mirroring the same greedy row-fill logic so the
- * chunk boundaries match exactly where a real collage would start a new row
- * beyond the cap.
+ * within maxRowsPerCollage × maxColsPerRow, mirroring the same greedy
+ * row-fill logic so the chunk boundaries match exactly where a real collage
+ * would start a new row beyond either cap.
  */
-function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows) {
+function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows, maxCols) {
     const collages = [];
     let remaining = items.slice();
 
     while (remaining.length > 0) {
-        const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows);
+        const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows, maxCols);
         const used = rows.reduce((sum, r) => sum + r.images.length, 0);
         if (used === 0) break; // safety guard against infinite loop
         collages.push({ rows, items: remaining.slice(0, used) });
@@ -936,9 +957,10 @@ async function runReviewStage(db, collection) {
         downloaded,
         CONFIG.review.collageMaxWidth,
         CONFIG.review.targetRowHeight,
-        CONFIG.review.maxRowsPerCollage
+        CONFIG.review.maxRowsPerCollage,
+        CONFIG.review.maxColsPerRow
     );
-    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows each).`);
+    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each).`);
 
     // Track every entry that went through review, so we know what to remove
     // at the end if it wasn't explicitly kept.
