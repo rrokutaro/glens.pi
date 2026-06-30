@@ -28,7 +28,7 @@ on:
         required: false
         default: ''
       hf_token:
-        description: 'HuggingFace token for uploading results'
+        description: 'HuggingFace token for uploading/downloading results (or leave empty to use secrets.GLENS_HF_TOKEN / ORCHESTRATOR_HF_TOKEN)'
         required: false
         default: ''
       hf_repo:
@@ -155,7 +155,7 @@ jobs:
         GLENS_NAV_WAIT: domcontentloaded
         GLENS_LOG_LEVEL: info
         GLENS_IMAGE_URLS: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.image_urls) || github.event.inputs.image_urls || '' }}
-        GLENS_HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
+        GLENS_HF_TOKEN: ${{ github.event.inputs.hf_token || github.event.client_payload.hf_token || secrets.GLENS_HF_TOKEN || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
         GLENS_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri || secrets.GLENS_MONGODB_URI || '' }}
         GLENS_MONGODB_DB: ${{ github.event.inputs.mongodb_db || github.event.client_payload.mongodb_db || 'ugc-dropship' }}
         GLENS_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || github.event.client_payload.mongodb_collection || 'scraped-posts' }}
@@ -164,9 +164,9 @@ jobs:
       run: node glens.js
 
     - name: Upload successful results to HuggingFace
-      if: always() && (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '' || github.event_name == 'repository_dispatch' && github.event.client_payload.hf_token != '')
+      if: always()
       env:
-        HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
+        HF_TOKEN: ${{ github.event.inputs.hf_token || github.event.client_payload.hf_token || secrets.GLENS_HF_TOKEN || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
         HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'hfusername/ugc-dropship' }}
         HF_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_path || github.event.client_payload.hf_path || 'scraped-posts/glens-responses' }}
         HF_REPO_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo_type || github.event.client_payload.hf_repo_type || 'dataset' }}
@@ -176,7 +176,11 @@ jobs:
         import os, glob
         from huggingface_hub import HfApi
 
-        token   = os.environ["HF_TOKEN"]
+        token   = os.environ.get("HF_TOKEN", "")
+        if not token:
+            print("No HF_TOKEN provided. Skipping upload to HuggingFace.")
+            exit(0)
+            
         repo_id = os.environ["HF_REPO"]
         prefix  = os.environ["HF_PATH"]
         rtype   = os.environ["HF_REPO_TYPE"]
