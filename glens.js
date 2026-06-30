@@ -1252,13 +1252,19 @@ async function processImageStandard(browser, imageInfo, index, total) {
             await takeScreenshot(page, ssPrefix + '_response.png');
 
             const analysis = analyzeResponse(resp.text);
+            let finalError = null;
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
+                finalError = 'Blocked: IP blocked/CAPTCHA detected';
+            } else if (analysis.isRateLimited) {
+                finalError = 'Blocked: Rate limited';
+            } else if (!analysis.hasJson) {
+                finalError = 'Failed: No valid JSON found in response';
             }
 
             return {
                 filename, originalId: imageInfo.originalId, imageUrl, response: resp.text,
-                html: resp.html, duration: Date.now() - t0, error: null, timedOut: false,
+                html: resp.html, duration: Date.now() - t0, error: finalError, timedOut: false,
                 jsonExtracted: resp.jsonExtracted, mongoMeta: imageInfo.mongoMeta || null
             };
         } finally {
@@ -1360,13 +1366,19 @@ async function processImageLens(browser, imageInfo, index, total) {
             await takeScreenshot(page, ssPrefix + '_response.png');
 
             const analysis = analyzeResponse(resp.text);
+            let finalError = null;
             if (analysis.isBlocked || analysis.isCaptchaHtml) {
                 if (recorder) await recorder.updateStatus('BLOCKED');
+                finalError = 'Blocked: IP blocked/CAPTCHA detected';
+            } else if (analysis.isRateLimited) {
+                finalError = 'Blocked: Rate limited';
+            } else if (!analysis.hasJson) {
+                finalError = 'Failed: No valid JSON found in response';
             }
 
             return {
                 filename, originalId: imageInfo.originalId, imageUrl, response: resp.text,
-                html: resp.html, duration: Date.now() - t0, error: null, timedOut: false,
+                html: resp.html, duration: Date.now() - t0, error: finalError, timedOut: false,
                 jsonExtracted: resp.jsonExtracted, mongoMeta: imageInfo.mongoMeta || null
             };
         } finally {
@@ -1680,11 +1692,12 @@ async function startTesting() {
 
             let updatedCount = 0;
             for (const r of allResults) {
-                if (!r.error && !r.timedOut && r.response && r.mongoMeta) {
+                const extractedJson = extractJsonFromText(r.response || '');
+                if (!r.error && !r.timedOut && extractedJson && r.mongoMeta) {
                     try {
                         await collection.updateOne(
                             { _id: r.mongoMeta.docId },
-                            { $set: { [`${r.mongoMeta.path}.response`]: r.response } }
+                            { $set: { [`${r.mongoMeta.path}.response`]: extractedJson } }
                         );
                         updatedCount++;
                         log('debug', `MongoDB updated: ${r.mongoMeta.postId} ${r.mongoMeta.path}`);
@@ -1718,7 +1731,7 @@ async function startTesting() {
         }
     }
 
-    const successful = allResults.filter(r => !r.error && !r.timedOut).length;
+    const successful = allResults.filter(r => !r.error && !r.timedOut && extractJsonFromText(r.response || '')).length;
     const withJson = allResults.filter(r => !!extractJsonFromText(r.response || '')).length;
     const blocked = allResults.filter(r => {
         const a = analyzeResponse(r.response);
@@ -1741,7 +1754,8 @@ async function startTesting() {
         results: allResults.map(r => {
             const a = analyzeResponse(r.response);
             return {
-                filename: r.filename, originalId: r.originalId, imageUrl: r.imageUrl, response: r.response,
+                filename: r.filename, originalId: r.originalId, imageUrl: r.imageUrl, 
+                response: extractJsonFromText(r.response || '') || r.response,
                 duration: r.duration, error: r.error || null, timedOut: r.timedOut || false,
                 isBlocked: a.isBlocked || a.isCaptchaHtml,
                 isRateLimited: a.isRateLimited,
@@ -1760,18 +1774,19 @@ async function startTesting() {
     const SUCCESSFUL_DIR = path.join(OUTPUT_DIR, 'successful');
     if (!fs.existsSync(SUCCESSFUL_DIR)) fs.mkdirSync(SUCCESSFUL_DIR, { recursive: true });
 
-    const successfulResults = allResults.filter(r => !r.error && !r.timedOut && r.response);
+    const successfulResults = allResults.filter(r => !r.error && !r.timedOut && extractJsonFromText(r.response || ''));
 
     for (const r of successfulResults) {
         const identifier = r.originalId || r.filename;
         const hash = crypto.createHash('md5').update(identifier).digest('hex');
         const outputFilename = hash + '.json';
 
+        const extractedJson = extractJsonFromText(r.response || '');
         const payload = {
             originalId: identifier,
             filename: outputFilename,
             imageURL: r.imageUrl,
-            response: r.response
+            response: extractedJson
         };
         const filePath = path.join(SUCCESSFUL_DIR, outputFilename);
         const data = JSON.stringify(payload, null, 2);
