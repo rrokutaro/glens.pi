@@ -28,21 +28,9 @@ on:
         required: false
         default: ''
       hf_token:
-        description: 'HuggingFace token for uploading/downloading results (or leave empty to use secrets.GLENS_HF_TOKEN / ORCHESTRATOR_HF_TOKEN)'
+        description: 'HuggingFace token for downloading results (or leave empty to use secrets.GLENS_HF_TOKEN / ORCHESTRATOR_HF_TOKEN)'
         required: false
         default: ''
-      hf_repo:
-        description: 'HuggingFace repo ID (e.g., rrokutaro/ugc-dropship)'
-        required: false
-        default: 'hfusername/ugc-dropship'
-      hf_path:
-        description: 'Target directory inside the HF repo'
-        required: false
-        default: 'scraped-posts/glens-responses'
-      hf_repo_type:
-        description: 'HF repo type: dataset, model, or space'
-        required: false
-        default: 'dataset'
 
   repository_dispatch:
     types:
@@ -162,48 +150,6 @@ jobs:
         GLENS_MONGODB_LIMIT: ${{ github.event.inputs.mongodb_limit || github.event.client_payload.mongodb_limit || '20' }}
         GLENS_RUN_ID: ${{ github.run_id }}
       run: node glens.js
-
-    - name: Upload successful results to HuggingFace
-      if: always()
-      env:
-        HF_TOKEN: ${{ github.event.inputs.hf_token || github.event.client_payload.hf_token || secrets.GLENS_HF_TOKEN || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
-        HF_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo || github.event.client_payload.hf_repo || 'hfusername/ugc-dropship' }}
-        HF_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_path || github.event.client_payload.hf_path || 'scraped-posts/glens-responses' }}
-        HF_REPO_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_repo_type || github.event.client_payload.hf_repo_type || 'dataset' }}
-      run: |
-        pip install -q huggingface_hub
-        python3 << 'PYEOF'
-        import os, glob
-        from huggingface_hub import HfApi
-
-        token   = os.environ.get("HF_TOKEN", "")
-        if not token:
-            print("No HF_TOKEN provided. Skipping upload to HuggingFace.")
-            exit(0)
-            
-        repo_id = os.environ["HF_REPO"]
-        prefix  = os.environ["HF_PATH"]
-        rtype   = os.environ["HF_REPO_TYPE"]
-
-        api = HfApi(token=token)
-        files = glob.glob("output/successful/*.json")
-
-        if not files:
-            print("No successful results to upload.")
-            exit(0)
-
-        for f in files:
-            name = os.path.basename(f)
-            target = f"{prefix}/{name}" if prefix else name
-            print(f"Uploading {name}  ->  {repo_id}/{target}")
-            api.upload_file(
-                path_or_fileobj=f,
-                path_in_repo=target,
-                repo_id=repo_id,
-                repo_type=rtype,
-            )
-        print(f"Done. Uploaded {len(files)} file(s).")
-        PYEOF
 
     - name: Upload output artifacts
       if: always()
