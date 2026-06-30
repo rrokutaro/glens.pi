@@ -1,369 +1,164 @@
-# GLENS.PI — Google Lens Product Identifier
+# UGC Dropship Pipeline
 
 ![](./assets/banner.gif)
 
-Automated pipeline that uploads images to Google Lens, extracts AI-generated product analysis (titles, brands, prices, sources, dropship viability, social appearances), and outputs structured JSON. It does not rely on manually clicking elements; instead it navigates directly to URLs and extracts the returned JSON data from the DOM. This makes it far more robust and reliable than fragile UI-automation scripts that break when selectors change.
+This system automatically scrapes Instagram posts, downloads their photos and videos, and runs an AI reviewer to keep only the best product shots. The kept images are then fed into Google Lens to identify exactly what products are shown, find where to buy them, and score their dropshipping potential — all managed through GitHub Actions with results stored in MongoDB and HuggingFace.
 
-Runs on **GitHub Actions** (with optional HuggingFace upload) or locally with Node.js.
+Two GitHub Actions workflows that automate Instagram media scraping, AI review, and product reverse-search.
 
----
-
-## What it does
-
-1. **Discovers** images from `./images/` (or from a JSON array of URLs, or from **MongoDB**)
-2. **Resizes** them for fast upload (configurable max dimension/quality)
-3. **Uploads** to a temporary image host, falling back through a chain (catbox.moe → litterbox → uguu.se → storage.to → imgbb)
-4. **Navigates** Google Lens with the image URL + structured prompt
-5. **Extracts** the AI response as clean JSON (with robust fallback parsing)
-6. **Records** the entire browser session as an MP4 (optional) and compiles all clips into a single session video
-7. **Saves** everything to `./output/` and optionally **pushes successful results to a HuggingFace repo**
-8. *(New)* **MongoDB mode**: Pulls reviewed posts from MongoDB, extracts video frames into a merged image, runs the pipeline, and writes successful responses back to the DB
+| Workflow | What it does | Trigger event |
+|---|---|---|
+| **Orchestrator** | Downloads posts → uploads to HuggingFace → Gemini AI review → MongoDB | `orchestrator-run` |
+| **GLENS** | Pulls reviewed images → Google Lens / AI lookup → extracts product JSON | `glens-run` |
 
 ---
 
-## Launch Methods
+## Required Secrets
 
-There are **four** supported ways to launch the workflow:
+Add these in **Settings → Secrets and variables → Actions**:
 
-### 1. GitHub Actions — MongoDB Mode (Recommended)
-Best for production pipelines connected to your scraped content database.
-
-1. Add your MongoDB URI to **Settings → Secrets and variables → Actions → New repository secret**:
-   - Name: `GLENS_MONGODB_URI`
-   - Value: `mongodb+srv://...`
-
-2. *(Optional)* Go to **Actions → GLENS → Run workflow** and adjust:
-   - `mongodb_db` — default `ugc-dropship`
-   - `mongodb_collection` — default `scraped-posts`
-   - `mongodb_limit` — default `20` (max posts per run)
-
-3. The runner will:
-   - Query `{ reviewed: true }` from your collection, capped at the limit
-   - Only return posts that have at least one file without a `response`
-   - For **images**: send the URL directly through the pipeline
-   - For **videos**: download the video, extract the specified frames, merge them vertically into one image, and send that through the pipeline
-   - Write successful AI responses back to `file_urls[i].response` in MongoDB
-   - Skip files that already have a `response` (never overwrite existing data)
-
-### 2. GitHub Actions — Manual Run (workflow_dispatch)
-Best for one-off runs or testing.
-
-1. Fork or create a repo with these files:
-   ```
-   .github/workflows/glens.yml
-   glens.js
-   images/   (optional if you provide URLs)
-   ```
-
-2. Go to **Actions → GLENS → Run workflow**
-
-3. *(Optional)* Fill in the inputs:
-   - **image_urls** — JSON array of direct image URLs, e.g. `["https://i.imgur.com/abc.jpg"]`. If left empty, the workflow looks for images in the `./images/` directory.
-   - **hf_token** — HuggingFace write token. If provided, successful JSON results are auto-uploaded to your HF repo.
-   - **hf_repo** — Target repo ID (default: `hfusername/ugc-dropship`).
-   - **hf_path** — Directory inside the repo (default: `assets/glens-responses`).
-   - **hf_repo_type** — `dataset`, `model`, or `space` (default: `dataset`).
-
-4. Download artifacts from the completed run (`glens-output`) or find your files on HuggingFace.
-
-### 3. GitHub Actions — API / Webhook (repository_dispatch)
-Best for triggering remotely from another service, script, or scheduler.
-
-Send a `POST` request to the GitHub Dispatches API:
-
-```bash
-curl -X POST \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: token YOUR_PERSONAL_ACCESS_TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/dispatches \
-  -d '{
-    "event_type": "glens-run",
-    "client_payload": {
-      "image_urls": ["https://example.com/shoe1.jpg", "https://example.com/bag2.jpg"],
-      "mongodb_uri": "mongodb+srv://...",
-      "mongodb_db": "ugc-dropship",
-      "mongodb_collection": "scraped-posts",
-      "mongodb_limit": "20",
-      "hf_token": "hf_xxxxxxxx",
-      "hf_repo": "yourname/ugc-dropship",
-      "hf_path": "assets/glens-responses",
-      "hf_repo_type": "dataset"
-    }
-  }'
-```
-
-- `event_type` **must** be exactly `glens-run`.
-- All `client_payload` fields are optional; the workflow falls back to defaults if omitted.
-- If `mongodb_uri` is provided, it takes precedence over `image_urls` and local folders.
-
-### 4. Local Execution
-Best for development, debugging, or running on your own infrastructure.
-
-```bash
-# 1. System deps (Ubuntu/Debian)
-sudo apt-get update
-sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 \
-  libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 \
-  libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
-
-# 2. Node deps
-npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb
-
-# 3. Install stealth Chromium
-npx cloakbrowser install
-
-# 4. Add images (local mode)
-mkdir -p images
-# ... copy your images here ...
-
-# 5. Configure & run
-export GLENS_MODE=lens
-export GLENS_BATCH_SIZE=3
-export GLENS_RECORDING=true
-# export GLENS_IMAGE_URLS='["https://i.imgur.com/abc.jpg"]'  # optional URL mode
-# export GLENS_MONGODB_URI='mongodb+srv://...'               # optional MongoDB mode
-# export GLENS_MONGODB_LIMIT=20                               # optional limit
-node glens.js
-```
-
----
-
-## MongoDB Document Schema
-
-The pipeline expects documents in this shape (matching your scraped Instagram content):
-
-```json
-{
-  "post_id": "p/ABC",
-  "timestamp": 1719820800000,
-  "reviewed": true,
-  "file_urls": [
-    { "url": "https://hf.co/.../image1.jpg", "type": "image" },
-    { "url": "https://hf.co/.../image2.webp", "type": "image" },
-    {
-      "url": "https://hf.co/.../video1.mp4",
-      "type": "video",
-      "frames": [3.32, 23.55, 45.33]
-    }
-  ]
-}
-```
-
-**Reel example:**
-```json
-{
-  "post_id": "reel/ABC",
-  "timestamp": 1719820800000,
-  "reviewed": true,
-  "file_urls": [
-    {
-      "url": "https://hf.co/.../reel.mp4",
-      "type": "video",
-      "frames": [3.32, 23.55, 45.33]
-    }
-  ]
-}
-```
-
-**After a successful run**, the pipeline updates the document in-place:
-
-```json
-{
-  "post_id": "p/ABC",
-  "reviewed": true,
-  "file_urls": [
-    { "url": "...", "type": "image", "response": "{\"products\":[...]}" },
-    { "url": "...", "type": "image" },
-    { "url": "...", "type": "video", "frames": [3.32, 23.55, 45.33], "response": "{\"products\":[...]}" }
-  ]
-}
-```
-
-Only successful files get the `response` field. Failed or blocked files are left untouched so you can retry later. Files that already have a response are **never** re-processed or overwritten.
+| Secret | Used by | Purpose |
+|---|---|---|
+| `ORCHESTRATOR_MONGODB_URI` | Orchestrator | MongoDB connection string |
+| `ORCHESTRATOR_HF_TOKEN` | Orchestrator | HuggingFace write token |
+| `ORCHESTRATOR_GEMINI_API_KEYS` | Orchestrator | Comma-separated Gemini keys (optional) |
+| `GLENS_MONGODB_URI` | GLENS | MongoDB connection string (skip if using direct image URLs) |
+| `GLENS_HF_TOKEN` | GLENS | HuggingFace read token (falls back to `ORCHESTRATOR_HF_TOKEN`) |
+| `GLENS_IMGBB_API_KEY` | GLENS | imgbb API key (optional upload fallback) |
 
 ---
 
 ## Configuration
 
-All settings are controlled via environment variables:
+### Orchestrator
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GLENS_MODE` | `lens` | `lens` (Google Lens) or `standard` (google.com/ai) |
-| `GLENS_BATCH_SIZE` | `3` | Images processed in parallel per batch |
-| `GLENS_BATCH_DELAY_MS` | `2000` | Delay between batches |
-| `GLENS_SEARCH_DELAY_MS` | `200` | Delay between individual searches (non-batch) |
-| `GLENS_NAV_TIMEOUT` | `30000` | Page navigation timeout (ms) |
-| `GLENS_RESP_TIMEOUT` | `30000` | Response wait timeout (ms) |
-| `GLENS_JSON_IDLE_MS` | `800` | How long JSON must be stable before considered complete |
-| `GLENS_UPLOAD_TIMEOUT` | `10000` | Image upload timeout (ms) |
-| `GLENS_UPLOAD_RETRIES` | `2` | Upload retry attempts per provider |
-| `GLENS_IMGBB_API_KEY` | `""` | Optional free API key for imgbb.com (https://api.imgbb.com/). If unset, imgbb is skipped in the upload fallback chain |
-| `GLENS_NAV_RETRIES` | `2` | Navigation retry attempts |
-| `GLENS_MAX_RETRIES` | `1` | Max image-level retries |
-| `GLENS_BACKOFF_BASE_MS` | `300` | Base retry backoff |
-| `GLENS_BACKOFF_MAX_MS` | `3000` | Max retry backoff |
-| `GLENS_MAX_DIM` | `1024` | Max image dimension for resize |
-| `GLENS_QUALITY` | `85` | JPEG quality for resized images |
-| `GLENS_SCREENSHOTS` | `false` | Enable screenshots |
-| `GLENS_SCREENSHOTS_ERROR_ONLY` | `true` | Only screenshot on errors |
-| `GLENS_RECORDING` | `true` | Enable session screen recording |
-| `GLENS_RECORDING_FPS` | `12` | Recording framerate |
-| `GLENS_RECORDING_QUALITY` | `60` | JPEG quality for frames |
-| `GLENS_RECORDING_RES` | `1280x720` | Recording resolution |
-| `GLENS_RECORDING_OVERLAY_COLOR` | `#FF0000` | Overlay text color |
-| `GLENS_RECORDING_OVERLAY_SIZE` | `16` | Overlay font size |
-| `GLENS_OUTPUT_DIR` | `./output` | Output directory |
-| `GLENS_SKIP_READY_CHECK` | `true` | Skip image ready check for speed |
-| `GLENS_FAST_CLOSE` | `true` | Close browser asynchronously |
-| `GLENS_NAV_WAIT` | `domcontentloaded` | Navigation wait condition |
-| `GLENS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `GLENS_IMAGE_URLS` | `""` | JSON array of image URLs to process instead of local files |
-| `GLENS_MONGODB_URI` | `""` | MongoDB connection string. If set, pulls from DB and ignores local/URL inputs |
-| `GLENS_MONGODB_DB` | `ugc-dropship` | MongoDB database name |
-| `GLENS_MONGODB_COLLECTION` | `scraped-posts` | MongoDB collection name |
-| `GLENS_MONGODB_LIMIT` | `20` | Max posts to pull from MongoDB per run |
-| `GLENS_RUN_ID` | `""` | Optional CI run ID (auto-set in GitHub Actions) |
+| Env Variable | Payload Key | Default | Set via | Description |
+|---|---|---|---|---|
+| `ORCH_MONGODB_URI` | `mongodb_uri` | — | Payload / Secret | MongoDB URI |
+| `ORCH_MONGODB_DB` | `mongodb_db` | `ugc-dropship` | Payload | Database name |
+| `ORCH_MONGODB_COLLECTION` | `mongodb_collection` | `scraped-posts` | Payload | Collection name |
+| `ORCH_HF_TOKEN` | `hf_token` | — | Payload / Secret | HuggingFace token |
+| `ORCH_HF_REPO` | `hf_repo` | `rrokutaro/ugc-dropship` | Payload | HF repo ID |
+| `ORCH_HF_ASSETS_PATH` | `hf_assets_path` | `scraped-posts/assets` | Payload | Asset path in repo |
+| `ORCH_BATCH_SIZE` | `batch_size` | `10` | Payload | Posts per run |
+| `ORCH_DOWNLOADER_CONCURRENCY` | `downloader_concurrency` | `3` | Payload | Parallel downloads |
+| `ORCH_LOG_LEVEL` | `log_level` | `info` | Payload | debug / info / warn / error |
+| `ORCH_RECORDING` | `recording` | `true` | Payload | Screen record browser |
+| `ORCH_RECORDING_FPS` | `recording_fps` | `12` | Payload | Recording framerate |
+| `ORCH_RECORDING_QUALITY` | `recording_quality` | `60` | Payload | JPEG quality (1-100) |
+| `ORCH_RECORDING_RES` | `recording_res` | `1280x800` | Payload | Recording resolution |
+| `ORCH_REVIEW_ENABLED` | `review_enabled` | `true` | Payload | Enable Gemini review |
+| `ORCH_REVIEW_FETCH_LIMIT` | `review_fetch_limit` | `60` | Payload | Max images to review |
+| `ORCH_REVIEW_MAX_ROWS` | `review_max_rows` | `4` | Payload | Collage rows |
+| `ORCH_REVIEW_MAX_COLS` | `review_max_cols` | `5` | Payload | Collage columns |
+| `ORCH_REVIEW_CELL_ASPECT_RATIO` | `review_cell_aspect_ratio` | `0.75` | Payload | Cell ratio (0 = natural) |
+| `ORCH_REVIEW_COLLAGE_GUTTER` | `review_collage_gutter` | `8` | Payload | Gutter px |
+| `ORCH_GEMINI_MODEL` | `gemini_model` | `gemini-3.5-flash-lite` | Payload | Gemini model |
+| `ORCH_GEMINI_API_KEYS` | `gemini_api_keys` | — | Payload / Secret | Comma-separated keys |
+| `ORCH_REVIEW_SAVE_COLLAGES` | `review_save_collages` | `false` | Payload | Save review JPEGs |
+
+**Advanced — edit workflow env block:**
+`ORCH_REVIEW_ROW_HEIGHT` (480), `ORCH_REVIEW_COLLAGE_WIDTH` (2200), `ORCH_REVIEW_JPEG_QUALITY` (82), `ORCH_GEMINI_QUOTA_COLLECTION` (gemini_quotas), `ORCH_GEMINI_RATE_LIMIT_COOLDOWN_MS` (600000), `ORCH_GEMINI_LOCK_STALE_MS` (300000), `ORCH_GEMINI_MAX_RETRIES` (3), `ORCH_RECORDING_OVERLAY_COLOR` (#00CFFF), `ORCH_RECORDING_OVERLAY_SIZE` (14), `ORCH_RUN_ID` (auto).
+
+### GLENS
+
+| Env Variable | Payload Key | Default | Set via | Description |
+|---|---|---|---|---|
+| `GLENS_MONGODB_URI` | `mongodb_uri` | — | Payload / Secret | MongoDB URI |
+| `GLENS_MONGODB_DB` | `mongodb_db` | `ugc-dropship` | Payload | Database name |
+| `GLENS_MONGODB_COLLECTION` | `mongodb_collection` | `scraped-posts` | Payload | Collection name |
+| `GLENS_MONGODB_LIMIT` | `mongodb_limit` | `20` | Payload | Files to process per run |
+| `GLENS_HF_TOKEN` | `hf_token` | — | Payload / Secret | HuggingFace read token |
+| `GLENS_IMGBB_API_KEY` | `imgbb_api_key` | — | Payload / Secret | imgbb fallback key |
+| `GLENS_IMAGE_URLS` | `image_urls` | — | Payload | JSON array of URLs (bypass MongoDB) |
+
+**Advanced — edit workflow env block:**
+`GLENS_MODE` (lens), `GLENS_BATCH_SIZE` (3), `GLENS_BATCH_DELAY_MS` (2000), `GLENS_SEARCH_DELAY_MS` (200), `GLENS_NAV_TIMEOUT` (30000), `GLENS_RESP_TIMEOUT` (30000), `GLENS_JSON_IDLE_MS` (800), `GLENS_UPLOAD_TIMEOUT` (10000), `GLENS_LITTERBOX_TIME` (1h), `GLENS_IMGBB_EXPIRATION_SECONDS` (600), `GLENS_UPLOAD_RETRIES` (2), `GLENS_NAV_RETRIES` (2), `GLENS_MAX_RETRIES` (1), `GLENS_BACKOFF_BASE_MS` (300), `GLENS_BACKOFF_MAX_MS` (3000), `GLENS_MAX_DIM` (1024), `GLENS_QUALITY` (85), `GLENS_SCREENSHOTS` (false), `GLENS_SCREENSHOTS_ERROR_ONLY` (true), `GLENS_RECORDING` (true), `GLENS_RECORDING_FPS` (12), `GLENS_RECORDING_QUALITY` (60), `GLENS_RECORDING_RES` (1280x720), `GLENS_RECORDING_OVERLAY_COLOR` (#FF0000), `GLENS_RECORDING_OVERLAY_SIZE` (16), `GLENS_OUTPUT_DIR` (./output), `GLENS_SKIP_READY_CHECK` (true), `GLENS_FAST_CLOSE` (true), `GLENS_NAV_WAIT` (domcontentloaded), `GLENS_LOG_LEVEL` (info), `GLENS_MONGODB_LOCK_TTL_MS` (90000), `GLENS_MONGODB_HEARTBEAT_MS` (30000), `GLENS_RUN_ID` (auto).
 
 ---
 
-## Output Structure
+## Launch Methods
 
-```
-output/
-├── responses/
-│   └── ai_responses.json          # Full results + metadata
-├── successful/
-│   ├── a1b2c3....json             # Individual successful results (MD5 hash filenames)
-│   └── ...
-├── screenshots/
-│   ├── lens_1_xxx_loaded.png     # Per-image screenshots (if enabled)
-│   ├── lens_1_xxx_lens.png
-│   └── ...
-└── recordings/
-    └── session_YYYY-MM-DD...mp4  # Compiled session video (if enabled)
+### 1. GitHub UI
+**Actions** → Select workflow → **Run workflow** → fill inputs.
+
+### 2. GitHub CLI
+```bash
+# Orchestrator
+gh workflow run orchestrator.yml -f batch_size=20 -f review_fetch_limit=30
+
+# GLENS
+gh workflow run glens.yml -f mongodb_limit=10
 ```
 
-### JSON Output Schema
+### 3. API / cron-job.org
 
-```json
-{
-  "timestamp": "2026-06-24T17:32:41.147Z",
-  "totalImages": 11,
-  "successful": 11,
-  "failed": 0,
-  "withValidJson": 10,
-  "blocked": 0,
-  "skippedBlocked": 0,
-  "rateLimited": 0,
-  "mode": "lens",
-  "config": { ... },
-  "system": { ... },
-  "results": [
-    {
-      "filename": "image.jpg",
-      "originalId": "image.jpg",
-      "imageUrl": "https://litter.catbox.moe/...",
-      "response": "{\"products\":[...]}",
-      "duration": 12345,
-      "error": null,
-      "timedOut": false,
-      "isBlocked": false,
-      "isRateLimited": false,
-      "hasJson": true,
-      "mongoMeta": null
+Create a GitHub PAT with **`repo`** scope.
+
+**Orchestrator** — every key from the Payload column above works in `client_payload`:
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer YOUR_PAT" \
+  https://api.github.com/repos/OWNER/REPO/dispatches \
+  -d '{
+    "event_type": "orchestrator-run",
+    "client_payload": {
+      "batch_size": "10",
+      "downloader_concurrency": "3",
+      "review_fetch_limit": "60",
+      "review_enabled": "true",
+      "gemini_api_keys": "key1,key2",
+      "recording": "true"
     }
-  ]
-}
+  }'
 ```
 
-Each `response` contains a `products` array with:
-- `title`, `brand`, `description`, `category`
-- `price` (current, original, currency)
-- `availability`, `sizing`
-- `sources` — 5+ direct product URLs (official store → major retailers → resellers)
-- `socialAppearances` — Instagram/TikTok/Pinterest posts
-- `dropshipViability` — score 1-10 + reasoning + risks
-- `estimatedResaleRange` — typical markup range
-- `alternatives` — 2-3 cheaper/similar alternatives
+**GLENS** — same pattern:
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer YOUR_PAT" \
+  https://api.github.com/repos/OWNER/REPO/dispatches \
+  -d '{
+    "event_type": "glens-run",
+    "client_payload": {
+      "mongodb_limit": "20",
+      "imgbb_api_key": "optional",
+      "image_urls": "[\"https://i.imgur.com/abc.jpg\"]"
+    }
+  }'
+```
+
+**cron-job.org setup**
+- **URL:** `https://api.github.com/repos/OWNER/REPO/dispatches`
+- **Method:** `POST`
+- **Headers:**
+  - `Accept: application/vnd.github+json`
+  - `Authorization: Bearer YOUR_PAT`
+- **Body:** `{"event_type":"orchestrator-run","client_payload":{"batch_size":"10"}}`
+- **Schedule:** e.g. every 6 hours
 
 ---
 
-## HuggingFace Integration
+## How It Works
 
-If you provide a `hf_token`, every successful JSON result is automatically uploaded to your HuggingFace repo inside the configured path. This is useful for:
-- Building a persistent dataset of product analyses
-- Serving results to downstream apps via the HF Hub
-- Collaborating without passing GitHub artifacts around
-
-The token is masked in GitHub Actions logs for security.
-
----
-
-## How it works
-
-### MongoDB Mode
-When `GLENS_MONGODB_URI` is provided, the pipeline:
-1. Connects to MongoDB and queries `{ reviewed: true }` with `$elemMatch` for files missing a response, capped at `GLENS_MONGODB_LIMIT` (default 20)
-2. For each `file_urls` entry:
-   - **Image**: passes the URL directly into the pipeline
-   - **Video**: downloads the MP4, uses `ffmpeg` to extract the specified frame timestamps, merges them vertically into a single JPG, and passes that merged image into the pipeline
-3. After all batches finish, iterates successful results and performs `$set: { "file_urls.N.response": "..." }` on the parent document
-4. Failed/blocked files are **not** updated, so you can retry them later
-5. Files that already have a `response` are **never** re-processed or overwritten
-
-### Batch Processing & Global Block Detection
-Images are processed in parallel batches (default 3). If **any** image in a batch triggers a Google CAPTCHA or block page, the pipeline assumes the IP is burned and **skips all remaining batches** immediately. This prevents pointless retries and wasted runner minutes.
-
-### Upload Providers
-Each image is sent up a fallback chain until one provider succeeds — if a host is down, rate-limited, or rejects the upload, the pipeline automatically moves to the next:
-
-1. **catbox.moe** (permanent, anonymous)
-2. **litterbox.catbox.moe** (72h temporary, anonymous)
-3. **uguu.se** (temporary, anonymous)
-4. **storage.to** (3-7 day expiry, anonymous, via its ShareX one-shot endpoint)
-5. **imgbb.com** (permanent — *requires* a free API key, see [Configuration](#configuration); skipped automatically if no key is set)
-
-The first four require no API keys and work from GitHub Actions runners as-is. imgbb only joins the chain once `GLENS_IMGBB_API_KEY` is set — without it, that step is skipped with no effect on the rest of the chain.
-
-### Screen Recording & Compilation
-Each browser context records its own clip. When the run finishes (success, failure, or block), all clips are stitched into a single `session_*.mp4` via ffmpeg. If compilation fails, individual clips are preserved.
-
-### JSON Extraction
-The extractor isolates the AI's actual response (ignoring the prompt text), attempts balanced-brace parsing, and falls back to a first-brace-to-last-brace slice if the model hallucinates malformed JSON.
-
-### Block Detection
-The script detects CAPTCHA, rate limits, and unusual-traffic pages by scanning response text for keywords. Blocked results are flagged but **not retried** — the IP is already flagged.
+```
+Instagram Post IDs (data.json)
+        ↓
+[Orchestrator] → Download → HuggingFace → Gemini Review → MongoDB
+        ↓
+[GLENS] ← Pull reviewed images from MongoDB
+        ↓
+Google Lens / AI → Product JSON → MongoDB + Artifacts
+```
 
 ---
 
-## Troubleshooting
+## Notes
 
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| `No images found` | `images/` directory empty or wrong path; `GLENS_IMAGE_URLS` empty or malformed; MongoDB has no `reviewed: true` posts with unprocessed files | Add images, pass URLs, or check MongoDB documents |
-| `All uploads failed` | Upload services down/changed | Already handled by catbox.moe fallback |
-| `IP BLOCKED DETECTED` | Google flagged the runner IP | Wait and retry, or use a different runner/region |
-| `0 JSON` | Response didn't contain valid product data | Check `ai_responses.json` raw response for errors |
-| Workflow stalls after completion | ffmpeg encoding the session video | 2-minute timeout — will auto-kill if stuck |
-| `SyntaxError: Unexpected token '%'` | `%%writefile` from Colab left in file | Ensure first line is `import { launch }` |
-| HF upload fails | Token lacks write access or repo doesn't exist | Verify `hf_token` and `hf_repo` |
-| MongoDB connection fails | URI is invalid or IP not allowlisted | Check URI format and Atlas Network Access |
-
----
-
-## Tech Stack
-
-- **Node.js 24** + ES modules
-- **Puppeteer** (via CloakBrowser) for stealth automation
-- **Sharp** for image resizing
-- **ffmpeg** for session video encoding and video frame extraction
-- **MongoDB Node.js driver** for database read/write
-- **GitHub Actions** `ubuntu-latest` runner
-- **HuggingFace Hub** for optional dataset persistence
-
----
-
-## License
-
-MIT — use at your own risk. Google Lens terms apply.
+- Place workflow files in `.github/workflows/orchestrator.yml` and `.github/workflows/glens.yml`.
+- Both use Puppeteer via CloakBrowser on `ubuntu-latest`.
+- Artifacts are retained for **1 day**.
+- GLENS can run standalone without MongoDB by passing `image_urls` in the payload.
+- Variables marked **Payload** can be passed via API/UI. Variables marked **Workflow env** require editing the `env:` block in the YAML (or fork) to change their defaults. 
