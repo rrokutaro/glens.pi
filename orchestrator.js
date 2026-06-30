@@ -1667,6 +1667,7 @@ async function processPost(postDoc, page, recorder) {
             
             try {
                 const pyPath = path.join(CONFIG.tmpDir, 'extract_frames.py');
+                log('info', 'Extracting video frames...');
                 execSync(`python3 "${pyPath}" "${tmpVidPath}" "${tmpFramesDir}"`, { stdio: 'ignore' });
             } catch (e) {
                 log('warn', `  Frame extraction failed for ${postId}: ${e.message}`);
