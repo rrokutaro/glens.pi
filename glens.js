@@ -92,6 +92,7 @@ const CONFIG = {
 // process. WORKER_ID is what gets written to `lockedBy`, so we only ever
 // release or extend locks that we ourselves currently hold.
 const WORKER_ID = (process.env.GLENS_RUN_ID || 'local') + '_' + crypto.randomBytes(6).toString('hex');
+const GLOBAL_HF_TOKEN = process.env.GLENS_HF_TOKEN || process.env.HF_TOKEN || '';
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 function log(level, ...args) {
@@ -384,8 +385,14 @@ async function processVideoFrames(videoUrl, frames, name) {
     fs.mkdirSync(framesDir, { recursive: true });
 
     log('debug', `Downloading video for ${safeName}...`);
-    const resp = await fetch(videoUrl);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} for video ${videoUrl.slice(0, 60)}`);
+    const headers = GLOBAL_HF_TOKEN ? { 'Authorization': `Bearer ${GLOBAL_HF_TOKEN}` } : {};
+    const resp = await fetch(videoUrl, { headers, redirect: 'follow' });
+    
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status} for video ${videoUrl}. Body: ${body.slice(0, 150)}`);
+    }
+    
     const buffer = Buffer.from(await resp.arrayBuffer());
     fs.writeFileSync(videoPath, buffer);
     log('debug', `Video ${safeName}: ${(buffer.length / 1024 / 1024).toFixed(1)}MB`);
@@ -675,8 +682,6 @@ async function fetchFromMongoDB() {
     let imageCount = 0;
     let skipCount = 0;
 
-    const hfToken = process.env.GLENS_HF_TOKEN || process.env.HF_TOKEN || '';
-
     for (const { post, path: objPath, file, docId } of claims) {
         const meta = {
             docId: docId,
@@ -695,12 +700,16 @@ async function fetchFromMongoDB() {
                 try { ext = path.extname(new URL(file.url).pathname) || '.jpg'; } catch(e) {}
                 const localPath = path.join(TMP_DIR, `dl_${safeName}_${uniqueSuffix}${ext}`);
 
-                log('debug', `Downloading local copy of ${file.url.slice(0, 60)}...`);
+                log('debug', `Downloading local copy of ${file.url}...`);
                 
-                const headers = hfToken ? { 'Authorization': `Bearer ${hfToken}` } : {};
-                const resp = await fetch(file.url, { headers });
+                const headers = GLOBAL_HF_TOKEN ? { 'Authorization': `Bearer ${GLOBAL_HF_TOKEN}` } : {};
+                const resp = await fetch(file.url, { headers, redirect: 'follow' });
                 
-                if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${file.url}`);
+                if (!resp.ok) {
+                    const body = await resp.text().catch(() => '');
+                    throw new Error(`HTTP ${resp.status} fetching ${file.url}. Body: ${body.slice(0, 150)}`);
+                }
+                
                 const buffer = Buffer.from(await resp.arrayBuffer());
                 fs.writeFileSync(localPath, buffer);
 
@@ -716,7 +725,7 @@ async function fetchFromMongoDB() {
                 skipCount++;
             }
         } catch (e) {
-            log('warn', `Failed to fetch/process ${meta.postId} ${objPath}: ${e.message.slice(0, 100)}`);
+            log('warn', `Failed to fetch/process ${meta.postId} ${objPath}: ${e.message.slice(0, 300)}`);
             skipCount++;
         }
     }
