@@ -155,6 +155,7 @@ jobs:
         GLENS_NAV_WAIT: domcontentloaded
         GLENS_LOG_LEVEL: info
         GLENS_IMAGE_URLS: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.image_urls) || github.event.inputs.image_urls || '' }}
+        GLENS_HF_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token || github.event.client_payload.hf_token }}
         GLENS_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || github.event.client_payload.mongodb_uri || secrets.GLENS_MONGODB_URI || '' }}
         GLENS_MONGODB_DB: ${{ github.event.inputs.mongodb_db || github.event.client_payload.mongodb_db || 'ugc-dropship' }}
         GLENS_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || github.event.client_payload.mongodb_collection || 'scraped-posts' }}
