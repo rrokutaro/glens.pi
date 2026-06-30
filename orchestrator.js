@@ -92,6 +92,9 @@ const CONFIG = {
 const RECORDINGS_DIR = path.join(CONFIG.outputDir, 'recordings');
 const COLLAGES_DIR    = path.join(CONFIG.outputDir, 'review-collages');
 
+// Ensure required dirs exist
+[CONFIG.outputDir, CONFIG.tmpDir, RECORDINGS_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
+
 // ─── Logging ───────────────────────────────────────────────────────────────────
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 function log(level, ...args) {
@@ -104,6 +107,143 @@ function log(level, ...args) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── PYTHON SCRIPT FOR EXTRACTING VIDEO FRAMES ────────────────────────────────
+const EXTRACT_FRAMES_PY = `
+import sys
+import os
+import cv2
+import numpy as np
+from scipy.fft import dct as scipy_dct
+from scenedetect import open_video, SceneManager
+from scenedetect.detectors import ContentDetector
+from ultralytics import YOLO
+
+def laplacian_sharpness(gray):
+    return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+def phash(frame_bgr, hash_size=8, high_freq_factor=4):
+    img_size = hash_size * high_freq_factor
+    small = cv2.resize(frame_bgr, (img_size, img_size), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    dct_rows = scipy_dct(gray, axis=0, norm='ortho')
+    dct_full = scipy_dct(dct_rows, axis=1, norm='ortho')
+    low_freq = dct_full[:hash_size, :hash_size]
+    flat = low_freq.flatten()
+    ac_coeffs = flat[1:]
+    median = np.median(ac_coeffs)
+    return (flat > median)
+
+def hamming_distance(h1, h2):
+    return int(np.count_nonzero(h1 != h2))
+
+def extract_frames(video_path, out_dir):
+    video = open_video(video_path)
+    scene_manager = SceneManager()
+    scene_manager.add_detector(ContentDetector(threshold=27.0, min_scene_len=int(0.4 * video.frame_rate)))
+    scene_manager.detect_scenes(video=video)
+    scene_list = scene_manager.get_scene_list()
+    if not scene_list:
+        scene_list = [(video.base_timecode, video.duration)]
+    fps = video.frame_rate
+
+    step = max(1, round(fps / 2.0))
+    wanted = {}
+    for shot_idx, (start, end) in enumerate(scene_list):
+        start_f = start.frame_num
+        end_f = max(start_f + 1, end.frame_num)
+        for idx in range(start_f, end_f, step):
+            wanted[idx] = shot_idx
+
+    wanted_sorted = sorted(wanted.keys())
+    cap = cv2.VideoCapture(video_path)
+    shot_frames = {}
+    current_pos = 0
+    ptr = 0
+
+    while ptr < len(wanted_sorted):
+        target = wanted_sorted[ptr]
+        while current_pos < target:
+            cap.grab()
+            current_pos += 1
+        ok, frame = cap.read()
+        if not ok:
+            ptr += 1
+            current_pos += 1
+            continue
+        shot_idx = wanted[current_pos]
+        h, w = frame.shape[:2]
+        small = cv2.resize(frame, (360, int(h * 360 / w)))
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        sharp = laplacian_sharpness(gray)
+        shot_frames.setdefault(shot_idx, []).append((current_pos, frame, sharp))
+        current_pos += 1
+        ptr += 1
+    cap.release()
+
+    candidates = []
+    for shot_idx, frames in shot_frames.items():
+        frames.sort(key=lambda x: x[2], reverse=True)
+        for idx, frame, sharp in frames[:1]:
+            candidates.append({'shot_idx': shot_idx, 'frame_idx': idx, 'timecode_sec': idx / fps, 'frame': frame, 'sharpness': sharp})
+    candidates.sort(key=lambda c: c['timecode_sec'])
+
+    if candidates:
+        hashes = [phash(c['frame']) for c in candidates]
+        used = [False] * len(candidates)
+        kept = []
+        for i in range(len(candidates)):
+            if used[i]: continue
+            cluster = [i]
+            for j in range(i + 1, len(candidates)):
+                if not used[j] and hamming_distance(hashes[i], hashes[j]) < 22:
+                    cluster.append(j)
+                    used[j] = True
+            used[i] = True
+            best = max(cluster, key=lambda k: candidates[k]['sharpness'])
+            kept.append(candidates[best])
+        kept.sort(key=lambda c: c['timecode_sec'])
+        candidates = kept
+
+    yolo_model = YOLO('yolov8n.pt')
+    yolo_model.to('cpu')
+    gated_candidates = []
+    for c in candidates:
+        results = yolo_model(c['frame'], classes=[0], conf=0.35, imgsz=640, device='cpu', verbose=False)
+        has_person = False
+        for r in results:
+            if len(r.boxes) > 0:
+                has_person = True
+                break
+        if has_person:
+            gated_candidates.append(c)
+
+    if gated_candidates:
+        hashes = [phash(c['frame']) for c in gated_candidates]
+        used = [False] * len(gated_candidates)
+        kept = []
+        for i in range(len(gated_candidates)):
+            if used[i]: continue
+            cluster = [i]
+            for j in range(i + 1, len(gated_candidates)):
+                if not used[j] and hamming_distance(hashes[i], hashes[j]) < 15:
+                    cluster.append(j)
+                    used[j] = True
+            used[i] = True
+            best = max(cluster, key=lambda k: gated_candidates[k]['sharpness'])
+            kept.append(gated_candidates[best])
+        kept.sort(key=lambda c: c['timecode_sec'])
+        gated_candidates = kept
+
+    os.makedirs(out_dir, exist_ok=True)
+    for i, c in enumerate(gated_candidates):
+        out_path = os.path.join(out_dir, f"frame_{i}.jpg")
+        cv2.imwrite(out_path, c['frame'])
+
+if __name__ == "__main__":
+    extract_frames(sys.argv[1], sys.argv[2])
+`;
+
 
 // ─── Gemini reviewer prompt ──────────────────────────────────────────────────
 const GEMINI_REVIEW_PROMPT = `You are an expert visual content curator for Instagram e-commerce. Your task is to analyze a collage image containing multiple frames/screenshots from Instagram posts and identify which individual frames should be sent to Google Lens for product identification.
@@ -171,10 +311,6 @@ Return a single JSON array. Each object represents one frame to be kept.
 - If **no frames** meet the eligibility criteria, return an empty array: \`[]\`
 - Do not include rejected frames in the output.
 - Do not wrap the JSON in markdown code blocks. Return raw JSON only.`;
-
-
-// Ensure required dirs exist
-[CONFIG.outputDir, CONFIG.tmpDir, RECORDINGS_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SCREEN RECORDER
@@ -426,16 +562,11 @@ async function hfFetch(filePath) {
 
 /**
  * Upload a single file's bytes to the HF LFS blob store WITHOUT committing it
- * to the repo tree. This lets us push the bytes for many files first, and
- * only perform ONE git commit at the very end (avoids hitting the per-hour
- * commit rate limit when downloading many posts).
- *
- * @returns {Promise<{path:string, oid:string, size:number, url:string}>}
+ * to the repo tree.
  */
 async function hfUploadBlob(fileBuffer, repoFilePath) {
     const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
 
-    // Step 1: LFS batch — always returns an upload URL if the blob is missing
     const lfsResp = await fetch(`https://huggingface.co/datasets/${CONFIG.hf.repo}.git/info/lfs/objects/batch`, {
         method:  'POST',
         headers: {
@@ -456,11 +587,9 @@ async function hfUploadBlob(fileBuffer, repoFilePath) {
     }
 
     const lfsData   = await lfsResp.json();
-    log('info', `  LFS batch → ${JSON.stringify(lfsData).slice(0, 300)}`);
     const obj       = lfsData.objects?.[0];
     const uploadUrl = obj?.actions?.upload?.href;
 
-    // Step 2: PUT to S3 — only if LFS says the blob is missing
     if (uploadUrl) {
         const upHeaders = obj.actions.upload.header || {};
         const upResp = await fetch(uploadUrl, {
@@ -472,9 +601,7 @@ async function hfUploadBlob(fileBuffer, repoFilePath) {
             const body = await upResp.text().catch(() => '');
             throw new Error(`LFS PUT failed (${upResp.status}): ${body.slice(0, 200)}`);
         }
-        log('info', `  LFS blob uploaded (${(fileBuffer.length / 1024).toFixed(0)} KB)`);
 
-        // Step 2b: verify if LFS gave us a verify URL
         const verifyUrl     = obj?.actions?.verify?.href;
         const verifyHeaders = obj?.actions?.verify?.header || {};
         if (verifyUrl) {
@@ -484,8 +611,6 @@ async function hfUploadBlob(fileBuffer, repoFilePath) {
                 body:    JSON.stringify({ oid: sha256, size: fileBuffer.length }),
             }).catch(() => {});
         }
-    } else {
-        log('info', `  LFS blob already exists on HF — skipping PUT`);
     }
 
     return {
@@ -497,13 +622,7 @@ async function hfUploadBlob(fileBuffer, repoFilePath) {
 }
 
 /**
- * Commit a batch of already-uploaded LFS blobs (see hfUploadBlob) to the repo
- * tree in a SINGLE git commit. This is what actually consumes the HF
- * "commits per hour" rate limit, so callers should batch as many files as
- * possible into one call instead of committing per-file.
- *
- * @param {Array<{path:string, oid:string, size:number}>} lfsFiles
- * @param {string} summary
+ * Commit a batch of already-uploaded LFS blobs to the repo tree in a SINGLE git commit.
  */
 async function hfCommitFiles(lfsFiles, summary) {
     if (!lfsFiles.length) return;
@@ -538,7 +657,6 @@ async function downloadToBuffer(url) {
     const buffer = Buffer.from(await resp.arrayBuffer());
     const ct     = resp.headers.get('content-type') || '';
 
-    // Catch error pages / empty responses before they reach HF
     if (buffer.length < 1024)
         throw new Error(`Too small (${buffer.length} bytes) — not real media: ${url.slice(0, 80)}`);
     if (ct.includes('text/html'))
@@ -562,13 +680,8 @@ async function downloadToBuffer(url) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GEMINI API KEY ROTATION  (multi-instance safe, backed by MongoDB)
+//  GEMINI API KEY ROTATION
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// Mirrors the locking strategy from the user's existing code: each key has a
-// quota doc in `gemini_quotas`. We lock the least-recently-used, non-rate-
-// limited key, use it, then release the lock (and record rate_limited_until
-// on 429s) when done.
 
 function getRandomKeyFallback() {
     const keys = CONFIG.review.apiKeys;
@@ -576,7 +689,6 @@ function getRandomKeyFallback() {
     return keys[Math.floor(Math.random() * keys.length)];
 }
 
-/** Ensure every configured API key has a quota doc in MongoDB (idempotent). */
 async function ensureGeminiQuotaDocs(db) {
     if (!CONFIG.review.apiKeys.length) return;
     const quotaCollection = db.collection(CONFIG.review.quotaCollection);
@@ -605,11 +717,6 @@ async function ensureGeminiQuotaDocs(db) {
     }
 }
 
-/**
- * Lock and return the best available Gemini API key (least-recently-used,
- * not currently locked by another instance, not rate-limited).
- * @returns {Promise<{keyHash:string, apiKey:string} | null>}
- */
 async function getBestGeminiApiKey(db) {
     const quotaCollection = db.collection(CONFIG.review.quotaCollection);
     const instanceId = process.env.INSTANCE_ID || os.hostname();
@@ -647,7 +754,6 @@ async function getBestGeminiApiKey(db) {
     return { keyHash: result.key_hash, apiKey: result.api_key };
 }
 
-/** Release a key's lock and bump its usage stats. */
 async function releaseGeminiApiKey(db, keyHash) {
     if (!keyHash) return;
     const quotaCollection = db.collection(CONFIG.review.quotaCollection);
@@ -660,7 +766,6 @@ async function releaseGeminiApiKey(db, keyHash) {
     ).catch(err => log('warn', `Gemini: failed to release key ${keyHash}: ${err.message}`));
 }
 
-/** Mark a key as rate-limited for a cooldown period and release its lock. */
 async function markGeminiKeyRateLimited(db, keyHash) {
     if (!keyHash) return;
     const quotaCollection = db.collection(CONFIG.review.quotaCollection);
@@ -677,44 +782,22 @@ async function markGeminiKeyRateLimited(db, keyHash) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  COLLAGE BUILDER  (ports the Infinite Collage Maker's justified-row layout)
+//  COLLAGE BUILDER
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// When CONFIG.review.cellAspectRatio > 0 (default 0.75 = 3:4 portrait) every
-// cell is treated as if it had that fixed ratio for layout purposes.  The
-// actual image is rendered into that cell with fit:'cover' so the subject is
-// never distorted — excess area is centre-cropped.  This gives the LLM a
-// perfectly uniform grid (same-sized boxes, white gutter between them) which
-// dramatically reduces mis-identification caused by wildly different frame
-// shapes competing for attention.
-//
-// When cellAspectRatio === 0 the original behaviour is preserved: each image
-// uses its natural width/height ratio and rows are justified to fill the
-// canvas width.
-//
-// Rows are still capped at maxRowsPerCollage AND maxColsPerRow — once either
-// cap is hit, remaining images spill into a new collage entirely.
 
-/** @returns {Array<{images: Array<{item:any, ratio:number}>, height:number, isJustified:boolean}>} */
 function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter) {
     const rows = [];
     let currentRow = [];
 
-    // When a fixed cell ratio is active every cell in the same row is identical
-    // in size, so the layout simplifies to: pack up to maxCols cells per row,
-    // compute the row height from the cell width, and never justify (cells are
-    // already uniform).
     const fixedRatio = (cellAspectRatio > 0) ? cellAspectRatio : 0;
 
     for (const item of items) {
-        if (rows.length >= maxRows) break; // row cap reached — caller starts a new collage with leftovers
+        if (rows.length >= maxRows) break; 
 
         if (fixedRatio > 0) {
-            // Fixed-cell mode — all cells the same size.
             currentRow.push({ item, ratio: fixedRatio });
 
             if (currentRow.length >= maxCols) {
-                // Row is full.  Cell width = (containerWidth - gutters) / maxCols.
                 const totalGutter = gutter * (maxCols - 1);
                 const cellW = (containerWidth - totalGutter) / maxCols;
                 const cellH = cellW / fixedRatio;
@@ -722,7 +805,6 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows,
                 currentRow = [];
             }
         } else {
-            // Natural-ratio mode — original justified-row algorithm.
             const ratio = item.width / item.height;
             currentRow.push({ item, ratio });
             const currentRatioSum = currentRow.reduce((s, c) => s + c.ratio, 0);
@@ -738,11 +820,8 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows,
         }
     }
 
-    // Flush the last partial row.
     if (currentRow.length > 0 && rows.length < maxRows) {
         if (fixedRatio > 0) {
-            const cols = currentRow.length;
-            // Keep the same cell size as full rows so partial rows don't look inflated.
             const totalGutter = gutter * (maxCols - 1);
             const cellW = (containerWidth - totalGutter) / maxCols;
             const cellH = cellW / fixedRatio;
@@ -755,12 +834,6 @@ function calculateCollageLayout(items, containerWidth, targetRowHeight, maxRows,
     return rows;
 }
 
-/**
- * Split `items` (each needs .width/.height/.buffer) into chunks that each fit
- * within maxRowsPerCollage × maxColsPerRow, mirroring the same greedy
- * row-fill logic so the chunk boundaries match exactly where a real collage
- * would start a new row beyond either cap.
- */
 function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter) {
     const collages = [];
     let remaining = items.slice();
@@ -768,7 +841,7 @@ function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows,
     while (remaining.length > 0) {
         const rows = calculateCollageLayout(remaining, containerWidth, targetRowHeight, maxRows, maxCols, cellAspectRatio, gutter);
         const used = rows.reduce((sum, r) => sum + r.images.length, 0);
-        if (used === 0) break; // safety guard against infinite loop
+        if (used === 0) break;
         collages.push({ rows, items: remaining.slice(0, used) });
         remaining = remaining.slice(used);
     }
@@ -776,37 +849,17 @@ function chunkItemsIntoCollages(items, containerWidth, targetRowHeight, maxRows,
     return collages;
 }
 
-/**
- * Render one collage (a set of rows) to a JPEG buffer using sharp,
- * and return a map of `col:row` → original item so the caller can translate
- * Gemini's refs back to file_urls/post_id.
- *
- * When CONFIG.review.cellAspectRatio > 0 every cell is a fixed-size box
- * (width/height = cellAspectRatio) rendered with fit:'cover' so the image
- * fills the cell without distortion (centre-cropped).  White gutters of
- * CONFIG.review.collageGutter pixels are placed between cells and rows.
- *
- * When cellAspectRatio === 0 the original variable-width justified layout is
- * used (no gutters — original behaviour preserved).
- *
- * @returns {Promise<{buffer: Buffer, refMap: Map<string, any>}>}
- */
 async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gutter) {
     const fixedRatio = (cellAspectRatio > 0) ? cellAspectRatio : 0;
     const refMap = new Map();
     const composites = [];
 
     if (fixedRatio > 0) {
-        // ── Fixed-cell mode ─────────────────────────────────────────────────
-        // All cells have the same pixel dimensions.  We derive cellW from the
-        // widest row (which will be maxCols wide) so every partial row uses
-        // the same cell size.
         const maxCols = Math.max(...rows.map(r => r.images.length));
         const totalGutterW = gutter * (maxCols - 1);
         const cellW = Math.max(1, Math.round((containerWidth - totalGutterW) / maxCols));
         const cellH = Math.max(1, Math.round(cellW / fixedRatio));
 
-        // Total canvas dimensions include gutters between rows too.
         const numRows = rows.length;
         const totalGutterH = gutter * (numRows - 1);
         const canvasW = cellW * maxCols + gutter * (maxCols - 1);
@@ -819,7 +872,6 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
             for (let colIdx = 0; colIdx < row.images.length; colIdx++) {
                 const { item } = row.images[colIdx];
 
-                // Resize + centre-crop to exact cell dimensions (no distortion).
                 const resized = await sharp(item.buffer)
                     .resize(cellW, cellH, { fit: 'cover', position: 'centre' })
                     .toBuffer();
@@ -837,7 +889,7 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
                 width:      canvasW,
                 height:     canvasH,
                 channels:   3,
-                background: { r: 255, g: 255, b: 255 }, // white gutter/background
+                background: { r: 255, g: 255, b: 255 },
             },
         })
             .composite(composites)
@@ -847,7 +899,6 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
         return { buffer, refMap };
 
     } else {
-        // ── Natural-ratio mode — original justified-row algorithm ────────────
         const totalHeight = Math.round(rows.reduce((sum, r) => sum + r.height, 0));
 
         let y = 0;
@@ -882,7 +933,7 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
                 width:      Math.round(containerWidth),
                 height:     totalHeight,
                 channels:   3,
-                background: { r: 13, g: 13, b: 13 }, // matches --bg: #0d0d0d
+                background: { r: 13, g: 13, b: 13 },
             },
         })
             .composite(composites)
@@ -897,11 +948,6 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
 //  GEMINI REVIEWER CALL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Send one collage image to Gemini with the review prompt, rotating API keys
- * via MongoDB-backed locking, with retry on 429 (rotates to a different key).
- * @returns {Promise<Array<{ref:string, reason:string, stunning_score:number}>>}
- */
 async function reviewCollageWithGemini(db, collageBuffer) {
     const base64 = collageBuffer.toString('base64');
     let lastErr = null;
@@ -958,7 +1004,7 @@ async function reviewCollageWithGemini(db, collageBuffer) {
             if (!Array.isArray(parsed)) throw new Error('Gemini response was not a JSON array');
             return parsed;
         } catch (err) {
-            if (err.message?.includes('429')) continue; // already rotated above
+            if (err.message?.includes('429')) continue; 
             lastErr = err;
             log('warn', `Gemini: attempt ${attempt + 1}/${CONFIG.review.maxRetries} failed: ${err.message.slice(0, 200)}`);
         }
@@ -968,20 +1014,16 @@ async function reviewCollageWithGemini(db, collageBuffer) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  REVIEW STAGE — fetch unreviewed images, collage, send to Gemini, reconcile
+//  REVIEW STAGE — fetch unreviewed images & video frames, send to Gemini
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Pull up to `limit` individual image file_urls entries (across any posts)
- * that have not yet been reviewed (no `reviewed:true` on the entry itself),
- * tagged with their parent post_id and their index within that post's
- * file_urls array, so we can map results back after review.
- *
- * @returns {Promise<Array<{postId:string, postObjectId:any, fileIndex:number, url:string, type:string}>>}
+ * Fetch top-level images and video frames up to `limit`.
  */
 async function fetchUnreviewedFiles(collection, limit) {
-    const cursor = collection.aggregate([
-        { $match: { file_urls: { $exists: true, $ne: [] } } },
+    // 1. Fetch top-level images
+    const imagesCursor = collection.aggregate([
+        { $match: { file_urls: { $exists: true, $ne: [] }, discarded: { $ne: true } } },
         { $project: { post_id: 1, file_urls: 1 } },
         { $unwind: { path: '$file_urls', includeArrayIndex: 'fileIndex' } },
         { $match: {
@@ -991,21 +1033,44 @@ async function fetchUnreviewedFiles(collection, limit) {
         { $limit: limit },
     ]);
 
-    const docs = await cursor.toArray();
-    return docs.map(d => ({
+    const topImages = await imagesCursor.toArray();
+    let candidates = topImages.map(d => ({
         postId:       d.post_id,
         postObjectId: d._id,
         fileIndex:    d.fileIndex,
+        frameIndex:   -1,
         url:          d.file_urls.url,
         type:         d.file_urls.type,
     }));
+
+    // 2. If we haven't hit the limit, fetch unreviewed video frames
+    if (candidates.length < limit) {
+        const framesCursor = collection.aggregate([
+            { $match: { file_urls: { $exists: true, $ne: [] }, discarded: { $ne: true } } },
+            { $project: { post_id: 1, file_urls: 1 } },
+            { $unwind: { path: '$file_urls', includeArrayIndex: 'fileIndex' } },
+            { $match: { 'file_urls.type': 'video', 'file_urls.frames': { $exists: true, $ne: [] } } },
+            { $unwind: { path: '$file_urls.frames', includeArrayIndex: 'frameIndex' } },
+            { $match: {
+                'file_urls.frames.reviewed': { $ne: true },
+            } },
+            { $limit: limit - candidates.length },
+        ]);
+        const frames = await framesCursor.toArray();
+        const frameCandidates = frames.map(d => ({
+            postId:       d.post_id,
+            postObjectId: d._id,
+            fileIndex:    d.fileIndex,
+            frameIndex:   d.frameIndex,
+            url:          d.file_urls.frames.url,
+            type:         d.file_urls.frames.type,
+        }));
+        candidates = candidates.concat(frameCandidates);
+    }
+    return candidates;
 }
 
-/** Download an image file's bytes + dimensions for collage building. */
 async function fetchImageForCollage(fileEntry) {
-    // file_urls point at our own HuggingFace dataset repo, which may be
-    // private — send the same bearer token used for upload/commit, mirroring
-    // hfFetch(). Harmless to send on public repos too.
     const headers = CONFIG.hf.token ? { Authorization: `Bearer ${CONFIG.hf.token}` } : {};
     const resp = await fetch(fileEntry.url, { redirect: 'follow', headers });
     if (!resp.ok) throw new Error(`Failed to fetch image for review (${resp.status}): ${fileEntry.url.slice(0, 80)}`);
@@ -1014,21 +1079,13 @@ async function fetchImageForCollage(fileEntry) {
     return { ...fileEntry, buffer, width: meta.width || 1, height: meta.height || 1 };
 }
 
-/**
- * Run the full review stage:
- *  1. Fetch up to fetchLimit unreviewed image file_urls (across posts).
- *  2. Download bytes + build collages respecting maxRowsPerCollage.
- *  3. Send each collage to Gemini; mark kept refs reviewed:true immediately.
- *  4. After ALL collages are processed, remove every file_urls entry that
- *     was part of this batch but NOT kept, in one bulk operation.
- */
 async function runReviewStage(db, collection) {
-    log('info', '── Review Stage: Fetching unreviewed images ──');
+    log('info', '── Review Stage: Fetching unreviewed images/frames ──');
 
     await ensureGeminiQuotaDocs(db);
 
     const candidates = await fetchUnreviewedFiles(collection, CONFIG.review.fetchLimit);
-    log('info', `Found ${candidates.length} unreviewed image file(s) (limit=${CONFIG.review.fetchLimit}).`);
+    log('info', `Found ${candidates.length} unreviewed item(s) (limit=${CONFIG.review.fetchLimit}).`);
 
     const results = { reviewed: 0, kept: 0, rejected: 0, collages: 0, failed: 0 };
     if (candidates.length === 0) return results;
@@ -1038,7 +1095,6 @@ async function runReviewStage(db, collection) {
         return results;
     }
 
-    // Download all candidate image bytes + dimensions up front.
     const downloaded = [];
     for (const fileEntry of candidates) {
         try {
@@ -1058,16 +1114,14 @@ async function runReviewStage(db, collection) {
         CONFIG.review.cellAspectRatio,
         CONFIG.review.collageGutter
     );
-    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} image(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each, cell ratio ${CONFIG.review.cellAspectRatio > 0 ? CONFIG.review.cellAspectRatio.toFixed(2) : 'natural'}, gutter ${CONFIG.review.collageGutter}px).`);
+    log('info', `Built ${collages.length} collage(s) from ${downloaded.length} item(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each, cell ratio ${CONFIG.review.cellAspectRatio > 0 ? CONFIG.review.cellAspectRatio.toFixed(2) : 'natural'}, gutter ${CONFIG.review.collageGutter}px).`);
 
-    // Track every entry that went through review, so we know what to remove
-    // at the end if it wasn't explicitly kept.
-    const allProcessed = []; // { postObjectId, postId, fileIndex, url }
-    const keptKeys = new Set(); // `${postObjectId}:${fileIndex}`
+    const allProcessed = []; 
+    const keptKeys = new Set(); // format: `${postObjectId}:${fileIndex}:${frameIndex}`
 
     for (let i = 0; i < collages.length; i++) {
         const { rows, items } = collages[i];
-        log('info', `Review: collage ${i + 1}/${collages.length} — ${items.length} image(s), ${rows.length} row(s)`);
+        log('info', `Review: collage ${i + 1}/${collages.length} — ${items.length} item(s), ${rows.length} row(s)`);
 
         for (const item of items) allProcessed.push(item);
 
@@ -1085,23 +1139,15 @@ async function runReviewStage(db, collection) {
 
         results.collages++;
 
-        // Debug aid: persist the exact JPEG bytes sent to Gemini so you can
-        // visually cross-check layout/ref alignment against the
-        // review_reason it returns. Saved BEFORE the Gemini call so the
-        // artifact exists even if that call fails. Does not affect review
-        // logic at all — purely a side-effect write to disk.
         if (CONFIG.review.saveCollages) {
             try {
                 fs.mkdirSync(COLLAGES_DIR, { recursive: true });
                 const collageFilename = `collage_${CONFIG.runId}_${String(i + 1).padStart(2, '0')}.jpg`;
                 fs.writeFileSync(path.join(COLLAGES_DIR, collageFilename), collageBuffer);
 
-                // Sidecar JSON: ref -> which post/file this frame actually is,
-                // so you can cross-check Gemini's reason text against ground
-                // truth without guessing from pixel position alone.
                 const refMapJson = {};
                 for (const [ref, item] of refMap.entries()) {
-                    refMapJson[ref] = { postId: item.postId, fileIndex: item.fileIndex, url: item.url };
+                    refMapJson[ref] = { postId: item.postId, fileIndex: item.fileIndex, frameIndex: item.frameIndex, url: item.url };
                 }
                 const sidecarFilename = `collage_${CONFIG.runId}_${String(i + 1).padStart(2, '0')}.refmap.json`;
                 fs.writeFileSync(path.join(COLLAGES_DIR, sidecarFilename), JSON.stringify(refMapJson, null, 2));
@@ -1128,56 +1174,97 @@ async function runReviewStage(db, collection) {
                 continue;
             }
 
-            const key = `${item.postObjectId}:${item.fileIndex}`;
+            const key = `${item.postObjectId}:${item.fileIndex}:${item.frameIndex}`;
             keptKeys.add(key);
 
-            // Mark kept file immediately as reviewed:true on its post document.
+            let updatePath = `file_urls.${item.fileIndex}`;
+            if (item.frameIndex !== -1) {
+                updatePath = `file_urls.${item.fileIndex}.frames.${item.frameIndex}`;
+            }
+
             try {
                 await collection.updateOne(
                     { _id: item.postObjectId },
                     { $set: {
-                        [`file_urls.${item.fileIndex}.reviewed`]:       true,
-                        [`file_urls.${item.fileIndex}.stunning_score`]: decision.stunning_score,
-                        [`file_urls.${item.fileIndex}.review_reason`]:  decision.reason,
+                        [`${updatePath}.reviewed`]:       true,
+                        [`${updatePath}.stunning_score`]: decision.stunning_score,
+                        [`${updatePath}.review_reason`]:  decision.reason,
                     } }
                 );
                 results.kept++;
             } catch (err) {
-                log('error', `Review: failed to mark kept file reviewed (post ${item.postId}, idx ${item.fileIndex}): ${err.message}`);
+                log('error', `Review: failed to mark kept file reviewed (post ${item.postId}): ${err.message}`);
             }
         }
 
         results.reviewed += items.length;
-        log('info', `Review: collage ${i + 1} — ${kept.length}/${items.length} frame(s) kept`);
+        log('info', `Review: collage ${i + 1} — ${kept.length}/${items.length} item(s) kept`);
     }
 
-    // ── Remove every processed-but-not-kept file_urls entry, in one pass ──
-    const rejected = allProcessed.filter(item => !keptKeys.has(`${item.postObjectId}:${item.fileIndex}`));
-    log('info', `Review: ${rejected.length} rejected file(s) to remove across affected posts.`);
+    // ── Remove every processed-but-not-kept entry, in one pass ──
+    const rejected = allProcessed.filter(item => !keptKeys.has(`${item.postObjectId}:${item.fileIndex}:${item.frameIndex}`));
+    log('info', `Review: ${rejected.length} rejected item(s) to remove across affected posts.`);
 
     if (rejected.length > 0) {
-        // Group rejected file URLs by post so we can $pull all of them for a
-        // post in a single update (file_urls.url is unique per post here).
         const byPost = new Map();
         for (const item of rejected) {
-            if (!byPost.has(String(item.postObjectId))) byPost.set(String(item.postObjectId), { postObjectId: item.postObjectId, urls: [] });
-            byPost.get(String(item.postObjectId)).urls.push(item.url);
+            if (!byPost.has(String(item.postObjectId))) byPost.set(String(item.postObjectId), { postObjectId: item.postObjectId, topUrls: [], frameUrls: [] });
+            
+            if (item.frameIndex === -1) {
+                byPost.get(String(item.postObjectId)).topUrls.push(item.url);
+            } else {
+                byPost.get(String(item.postObjectId)).frameUrls.push(item.url);
+            }
         }
 
-        const bulkOps = [...byPost.values()].map(({ postObjectId, urls }) => ({
-            updateOne: {
-                filter: { _id: postObjectId },
-                update: { $pull: { file_urls: { url: { $in: urls } } } },
-            },
-        }));
+        const bulkOps = [];
+        for (const { postObjectId, topUrls, frameUrls } of byPost.values()) {
+            if (topUrls.length > 0) {
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: postObjectId },
+                        update: { $pull: { file_urls: { url: { $in: topUrls } } } },
+                    },
+                });
+            }
+            if (frameUrls.length > 0) {
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: postObjectId },
+                        update: { $pull: { 'file_urls.$[].frames': { url: { $in: frameUrls } } } },
+                    },
+                });
+            }
+        }
 
         try {
             await collection.bulkWrite(bulkOps, { ordered: false });
             results.rejected = rejected.length;
-            log('info', `Review: removed ${rejected.length} rejected file(s) across ${bulkOps.length} post(s) in one bulk operation.`);
+            log('info', `Review: removed ${rejected.length} rejected item(s) across ${bulkOps.length} DB operation(s).`);
         } catch (err) {
             log('error', `Review: bulk removal of rejected files failed: ${err.message}`);
         }
+    }
+
+    // ── Remove empty videos and flag entirely empty posts as discarded ──
+    try {
+        const pullEmptyVideos = await collection.updateMany(
+            { file_urls: { $elemMatch: { type: 'video', frames: { $size: 0 } } } },
+            { $pull: { file_urls: { type: 'video', frames: { $size: 0 } } } }
+        );
+        if (pullEmptyVideos.modifiedCount > 0) {
+            log('info', `Review: removed empty videos across ${pullEmptyVideos.modifiedCount} post(s).`);
+        }
+
+        const flagDiscarded = await collection.updateMany(
+            { file_urls: { $size: 0 }, discarded: { $ne: true }, downloaded: true },
+            { $set: { discarded: true } }
+        );
+        if (flagDiscarded.modifiedCount > 0) {
+            log('info', `Review: flagged ${flagDiscarded.modifiedCount} post(s) as discarded (0 files remaining).`);
+        }
+    } catch (err) {
+        log('error', `Review: cleanup of empty videos/posts failed: ${err.message}`);
     }
 
     return results;
@@ -1236,7 +1323,6 @@ class InstagramDownloader {
     }
 }
 
-// ── fastdl.app ──────────────────────────────────────────────────────────────
 class FastDLDownloader extends InstagramDownloader {
     constructor() { super('FastDL'); }
 
@@ -1253,14 +1339,11 @@ class FastDLDownloader extends InstagramDownloader {
         const inputSel = '#search-form-input';
         await page.waitForSelector(inputSel, { timeout: 15_000 });
 
-        // Click to focus, select all existing text, then delete it — fires real events
         await page.click(inputSel, { clickCount: 3 });
         await page.keyboard.press('Backspace');
 
-        // Type the URL character-by-character so input/change events fire correctly
         await page.type(inputSel, igUrl, { delay: 10 });
 
-        // Dispatch a native input event in case the site uses a framework listener
         await page.evaluate(sel => {
             const el = document.querySelector(sel);
             el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1340,14 +1423,11 @@ class SnapInstaDownloader extends InstagramDownloader {
 
         await page.waitForSelector('#s_input', { timeout: 15_000 });
 
-        // Triple-click to select any pre-existing value, then delete it — fires real events
         await page.click('#s_input', { clickCount: 3 });
         await page.keyboard.press('Backspace');
 
-        // Type character-by-character so the site's input listeners track the value
         await page.type('#s_input', igUrl, { delay: 10 });
 
-        // Dispatch native input/change events for framework-based validation
         await page.evaluate(() => {
             const el = document.querySelector('#s_input');
             el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1410,84 +1490,6 @@ class SnapInstaDownloader extends InstagramDownloader {
     }
 }
 
-/* class InSaverDownloader extends InstagramDownloader {
-    constructor() { super('InSaver'); }
-
-    async extractLinks(page, postId) {
-        const igUrl = `https://www.instagram.com/${postId}/`;
-
-        log('info', `[InSaver] Processing ${postId}`);
-
-        await page.goto('https://insaver.to/en', {
-            waitUntil: 'domcontentloaded',
-            timeout: CONFIG.timeouts.navigation,
-        });
-
-        await page.waitForSelector('#s_input', { timeout: 15_000 });
-
-        await page.click('#s_input', { clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await page.type('#s_input', igUrl, { delay: 10 });
-
-        await page.evaluate(() => {
-            const el = document.querySelector('#s_input');
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-
-        await page.click('button[onclick*="ksearchvideo"]');
-
-        log('debug', `[InSaver] Submitted: ${igUrl}`);
-
-        await page.waitForFunction(() => {
-            return document.querySelector('#search-result ul.download-box') !== null
-                && document.querySelector('#search-result ul.download-box li') !== null;
-        }, { timeout: CONFIG.timeouts.downloaderIdle });
-
-        await sleep(1500);
-
-        const results = await page.evaluate(() => {
-            const items = [];
-            const seen  = new Set();
-
-            document.querySelectorAll('#search-result .download-items').forEach(item => {
-                // For photos: grab the highest-res option (first <option> value)
-                const select = item.querySelector('.photo-option select.minimal');
-                if (select && select.options.length > 0) {
-                    const href = select.options[0].value;
-                    if (href && !seen.has(href)) {
-                        seen.add(href);
-                        items.push({ directUrl: href, uri: href });
-                    }
-                    return;
-                }
-
-                // For videos: grab the btn-premium href
-                const btn = item.querySelector('a.btn-premium[href*="dl.snapcdn.app"]');
-                if (btn) {
-                    const href = btn.href;
-                    if (href && !seen.has(href)) {
-                        seen.add(href);
-                        items.push({ directUrl: href, uri: href });
-                    }
-                }
-            });
-
-            return items;
-        });
-
-        log('info', `[InSaver] ✅ ${results.length} link(s) for ${postId}`);
-
-        if (results.length === 0) {
-            const safeName = postId.replace(/[^a-z0-9]/gi, '');
-            await page.screenshot({
-                path: path.join(CONFIG.tmpDir, `insaver-debug-${safeName}-${Date.now()}.png`),
-            }).catch(() => {});
-        }
-
-        return results;
-    }
-} */
 class InSaverDownloader extends InstagramDownloader {
     constructor() { super('InSaver'); }
 
@@ -1529,7 +1531,6 @@ class InSaverDownloader extends InstagramDownloader {
             const seen  = new Set();
 
             document.querySelectorAll('#search-result .download-items').forEach(item => {
-                // For photos: grab the highest-res option (first <option> value)
                 const select = item.querySelector('.photo-option select.minimal');
                 if (select && select.options.length > 0) {
                     const href = select.options[0].value;
@@ -1540,12 +1541,6 @@ class InSaverDownloader extends InstagramDownloader {
                     return;
                 }
 
-                // For videos/reels: the result block contains TWO btn-premium anchors:
-                //   1. "Download Thumbnail"  — inside  .download-items__btn.dl-thumb  (first in DOM)
-                //   2. "Download Video"      — inside  .download-items__btn (no .dl-thumb)
-                // querySelector() returns the first DOM match, which is the thumbnail.
-                // We must explicitly skip .dl-thumb containers and only grab the actual
-                // media button from the non-thumbnail container.
                 let pushed = false;
                 item.querySelectorAll('.download-items__btn:not(.dl-thumb)').forEach(container => {
                     const btn = container.querySelector('a.btn-premium[href*="dl.snapcdn.app"]');
@@ -1559,8 +1554,6 @@ class InSaverDownloader extends InstagramDownloader {
                     }
                 });
 
-                // Fallback: unexpected layout — grab any btn-premium so we never silently
-                // return empty (the thumbnail is still better than nothing for retry logic).
                 if (!pushed) {
                     const btn = item.querySelector('a.btn-premium[href*="dl.snapcdn.app"]');
                     if (btn) {
@@ -1589,9 +1582,6 @@ class InSaverDownloader extends InstagramDownloader {
     }
 }
 
-
-// Priority-ordered fallback chain
-// const DOWNLOADERS = [new SnapInstaDownloader(), new InSaverDownloader(), new FastDLDownloader()];
 const DOWNLOADERS = [new InSaverDownloader(), new SnapInstaDownloader(), new FastDLDownloader()];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1600,11 +1590,16 @@ const DOWNLOADERS = [new InSaverDownloader(), new SnapInstaDownloader(), new Fas
 
 async function fetchUndownloadedPosts(collection) {
     return collection.find({
-        $or: [
-            { downloaded: { $exists: false } },
-            { downloaded: false },
-            { downloaded: null },
-        ],
+        $and: [
+            {
+                $or: [
+                    { downloaded: { $exists: false } },
+                    { downloaded: false },
+                    { downloaded: null },
+                ]
+            },
+            { discarded: { $ne: true } }
+        ]
     }).limit(CONFIG.batch.size).toArray();
 }
 
@@ -1613,7 +1608,6 @@ async function fetchUndownloadedPosts(collection) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function buildAssetFilename(postId, index, ext) {
-    // "p/ABC" → "p-ABC-0.jpg"   "reel/ABC" → "reel-ABC-1.mp4"
     return `${postId.replace('/', '-')}-${index}${ext}`;
 }
 
@@ -1621,16 +1615,6 @@ function mimeToType(mimeType, ext) {
     return (mimeType.startsWith('video') || ext === '.mp4') ? 'video' : 'image';
 }
 
-/**
- * Process one post: navigate downloader → collect links → download → upload HF blob.
- * The page passed in already has a ScreenRecorder attached.
- *
- * NOTE: this uploads file bytes to HF's LFS store but does NOT commit them to
- * the repo tree yet — that happens once, in a single batched commit, after
- * ALL posts in this run have finished downloading (see processBatch/main).
- *
- * @returns {Promise<{fileUrls: Array<{url:string,type:string}>, lfsFiles: Array<{path:string,oid:string,size:number}>}>}
- */
 async function processPost(postDoc, page, recorder) {
     const postId = postDoc.post_id;
     log('info', `⬇  Processing: ${postId}`);
@@ -1671,32 +1655,63 @@ async function processPost(postDoc, page, recorder) {
         const repoPath = `${CONFIG.hf.assetsPath}/${filename}`;
         const type     = mimeToType(mimeType, ext);
 
-        await recorder.updateLabel(postId, `UPLOADING [${i + 1}/${links.length}]`);
+        await recorder.updateLabel(postId, `PROCESSING [${i + 1}/${links.length}]`);
+        
+        let fileEntry = { url: null, type };
+        let frames = [];
+
+        if (type === 'video') {
+            const tmpVidPath = path.join(CONFIG.tmpDir, `vid_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`);
+            fs.writeFileSync(tmpVidPath, buffer);
+            const tmpFramesDir = tmpVidPath + '_frames';
+            
+            try {
+                const pyPath = path.join(CONFIG.tmpDir, 'extract_frames.py');
+                execSync(`python3 "${pyPath}" "${tmpVidPath}" "${tmpFramesDir}"`, { stdio: 'ignore' });
+            } catch (e) {
+                log('warn', `  Frame extraction failed for ${postId}: ${e.message}`);
+            }
+
+            if (fs.existsSync(tmpFramesDir)) {
+                const frameFiles = fs.readdirSync(tmpFramesDir).filter(f => f.endsWith('.jpg'));
+                for (const [fIdx, f] of frameFiles.entries()) {
+                    const frameBuf = fs.readFileSync(path.join(tmpFramesDir, f));
+                    const frameName = `${postId.replace('/', '-')}-${i}-frame-${fIdx}.jpg`;
+                    const frameRepoPath = `${CONFIG.hf.assetsPath}/${frameName}`;
+                    
+                    log('debug', `  Uploading frame blob: ${frameRepoPath} (${(frameBuf.length / 1024).toFixed(0)} KB)`);
+                    const frameBlob = await hfUploadBlob(frameBuf, frameRepoPath);
+                    frames.push({ url: frameBlob.url, type: 'image' });
+                    lfsFiles.push({ path: frameBlob.path, oid: frameBlob.oid, size: frameBlob.size });
+                }
+            }
+            try { fs.unlinkSync(tmpVidPath); } catch(_) {}
+            try { fs.rmSync(tmpFramesDir, { recursive: true, force: true }); } catch(_) {}
+
+            if (frames.length === 0) {
+                log('info', `  [!] Video yielded 0 frames. Discarding video entirely.`);
+                continue; // Skip uploading the video blob
+            }
+            fileEntry.frames = frames;
+        }
+
         log('debug', `  Uploading blob: ${repoPath} (${(buffer.length / 1024).toFixed(0)} KB)`);
         const blob = await hfUploadBlob(buffer, repoPath);
-
-        fileUrls.push({ url: blob.url, type });
+        fileEntry.url = blob.url;
         lfsFiles.push({ path: blob.path, oid: blob.oid, size: blob.size });
-        log('info', `  ✓ [${i}] ${type}: ${blob.url}`);
+
+        fileUrls.push(fileEntry);
+        log('info', `  ✓ [${i}] ${type}: ${blob.url}${type === 'video' ? ` (${frames.length} frames)` : ''}`);
     }
 
     await recorder.updateLabel(postId, 'DONE');
     return { fileUrls, lfsFiles };
 }
 
-/**
- * Process posts in parallel chunks.  Each page gets its own ScreenRecorder.
- *
- * All file blobs are uploaded to HF during this pass, but the repo commit and
- * the MongoDB `downloaded:true` update are both deferred until every post has
- * been attempted — see the comment in main(). This guarantees we only ever
- * make ONE HF commit per run (avoiding the commits-per-hour rate limit) and
- * that MongoDB is only updated for posts whose assets are confirmed committed.
- */
 async function processBatch(posts, browser, collection) {
     const concurrency = Math.min(CONFIG.batch.concurrency, posts.length);
     const results      = { ok: 0, fail: 0 };
-    const pendingCommit = []; // { postDoc, fileUrls, lfsFiles }
+    const pendingCommit = [];
 
     for (let offset = 0; offset < posts.length; offset += concurrency) {
         const chunk = posts.slice(offset, offset + concurrency);
@@ -1731,19 +1746,21 @@ async function processBatch(posts, browser, collection) {
         if (offset + concurrency < posts.length) await sleep(2000);
     }
 
-    // ── Single batched HF commit for every uploaded file across all posts ──
     const allLfsFiles = pendingCommit.flatMap(p => p.lfsFiles);
     if (allLfsFiles.length > 0) {
         log('info', `── Committing ${allLfsFiles.length} file(s) across ${pendingCommit.length} post(s) to HuggingFace in ONE commit ──`);
         try {
             await hfCommitFiles(allLfsFiles, `orchestrator: add assets for ${pendingCommit.length} post(s) [run ${CONFIG.runId}]`);
 
-            // Commit succeeded — now (and only now) mark posts as downloaded in MongoDB.
             for (const { postDoc, fileUrls } of pendingCommit) {
                 try {
+                    const updateObj = { downloaded: true, file_urls: fileUrls };
+                    if (fileUrls.length === 0) {
+                        updateObj.discarded = true;
+                    }
                     await collection.updateOne(
                         { _id: postDoc._id },
-                        { $set: { downloaded: true, file_urls: fileUrls } }
+                        { $set: updateObj }
                     );
                 } catch (err) {
                     log('error', `MongoDB update failed for ${postDoc.post_id} after successful HF commit: ${err.message}`);
@@ -1752,12 +1769,23 @@ async function processBatch(posts, browser, collection) {
                 }
             }
         } catch (err) {
-            // Commit failed — do NOT mark any of these posts as downloaded, since
-            // their assets are not actually committed on HF yet. They'll be
-            // retried (re-downloaded) on the next run.
             log('error', `HF batch commit failed — MongoDB will NOT be updated for this run's ${pendingCommit.length} post(s): ${err.message}`);
             results.ok -= pendingCommit.length;
             results.fail += pendingCommit.length;
+        }
+    } else {
+        // Even if there were no valid files uploaded, we should still update posts that yielded 0 valid files to be discarded
+        for (const { postDoc, fileUrls } of pendingCommit) {
+            if (fileUrls.length === 0) {
+                try {
+                    await collection.updateOne(
+                        { _id: postDoc._id },
+                        { $set: { downloaded: true, file_urls: [], discarded: true } }
+                    );
+                } catch (err) {
+                    log('error', `MongoDB update failed for discarded post ${postDoc.post_id}: ${err.message}`);
+                }
+            }
         }
     }
 
@@ -1796,6 +1824,9 @@ async function main() {
         log('error', 'ORCH_HF_TOKEN is required.');
         process.exit(1);
     }
+
+    // Prepare Python script
+    fs.writeFileSync(path.join(CONFIG.tmpDir, 'extract_frames.py'), EXTRACT_FRAMES_PY);
 
     // ── MongoDB connect ──────────────────────────────────────────────────────
     log('info', 'Connecting to MongoDB…');
