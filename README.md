@@ -1,4 +1,4 @@
-# UGC Dropship Pipeline
+# GLENS.PI - Google Lens Product Identifier
 
 ![](./assets/banner.gif)
 
