@@ -61,6 +61,7 @@ const CONFIG = {
         navWaitUntil: process.env.GLENS_NAV_WAIT || 'domcontentloaded',
     },
     logLevel: process.env.GLENS_LOG_LEVEL || 'info',
+    hfToken: process.env.GLENS_HF_TOKEN || process.env.HF_TOKEN || '',
     mongodb: {
         uri: process.env.GLENS_MONGODB_URI || '',
         db: process.env.GLENS_MONGODB_DB || 'ugc-dropship',
@@ -575,6 +576,8 @@ async function fetchFromMongoDB() {
     let imageCount = 0;
     let skipCount = 0;
 
+    const headers = CONFIG.hfToken ? { Authorization: `Bearer ${CONFIG.hfToken}` } : {};
+
     for (const claim of claims) {
         const { post, fileIndex, frameIndex, updatePath, file } = claim;
         const meta = {
@@ -592,10 +595,20 @@ async function fetchFromMongoDB() {
                 const urlObj = new URL(file.url);
                 const basename = path.basename(urlObj.pathname) || 'image.jpg';
                 const frameStr = frameIndex !== -1 ? `f${frameIndex}` : 'main';
+                const filename = `mongo_${meta.postId}_${fileIndex}_${frameStr}_${basename}`;
+                
+                // Download the HF image locally first so the script knows to upload it to Litterbox/ImgBB
+                const localPath = path.join(TMP_DIR, filename);
+                const resp = await fetch(file.url, { headers, redirect: 'follow' });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching image from HF`);
+                
+                const buffer = Buffer.from(await resp.arrayBuffer());
+                fs.writeFileSync(localPath, buffer);
+
                 imagePaths.push({
-                    type: 'url',
-                    url: file.url,
-                    filename: `mongo_${meta.postId}_${fileIndex}_${frameStr}_${basename}`,
+                    type: 'local', // Marking as local forces it through uploadImage()
+                    originalPath: localPath,
+                    filename: filename,
                     mongoMeta: meta
                 });
                 imageCount++;
