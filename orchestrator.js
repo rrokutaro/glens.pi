@@ -1019,54 +1019,86 @@ async function reviewCollageWithGemini(db, collageBuffer) {
 
 /**
  * Fetch top-level images and video frames up to `limit`.
+ *
+ * Walks each candidate post's `file_urls` array in its natural, stored
+ * order (images and videos interleaved exactly as they appear), so a
+ * video sitting between two images gets picked up in its actual position
+ * instead of every unreviewed image in the whole collection being
+ * fetched first and only the leftover budget (if any) going to video
+ * frames. That earlier two-phase approach let a large image backlog
+ * starve out video frames indefinitely — this fixes that while keeping
+ * the exact same output shape consumers rely on.
  */
 async function fetchUnreviewedFiles(collection, limit) {
-    // 1. Fetch top-level images
-    const imagesCursor = collection.aggregate([
-        { $match: { file_urls: { $exists: true, $ne: [] }, discarded: { $ne: true } } },
-        { $project: { post_id: 1, file_urls: 1 } },
-        { $unwind: { path: '$file_urls', includeArrayIndex: 'fileIndex' } },
-        { $match: {
-            'file_urls.type': 'image',
-            'file_urls.reviewed': { $ne: true },
-        } },
-        { $limit: limit },
-    ]);
+    // Over-fetch candidate posts (same heuristic glens.js's claimFiles
+    // uses) so we have enough posts on hand to walk through and reach
+    // `limit` items without needing a second round-trip.
+    const candidatePosts = await collection
+        .find({
+            discarded: { $ne: true },
+            $or: [
+                {
+                    file_urls: {
+                        $elemMatch: {
+                            type: 'image',
+                            reviewed: { $ne: true },
+                        }
+                    }
+                },
+                {
+                    'file_urls.frames': {
+                        $elemMatch: {
+                            reviewed: { $ne: true },
+                        }
+                    }
+                }
+            ]
+        })
+        .project({ post_id: 1, file_urls: 1 })
+        .limit(limit * 3 + 10)
+        .toArray();
 
-    const topImages = await imagesCursor.toArray();
-    let candidates = topImages.map(d => ({
-        postId:       d.post_id,
-        postObjectId: d._id,
-        fileIndex:    d.fileIndex,
-        frameIndex:   -1,
-        url:          d.file_urls.url,
-        type:         d.file_urls.type,
-    }));
+    const candidates = [];
 
-    // 2. If we haven't hit the limit, fetch unreviewed video frames
-    if (candidates.length < limit) {
-        const framesCursor = collection.aggregate([
-            { $match: { file_urls: { $exists: true, $ne: [] }, discarded: { $ne: true } } },
-            { $project: { post_id: 1, file_urls: 1 } },
-            { $unwind: { path: '$file_urls', includeArrayIndex: 'fileIndex' } },
-            { $match: { 'file_urls.type': 'video', 'file_urls.frames': { $exists: true, $ne: [] } } },
-            { $unwind: { path: '$file_urls.frames', includeArrayIndex: 'frameIndex' } },
-            { $match: {
-                'file_urls.frames.reviewed': { $ne: true },
-            } },
-            { $limit: limit - candidates.length },
-        ]);
-        const frames = await framesCursor.toArray();
-        const frameCandidates = frames.map(d => ({
-            postId:       d.post_id,
-            postObjectId: d._id,
-            fileIndex:    d.fileIndex,
-            frameIndex:   d.frameIndex,
-            url:          d.file_urls.frames.url,
-            type:         d.file_urls.frames.type,
-        }));
-        candidates = candidates.concat(frameCandidates);
+    outer:
+    for (const post of candidatePosts) {
+        if (!Array.isArray(post.file_urls)) continue;
+
+        for (let i = 0; i < post.file_urls.length; i++) {
+            if (candidates.length >= limit) break outer;
+
+            const file = post.file_urls[i];
+            if (!file) continue;
+
+            if (file.type === 'image') {
+                if (file.reviewed) continue;
+                candidates.push({
+                    postId:       post.post_id,
+                    postObjectId: post._id,
+                    fileIndex:    i,
+                    frameIndex:   -1,
+                    url:          file.url,
+                    type:         file.type,
+                });
+            } else if (file.type === 'video' && Array.isArray(file.frames)) {
+                for (let j = 0; j < file.frames.length; j++) {
+                    if (candidates.length >= limit) break outer;
+
+                    const frame = file.frames[j];
+                    if (!frame || frame.reviewed) continue;
+                    candidates.push({
+                        postId:       post.post_id,
+                        postObjectId: post._id,
+                        fileIndex:    i,
+                        frameIndex:   j,
+                        url:          frame.url,
+                        type:         frame.type,
+                    });
+                }
+            }
+        }
     }
+
     return candidates;
 }
 
