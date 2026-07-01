@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import os from 'os';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
+import { jsonrepair } from 'jsonrepair';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONFIG
@@ -1047,6 +1048,27 @@ function extractBalancedJson(text, start) {
     return null;
 }
 
+function ensureValidJson(candidate) {
+    if (!candidate) return candidate;
+
+    try {
+        JSON.parse(candidate);
+        return candidate; // already valid, nothing to do
+    } catch (e) {
+        // fall through to repair attempt
+    }
+
+    try {
+        const repaired = jsonrepair(candidate);
+        JSON.parse(repaired); // confirm the repair actually produced valid JSON
+        log('debug', 'JSON repair fixed a malformed response.');
+        return repaired;
+    } catch (e) {
+        log('debug', 'JSON repair could not fix response, keeping original text: ' + e.message.slice(0, 100));
+        return candidate; // leave as the original string, exactly as before
+    }
+}
+
 function extractJsonFromText(text) {
     if (!text || text.length < 10) return null;
 
@@ -1064,7 +1086,7 @@ function extractJsonFromText(text) {
         let pos = 0;
         while ((pos = searchArea.indexOf(sig, pos)) !== -1) {
             const c = extractBalancedJson(searchArea, pos);
-            if (c && isRealProductData(c)) return c;
+            if (c && isRealProductData(c)) return ensureValidJson(c);
             pos++;
         }
     }
@@ -1072,7 +1094,7 @@ function extractJsonFromText(text) {
     let pos = 0;
     while ((pos = searchArea.indexOf('{', pos)) !== -1) {
         const c = extractBalancedJson(searchArea, pos);
-        if (c && c.length > 100 && isRealProductData(c)) return c;
+        if (c && c.length > 100 && isRealProductData(c)) return ensureValidJson(c);
         pos++;
     }
 
@@ -1081,7 +1103,7 @@ function extractJsonFromText(text) {
     if (firstBrace !== -1 && lastBrace > firstBrace) {
         const fallbackSlice = searchArea.slice(firstBrace, lastBrace + 1);
         if (isRealProductData(fallbackSlice)) {
-            return fallbackSlice; 
+            return ensureValidJson(fallbackSlice);
         }
     }
 
