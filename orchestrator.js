@@ -1720,6 +1720,12 @@ class PicukiSiteDownloader extends InstagramDownloader {
     constructor() { super('PicukiSite'); }
 
     async extractLinks(page, postId) {
+        // Avoid reels, posts only
+        if (postId?.includes("reel")) {
+            log('warn', `Picuki has issues with reels, skipping [${postId}]`);
+            return [];
+        }
+        
         const igUrl = `https://www.instagram.com/${postId}/`;
 
         log('info', `[PicukiSite] Processing ${postId}`);
@@ -1933,7 +1939,7 @@ class SaveClipDownloader extends InstagramDownloader {
     }
 }
 
-const DOWNLOADERS = [new PicnobDownloader(), new PicukiSiteDownloader(), new SaveClipDownloader(), new InSaverDownloader(), new FastDLDownloader(), new SnapInstaDownloader()];
+const DOWNLOADERS = [new PicnobDownloader(), new SaveClipDownloader(), new InSaverDownloader(), new FastDLDownloader(), new PicukiSiteDownloader()];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
