@@ -81,8 +81,8 @@ const CONFIG = {
         // heartbeatIntervalMs: how often we refresh our own locks while still
         //   working, so we can keep lockTtlMs low (fast recovery from a dead
         //   runner) without losing a lock mid-way through a slow video/image.
-        lockTtlMs: parseInt(process.env.GLENS_MONGODB_LOCK_TTL_MS || '90000', 10),
-        heartbeatIntervalMs: parseInt(process.env.GLENS_MONGODB_HEARTBEAT_MS || '30000', 10),
+        lockTtlMs: parseInt(process.env.GLENS_MONGODB_LOCK_TTL_MS || '45000', 10),
+        heartbeatIntervalMs: parseInt(process.env.GLENS_MONGODB_HEARTBEAT_MS || '15000', 10),
     },
 };
 
