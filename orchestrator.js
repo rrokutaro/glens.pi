@@ -72,7 +72,7 @@ const CONFIG = {
     },
     timeouts: {
         navigation:     45_000,
-        downloaderIdle: 30_000,
+        downloaderIdle: 15_000,
         idleReset:      10_000,
     },
     recording: {
@@ -1614,7 +1614,326 @@ class InSaverDownloader extends InstagramDownloader {
     }
 }
 
-const DOWNLOADERS = [new InSaverDownloader(), new FastDLDownloader(), new SnapInstaDownloader()];
+class PicnobDownloader extends InstagramDownloader {
+    constructor() { super('Picnob'); }
+
+    async extractLinks(page, postId) {
+        // Avoid reels, posts only
+        if (postId?.includes("reel")) {
+            log('warn', `Picnob doesnt support reels, skipping [${postId}]`);
+            return [];
+        }
+        
+        // Normalize postId in case it arrives as "p/CODE", "reel/CODE", or a bare shortcode.
+        const shortcode = postId.replace(/^\/+|\/+$/g, '').split('/').pop();
+
+        log('info', `[Picnob] Processing ${shortcode}`);
+
+        const candidates = [ `https://www.picnob.com/post/${shortcode}/` ];
+
+        let lastErr = null;
+
+        for (const url of candidates) {
+            try {
+                const resp = await page.goto(url, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: CONFIG.timeouts.navigation,
+                });
+
+                if (resp && resp.status() >= 400) {
+                    lastErr = new Error(`HTTP ${resp.status()} for ${url}`);
+                    continue;
+                }
+
+                const found = await page.waitForFunction(() => {
+                    if (document.querySelector('.down a.downbtn[href]')) return true;
+                    if (document.querySelector('.entry-body a[href]')) return true;
+                    if (document.querySelector('video source[src]')) return true;
+                    if (document.querySelector('video[src]')) return true;
+                    return false;
+                }, { timeout: CONFIG.timeouts.downloaderIdle })
+                    .then(() => true)
+                    .catch(() => false);
+
+                if (!found) {
+                    lastErr = new Error(`No media found at ${url}`);
+                    continue;
+                }
+
+                await sleep(1000);
+
+                const links = await page.evaluate(() => {
+                    const items = [];
+                    const seen  = new Set();
+
+                    const push = (href) => {
+                        if (!href || seen.has(href)) return;
+                        seen.add(href);
+                        items.push({ directUrl: href, uri: href });
+                    };
+
+                    // Preferred: explicit "Download" buttons (force-download via &dl=1,
+                    // one per carousel slide for image posts).
+                    document.querySelectorAll('.down a.downbtn[href]').forEach(a => push(a.href));
+
+                    // Video posts / reels.
+                    document.querySelectorAll('video source[src]').forEach(s => push(s.src));
+                    document.querySelectorAll('video[src]').forEach(v => push(v.src));
+
+                    // Fallback: the full-res link each slide's image is wrapped in.
+                    if (items.length === 0) {
+                        document.querySelectorAll('.entry-body a[href]').forEach(a => push(a.href));
+                    }
+
+                    // Last resort: any raw CDN media link left on the page.
+                    if (items.length === 0) {
+                        document.querySelectorAll('a[href*="cdninstagram.com"]').forEach(a => push(a.href));
+                    }
+
+                    return items;
+                });
+
+                if (links.length > 0) {
+                    log('info', `[Picnob] ✅ ${links.length} link(s) for ${shortcode} @ ${url}`);
+                    return links;
+                }
+
+                lastErr = new Error(`Media markers present but no links extracted at ${url}`);
+            } catch (err) {
+                lastErr = err;
+                log('debug', `[Picnob] ${url} failed: ${err.message.slice(0, 150)}`);
+            }
+        }
+
+        log('warn', `[Picnob] Failed for ${shortcode}: ${lastErr ? lastErr.message : 'unknown error'}`);
+
+        const safeName = shortcode.replace(/[^a-z0-9]/gi, '');
+        await page.screenshot({
+            path: path.join(CONFIG.tmpDir, `picnob-debug-${safeName}-${Date.now()}.png`),
+        }).catch(() => {});
+
+        return [];
+    }
+}
+
+class PicukiSiteDownloader extends InstagramDownloader {
+    constructor() { super('PicukiSite'); }
+
+    async extractLinks(page, postId) {
+        const igUrl = `https://www.instagram.com/${postId}/`;
+
+        log('info', `[PicukiSite] Processing ${postId}`);
+
+        // Block popups to avoid new tabs for ads
+        await page.evaluateOnNewDocument(() => {
+            window.open = function() { return null; };
+        });
+
+        await page.goto('https://picuki.site/', {
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.timeouts.navigation,
+        });
+
+        // Robust input selector: relies on form inputs and placeholders instead of CSS classes
+        const inputSel = 'form input[type="text"], input[placeholder*="username"], input[placeholder*="link"]';
+        await page.waitForSelector(inputSel, { timeout: 15_000 });
+
+        // Safely focus and set value via JS to prevent triggering invisible ad overlays
+        await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.focus();
+                el.value = '';
+            }
+        }, inputSel);
+
+        await page.type(inputSel, igUrl, { delay: 10 });
+
+        await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }, inputSel);
+
+        // Press Enter to submit the form without clicking any buttons
+        await page.keyboard.press('Enter');
+
+        log('debug', `[PicukiSite] Submitted: ${igUrl}`);
+
+        // Robust result waiting: checking for any anchor tag with a 'download' attribute or containing the proxy URL pattern
+        await page.waitForFunction(() => {
+            const anchors = Array.from(document.querySelectorAll('a'));
+            return anchors.some(a => 
+                a.hasAttribute('download') || 
+                (a.href && a.href.includes('media.picuki.site')) || 
+                (a.href && a.href.includes('uri='))
+            );
+        }, { timeout: CONFIG.timeouts.downloaderIdle });
+
+        await sleep(1500);
+
+        const results = await page.evaluate(() => {
+            const items = [];
+            const seen = new Set();
+
+            // Select all anchor tags on the page and filter them robustly
+            const allAnchors = document.querySelectorAll('a');
+            
+            for (const a of allAnchors) {
+                const href = a.href;
+                if (!href) continue;
+
+                // Condition to identify a valid download link independent of CSS classes
+                const isDownloadLink = a.hasAttribute('download') || 
+                                       href.includes('uri=') || 
+                                       href.includes('media.picuki.site/get');
+                
+                if (isDownloadLink && !seen.has(href)) {
+                    seen.add(href);
+
+                    let directUrl = href;
+                    let proxyUrl = href;
+                    
+                    try {
+                        const urlObj = new URL(href);
+                        const uriParam = urlObj.searchParams.get('uri');
+                        if (uriParam) {
+                            directUrl = decodeURIComponent(uriParam); // Extract the direct CDN URL from the query string
+                        }
+                    } catch (_) {}
+
+                    // Provide the proxyUrl as 'uri' and the CDN URL as 'directUrl'
+                    items.push({ directUrl, uri: proxyUrl });
+                }
+            }
+
+            return items;
+        });
+
+        log('info', `[PicukiSite] ✅ ${results.length} link(s) for ${postId}`);
+
+        if (results.length === 0) {
+            const safeName = postId.replace(/[^a-z0-9]/gi, '');
+            await page.screenshot({
+                path: path.join(CONFIG.tmpDir, `picukisite-debug-${safeName}-${Date.now()}.png`),
+            }).catch(() => {});
+        }
+
+        return results;
+    }
+}
+
+class SaveClipDownloader extends InstagramDownloader {
+    constructor() { super('SaveClip'); }
+
+    async extractLinks(page, postId) {
+        const igUrl = `https://www.instagram.com/${postId}/`;
+
+        log('info', `[SaveClip] Processing ${postId}`);
+
+        // Block popups to avoid new tabs for ads
+        await page.evaluateOnNewDocument(() => {
+            window.open = function() { return null; };
+        });
+
+        await page.goto('https://saveclip.app/en3', {
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.timeouts.navigation,
+        });
+
+        // Robust input selector: targeting the search form input
+        const inputSel = 'form#search-form input[name="q"], #s_input, input[placeholder*="Instagram"]';
+        await page.waitForSelector(inputSel, { timeout: 15_000 });
+
+        // Safely focus and set value via JS to prevent triggering invisible ad overlays
+        await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.focus();
+                el.value = '';
+            }
+        }, inputSel);
+
+        await page.type(inputSel, igUrl, { delay: 10 });
+
+        await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }, inputSel);
+
+        // Click the submit button inside the form robustly
+        const btnSel = 'form#search-form button, #search-form button.btn-default';
+        const btnExists = await page.$(btnSel);
+        if (btnExists) {
+            await page.click(btnSel);
+        } else {
+            await page.keyboard.press('Enter');
+        }
+
+        log('debug', `[SaveClip] Submitted: ${igUrl}`);
+
+        // Wait for results to be rendered
+        await page.waitForFunction(() => {
+            return document.querySelector('#search-result .download-items') !== null || 
+                   document.querySelector('#search-result ul.download-box') !== null;
+        }, { timeout: CONFIG.timeouts.downloaderIdle });
+
+        await sleep(1500);
+
+        const results = await page.evaluate(() => {
+            const items = [];
+            const seen = new Set();
+
+            document.querySelectorAll('#search-result .download-items').forEach(item => {
+                // Try dropdown first (Photos usually have resolution select)
+                const select = item.querySelector('.photo-option select, select.minimal');
+                if (select && select.options.length > 0) {
+                    const href = select.options[0].value;
+                    if (href && !seen.has(href)) {
+                        seen.add(href);
+                        items.push({ directUrl: href, uri: href });
+                    }
+                    return; // proceed to next item
+                }
+
+                // Otherwise, look for download buttons (Video/Reel)
+                // Avoid .dl-thumb to prevent grabbing the thumbnail instead of the actual media
+                const btnContainers = item.querySelectorAll('.download-items__btn:not(.dl-thumb)');
+                for (const container of btnContainers) {
+                    const a = container.querySelector('a[href]');
+                    if (a && a.href && !seen.has(a.href)) {
+                        // Check if it's a valid link 
+                        if (a.href.includes('token=') || a.href.includes('snapcdn.app') || a.hasAttribute('download')) {
+                            seen.add(a.href);
+                            items.push({ directUrl: a.href, uri: a.href });
+                            break;
+                        }
+                    }
+                }
+            });
+
+            return items;
+        });
+
+        log('info', `[SaveClip] ✅ ${results.length} link(s) for ${postId}`);
+
+        if (results.length === 0) {
+            const safeName = postId.replace(/[^a-z0-9]/gi, '');
+            await page.screenshot({
+                path: path.join(CONFIG.tmpDir, `saveclip-debug-${safeName}-${Date.now()}.png`),
+            }).catch(() => {});
+        }
+
+        return results;
+    }
+}
+
+const DOWNLOADERS = [new PicnobDownloader(), new PicukiSiteDownloader(), new SaveClipDownloader(), new InSaverDownloader(), new FastDLDownloader(), new SnapInstaDownloader()];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
