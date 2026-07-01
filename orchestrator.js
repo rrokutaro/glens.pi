@@ -1614,7 +1614,7 @@ class InSaverDownloader extends InstagramDownloader {
     }
 }
 
-const DOWNLOADERS = [new InSaverDownloader(), new SnapInstaDownloader(), new FastDLDownloader()];
+const DOWNLOADERS = [new InSaverDownloader(), new FastDLDownloader(), new SnapInstaDownloader()];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 2 — Fetch un-downloaded posts
