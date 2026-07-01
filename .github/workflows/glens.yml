@@ -61,7 +61,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
+        sudo apt-get install -y --no-install-recommends ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
 
     - name: Install npm dependencies
       run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb jsonrepair
