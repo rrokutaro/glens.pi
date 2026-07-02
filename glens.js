@@ -795,30 +795,38 @@ const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (c
 1. Title: Product name
 2. Brand: Manufacturer/brand name
 3. Description: What it is, key features, colors, materials
-4. Category: Type of product (top, bottom, footwear, accessory, etc.)
+4. Category: Type of product (top, bottom, footwear, accessory, etc.) Choose a descriptive category relative to the product(s)
 5. Price: Current price and original/sale price if discounted
 6. Availability: In stock, out of stock, pre-order, etc.
 7. Sizing: Available sizes or size range
-8. Sources (top priority): At least 5 direct product page URLs where this exact or very similar item can be purchased. Sort by reliability (official brand store first, then major retailers, then resellers). Each source should include:
-   - Store name
-   - Direct product URL (very important)
-   - Price at that source (if known)
-   - Availability at that source
-9. SocialAppearances: Any social media posts (Instagram, TikTok, Pinterest, etc.) where this exact product or very similar item appears. Include:
-   - Platform name
-   - Post URL (if identifiable)
-   - Brief context (e.g., "viral try-on haul", "styled outfit post")
-10. DropshipViability: Rate 1-10 with reasoning. Consider: brand recognition, price point, shipping complexity, seasonality, trend status, competition saturation
-11. EstimatedResaleRange: Typical resale markup range based on category and brand tier (e.g., fast fashion 2-3x, luxury 1.2-1.5x)
-12. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier
+8. SizingGuide: Unified sizing guidance synthesized from all sources (e.g., fit notes, measurement recommendations, "runs small — size up", model stats, etc.)
+9. BasePrice: The highest non-sale/actual price found across all sources. Use the original/non-discounted price when available; if only sale prices exist, use the highest current price. This represents the baseline supplier cost for dropshipping. Use the same currency as price.currency.
+10. RecommendedMarkup: Recommended resale markup. Use type "percentage" (e.g., value: "30") or type "fixed" (e.g., value: "25.00"). Include currency for fixed amounts. Prefer percentage when possible.
+11. RecommendedShippingRate: Recommended flat-rate shipping cost to cover international orders without issues. Include amount, currency, and coverage description (e.g., "Worldwide", "International").
+12. ShippingAndReturns: Unified shipping and returns summary for the product (e.g., "Free shipping over $50. 30-day returns. Excludes final sale items.").
+13. Sources (maximum 7, sorted best to worst): Direct product page URLs where this exact or very similar item can be purchased. Sort by exactness and reliability: exact match on official brand store first, then authorized major retailers, then reputable marketplaces. Prioritize sources with available inventory. Each source should include:
+    - Store name
+    - Direct product URL (very important)
+    - Price at that source (if known)
+    - Availability at that source
+    - ShippingAndReturns: Shipping and returns policy specific to this source
+    - ShippingRestrictions: Array of country names or codes this source will NOT ship to
+    - ShippingAllowed: Array of country names or codes this source explicitly supports. If unrestricted or unknown, return null or an empty array [].
+14. SocialAppearances: Any social media posts (Instagram, TikTok, Pinterest, etc.) where this exact product or very similar item appears. Include:
+    - Platform name
+    - Direct post URL (if identifiable)
+    - Brief context (e.g., "viral try-on haul", "styled outfit post" and etc)
+15. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier
+16. Apply high amounts of effort and make sure you find exact products as needed.
 
 Return ONLY raw JSON. No code blocks, no explanations. Raw JSON text in one line.
 
 Schema:
 
-{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"dropshipViability":{"score":1-10,"reasoning":"string","risks":["string"]},"estimatedResaleRange":{"low":"string","high":"string","currency":"string"},"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}]}]}
+{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sizingGuide":"string","basePrice":"string","recommendedMarkup":{"type":"percentage|fixed","value":"string","currency":"string|null"},"recommendedShippingRate":{"amount":"string","currency":"string","coverage":"string"},"shippingAndReturns":"string","sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null","shippingAndReturns":"string|null","shippingRestrictions":["string"],"shippingAllowed":["string"]|null}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}]}]}
 
 Heres the image URL: {IMAGE_URL}`;
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  DOM UTILITIES
