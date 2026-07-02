@@ -1725,10 +1725,17 @@ async function startTesting() {
                 const extractedJson = extractJsonFromText(r.response || '');
                 if (!r.error && !r.timedOut && extractedJson && r.mongoMeta) {
                     try {
+                        let valueToStore;
+                        try {
+                            valueToStore = JSON.parse(extractedJson);
+                        } catch (parseErr) {
+                            valueToStore = extractedJson;
+                        }
                         await collection.updateOne(
                             { _id: r.mongoMeta.docId },
-                            { $set: { [`${r.mongoMeta.path}.response`]: extractedJson } }
+                            { $set: { [`${r.mongoMeta.path}.response`]: valueToStore } }
                         );
+                        
                         updatedCount++;
                         log('debug', `MongoDB updated: ${r.mongoMeta.postId} ${r.mongoMeta.path}`);
                     } catch (e) {
