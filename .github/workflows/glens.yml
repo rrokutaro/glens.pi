@@ -59,6 +59,7 @@ jobs:
           apt-${{ runner.os }}-
 
     - name: Install system dependencies
+      timeout-minutes: 3
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
