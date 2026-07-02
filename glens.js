@@ -795,35 +795,33 @@ const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (c
 1. Title: Product name
 2. Brand: Manufacturer/brand name
 3. Description: What it is, key features, colors, materials
-4. Category: Type of product (top, bottom, footwear, accessory, etc.) Choose a descriptive category relative to the product(s)
+4. Category: Type of product (top, bottom, footwear, accessory, etc.)
 5. Price: Current price and original/sale price if discounted
 6. Availability: In stock, out of stock, pre-order, etc.
-7. Sizing: Available sizes or size range only (e.g., "XS-XL", "6-12", "One Size") — no fit commentary here.
-8. SizingGuide: Fit-specific guidance only — do not restate the size list from field 7. Include only new information: fit notes, measurement recommendations, "runs small — size up", model stats, etc.
-9. BasePrice: The item's true original/non-discounted price, if any source shows one — even if other sources show it on sale. Only if NO source shows an original price anywhere, use the highest current price found across sources instead. This represents the baseline supplier cost for dropshipping. Use the same currency as price.currency.
-10. RecommendedMarkup: Recommended resale markup, based on typical markup norms for this product's category and brand tier (e.g., fast fashion vs. mid-tier vs. luxury) — not an arbitrary guess. Use type "percentage" (e.g., value: "30") or type "fixed" (e.g., value: "25.00"). Include currency for fixed amounts. Prefer percentage when possible.
-11. RecommendedShippingRate: Recommended flat-rate shipping cost to cover international orders without issues, based on typical shipping costs for this product's size/weight category. Include amount, currency, and coverage description (e.g., "Worldwide", "International").
-12. ShippingAndReturns: A summary of shipping and returns policy specifically from the top-ranked (first-listed) source only — not an average or blend across all sources (e.g., "Free shipping over $50. 30-day returns. Excludes final sale items.").
-13. Sources (top priority — at least 5 direct product page URLs): Direct product page URLs where this exact or very similar item can be purchased. Sort by exactness and reliability: exact match on official brand store first, then authorized major retailers, then reputable marketplaces. Each source should include:
-    - Store name
-    - Direct product URL (very important)
-    - Price at that source (if known)
-    - Availability at that source
-    - ShippingAndReturns: Shipping and returns policy specific to this source
-    - ShippingRestrictions: Array of country names or codes this source will NOT ship to. Use an empty array [] if there are no restrictions or none are stated.
-    - ShippingAllowed: Array of country names or codes this source explicitly supports. Use an empty array [] if unrestricted or unknown.
-14. SocialAppearances: Actively search for social media posts (Instagram, TikTok, Pinterest, etc.) where this exact product or very similar item appears — do not skip this search or leave URLs null by default. Include:
-    - Platform name
-    - Direct post URL — search specifically for this; only return null if you have actively searched and confirmed no direct link exists
-    - Brief context (e.g., "viral try-on haul", "styled outfit post" and etc)
-15. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier. Each alternative's URL must be a real, verifiable product page — do not include an alternative if you cannot identify an actual URL for it.
-16. Apply high amounts of effort: find exact products where possible, and do not return fewer than 5 sources per product unless you can confirm no more exist after exhausting reasonable search avenues. If a product's brand cannot be identified with reasonable confidence, use "Unknown" for brand rather than guessing — do not fabricate a brand name.
+7. Sizing: Available sizes or size range
+8. Sources (top priority): At least 5 direct product page URLs where this exact or very similar item can be purchased. Sort by reliability (official brand store first, then major retailers, then resellers). Each source should include:
+   - Store name
+   - Direct product URL (very important)
+   - Price at that source (if known)
+   - Availability at that source
+9. SocialAppearances: Any social media posts (Instagram, TikTok, Pinterest, etc.) where this exact product or very similar item appears. Include:
+   - Platform name
+   - Post URL (if identifiable)
+   - Brief context (e.g., "viral try-on haul", "styled outfit post")
+10. DropshipViability: Rate 1-10 with reasoning. Consider: brand recognition, price point, shipping complexity, seasonality, trend status, competition saturation
+11. EstimatedResaleRange: Typical resale markup range based on category and brand tier (e.g., fast fashion 2-3x, luxury 1.2-1.5x)
+12. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier
+13. SizingGuide: Unified sizing guidance synthesized from all sources (e.g., fit notes, measurement recommendations, "runs small — size up", model stats, etc.)
+14. BasePrice: The item's true original/non-discounted price, if any source shows one. If no source shows an original price anywhere, use the highest current price found across sources instead. Use the same currency as price.currency.
+15. RecommendedMarkup: Recommended resale markup, based on typical markup norms for this product's category and brand tier. Use type "percentage" (e.g., value: "30") or type "fixed" (e.g., value: "25.00"). Include currency for fixed amounts.
+16. RecommendedShippingRate: Recommended flat-rate shipping cost to cover international orders, based on typical shipping costs for this product's size/weight category. Include amount, currency, and coverage description (e.g., "Worldwide", "International").
+17. ShippingAndReturns: A summary of shipping and returns policy specifically from the top-ranked (first-listed) source (e.g., "Free shipping over $50. 30-day returns. Excludes final sale items.").
 
 Return ONLY raw JSON. No code blocks, no explanations. Raw JSON text in one line.
 
 Schema:
 
-{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sizingGuide":"string","basePrice":"string","recommendedMarkup":{"type":"percentage|fixed","value":"string","currency":"string|null"},"recommendedShippingRate":{"amount":"string","currency":"string","coverage":"string"},"shippingAndReturns":"string","sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null","shippingAndReturns":"string|null","shippingRestrictions":["string"],"shippingAllowed":["string"]}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}]}]}
+{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"dropshipViability":{"score":1-10,"reasoning":"string","risks":["string"]},"estimatedResaleRange":{"low":"string","high":"string","currency":"string"},"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}],"sizingGuide":"string","basePrice":"string","recommendedMarkup":{"type":"percentage|fixed","value":"string","currency":"string|null"},"recommendedShippingRate":{"amount":"string","currency":"string","coverage":"string"},"shippingAndReturns":"string"}]}
 
 Heres the image URL: {IMAGE_URL}`;
 
