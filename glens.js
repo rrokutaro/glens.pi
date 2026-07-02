@@ -799,29 +799,24 @@ const PROMPT_TEMPLATE = `Analyze this image and identify all visible products (c
 5. Price: Current price and original/sale price if discounted
 6. Availability: In stock, out of stock, pre-order, etc.
 7. Sizing: Available sizes or size range
-8. Sources (top priority): At least 5 direct product page URLs where this exact or very similar item can be purchased. Sort by reliability (official brand store first, then major retailers, then resellers). Each source should include:
+8. Sources (top priority): At least 5 direct product page URLs where this exact or very similar item can be purchased. Sort by reliability (official brand store first, then major retailers, then resellers). A direct product URL must lead to the specific product's page (containing a product ID, SKU, or product-name slug in the path) — never a homepage, category page, search results page, or bare domain. If you cannot find the actual product page for a given store, do not include that store as a source; search for a different retailer instead. Each source should include:
    - Store name
    - Direct product URL (very important)
    - Price at that source (if known)
    - Availability at that source
-9. SocialAppearances: Any social media posts (Instagram, TikTok, Pinterest, etc.) where this exact product or very similar item appears. Include:
-   - Platform name
-   - Post URL (if identifiable)
-   - Brief context (e.g., "viral try-on haul", "styled outfit post")
-10. DropshipViability: Rate 1-10 with reasoning. Consider: brand recognition, price point, shipping complexity, seasonality, trend status, competition saturation
-11. EstimatedResaleRange: Typical resale markup range based on category and brand tier (e.g., fast fashion 2-3x, luxury 1.2-1.5x)
-12. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier
-13. SizingGuide: Unified sizing guidance synthesized from all sources (e.g., fit notes, measurement recommendations, "runs small — size up", model stats, etc.)
-14. BasePrice: The item's true original/non-discounted price, if any source shows one. If no source shows an original price anywhere, use the highest current price found across sources instead. Use the same currency as price.currency.
-15. RecommendedMarkup: Recommended resale markup, based on typical markup norms for this product's category and brand tier. Use type "percentage" (e.g., value: "30") or type "fixed" (e.g., value: "25.00"). Include currency for fixed amounts.
-16. RecommendedShippingRate: Recommended flat-rate shipping cost to cover international orders, based on typical shipping costs for this product's size/weight category. Include amount, currency, and coverage description (e.g., "Worldwide", "International").
-17. ShippingAndReturns: A summary of shipping and returns policy specifically from the top-ranked (first-listed) source (e.g., "Free shipping over $50. 30-day returns. Excludes final sale items.").
+9. DropshipViability: Rate 1-10 with reasoning. Consider: brand recognition, price point, shipping complexity, seasonality, trend status, competition saturation
+10. Alternatives: 2-3 similar but cheaper or more available alternatives if the exact item is expensive, out of stock, or from a restrictive supplier
+11. SizingGuide: Unified sizing guidance synthesized from all sources (e.g., fit notes, measurement recommendations, "runs small — size up", model stats, etc.)
+12. BasePrice: The item's true original/non-discounted price, if any source shows one. If no source shows an original price anywhere, use the highest current price found across sources instead. Use the same currency as price.currency.
+13. RecommendedMarkup: Recommended resale markup, based on typical markup norms for this product's category and brand tier. Use type "percentage" (e.g., value: "30") or type "fixed" (e.g., value: "25.00"). Include currency for fixed amounts.
+14. RecommendedShippingRate: Recommended flat-rate shipping cost to cover international orders, based on typical shipping costs for this product's size/weight category. Include amount, currency, and coverage description (e.g., "Worldwide", "International").
+15. ShippingAndReturns: A summary of shipping and returns policy specifically from the top-ranked (first-listed) source (e.g., "Free shipping over $50. 30-day returns. Excludes final sale items.").
 
 Return ONLY raw JSON. No code blocks, no explanations. Raw JSON text in one line.
 
 Schema:
 
-{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}],"socialAppearances":[{"platform":"string","url":"string|null","context":"string|null"}],"dropshipViability":{"score":1-10,"reasoning":"string","risks":["string"]},"estimatedResaleRange":{"low":"string","high":"string","currency":"string"},"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}],"sizingGuide":"string","basePrice":"string","recommendedMarkup":{"type":"percentage|fixed","value":"string","currency":"string|null"},"recommendedShippingRate":{"amount":"string","currency":"string","coverage":"string"},"shippingAndReturns":"string"}]}
+{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"string","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"string|null"}],"dropshipViability":{"score":1-10,"reasoning":"string","risks":["string"]},"alternatives":[{"title":"string","brand":"string","url":"string","price":"string|null","why":"string"}],"sizingGuide":"string","basePrice":"string","recommendedMarkup":{"type":"percentage|fixed","value":"string","currency":"string|null"},"recommendedShippingRate":{"amount":"string","currency":"string","coverage":"string"},"shippingAndReturns":"string"}]}
 
 Heres the image URL: {IMAGE_URL}`;
 
