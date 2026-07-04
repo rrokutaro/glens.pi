@@ -116,7 +116,10 @@ jobs:
           python-version: '3.10'
 
       - name: Install Python dependencies
-        run: pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy
+        run: |
+          pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy
+          pip install -U crawl4ai imagehash httpx cloakbrowser
+          playwright install-deps chromium
 
       - name: Cache apt packages
         uses: actions/cache@v4
@@ -135,6 +138,39 @@ jobs:
             libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 \
             libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 \
             libpango-1.0-0 libcairo2 libxdamage1
+
+      - name: Install CloakBrowser anti-detection fonts
+        run: |
+          # ── Fix 1: Repair dpkg and clear locks ─────────────────────────────────
+          sudo dpkg --configure -a
+          sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat.lock /tmp/segoe.zip
+          sudo pkill -9 apt || true
+
+          # ── Fix 2: Pre-accept EULA ────────────────────────────────────────────
+          echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
+
+          # ── Fix 3: Install fonts ──────────────────────────────────────────────
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              fonts-noto-color-emoji \
+              fonts-freefont-ttf \
+              ttf-mscorefonts-installer \
+              fonts-unifont \
+              fonts-ipafont-gothic \
+              fonts-wqy-zenhei \
+              fonts-tlwg-loma-otf \
+              fontconfig
+
+          fc-cache -f -v
+
+          # ── Fix 4: Segoe UI (clean unzip, no prompts) ──────────────────────────
+          rm -rf /tmp/segoe-ui-linux-master
+          wget -q https://github.com/mrbvrz/segoe-ui-linux/archive/refs/heads/master.zip -O /tmp/segoe.zip
+          unzip -oq /tmp/segoe.zip -d /tmp/
+
+          sudo mkdir -p /usr/share/fonts/truetype/segoe-ui
+          sudo cp /tmp/segoe-ui-linux-master/fonts/*.ttf /usr/share/fonts/truetype/segoe-ui/ 2>/dev/null || echo "No .ttf files found in zip"
+          fc-cache -f -v
 
       - name: Install npm dependencies
         run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib mongodb sharp
