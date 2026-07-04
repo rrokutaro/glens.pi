@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-GROK FINAL
 Product Image Pipeline for E-commerce Sites (Production-Ready Lazy Extraction v3)
 
 Targeted improvements to reduce unrelated product noise from supplementary DOM scan
