@@ -1428,7 +1428,7 @@ Examples:
     parser.add_argument(
         "-u", "--urls",
         required=True,
-        help="Path to a JSON file containing a list of URLs (e.g. ["https://...", "https://..."])",
+        help="Path to a JSON file containing a list of URLs (e.g. [url, url])",
     )
     parser.add_argument(
         "-o", "--output",
