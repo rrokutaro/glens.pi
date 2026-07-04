@@ -8,6 +8,10 @@
  *     — each browser page is screen-recorded, clips compiled into one session MP4
  *  4. Upload assets to HuggingFace under scraped-posts/assets/
  *  5. Mark posts as downloaded:true + file_urls in MongoDB
+ *  6. AI Review (Gemini) — collages of unreviewed images/frames
+ *  7. Product Source Image Extraction — for every GLENS product source,
+ *     fetch product-page images via ecom-image-extractor.py and save to
+ *     response.products[].sources[].images
  */
 
 import { launch } from 'cloakbrowser/puppeteer';
@@ -18,6 +22,9 @@ import { MongoClient } from 'mongodb';
 import { createHash } from 'crypto';
 import os from 'os';
 import sharp from 'sharp';
+import { fileURLToPath } from 'url';
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONFIG
@@ -69,6 +76,18 @@ const CONFIG = {
         // against the review_reason Gemini gave back. Off by default since
         // it adds files to the run artifact; flip on to debug bad reviews.
         saveCollages:     process.env.ORCH_REVIEW_SAVE_COLLAGES === 'true',
+    },
+    productImageExtraction: {
+        enabled:          process.env.ORCH_PRODUCT_IMG_ENABLED !== 'false',
+        batchSize:        parseInt(process.env.ORCH_PRODUCT_IMG_BATCH_SIZE || '8', 10),
+        lazyExtraction:   process.env.ORCH_PRODUCT_IMG_LAZY !== 'false',
+        minScore:         parseInt(process.env.ORCH_PRODUCT_IMG_MIN_SCORE || '3', 10),
+        hashThreshold:    parseInt(process.env.ORCH_PRODUCT_IMG_HASH_THRESHOLD || '6', 10),
+        cdpPort:          parseInt(process.env.ORCH_PRODUCT_IMG_CDP_PORT || '9243', 10),
+        adaptiveCutoff:   process.env.ORCH_PRODUCT_IMG_ADAPTIVE_CUTOFF !== 'false',
+        pythonPath:       process.env.ORCH_PRODUCT_IMG_PYTHON || 'python3',
+        scriptPath:       process.env.ORCH_PRODUCT_IMG_SCRIPT || path.join(SCRIPT_DIR, 'ecom-image-extractor.py'),
+        timeoutMs:        parseInt(process.env.ORCH_PRODUCT_IMG_TIMEOUT_MS || '300000', 10),
     },
     timeouts: {
         navigation:     45_000,
@@ -1303,6 +1322,272 @@ async function runReviewStage(db, collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  PRODUCT SOURCE IMAGE EXTRACTION STAGE (STEP 7)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Gather every source URL inside response.products that does not yet have
+ * an `images` array.  Returns flat list with enough path info to map back.
+ */
+function gatherPendingSources(post) {
+    const pending = [];
+    if (!Array.isArray(post.file_urls)) return pending;
+
+    for (let i = 0; i < post.file_urls.length; i++) {
+        const file = post.file_urls[i];
+        if (!file) continue;
+
+        // Top-level file response
+        if (file.response && Array.isArray(file.response.products)) {
+            for (let p = 0; p < file.response.products.length; p++) {
+                const product = file.response.products[p];
+                if (!product || !Array.isArray(product.sources)) continue;
+                for (let s = 0; s < product.sources.length; s++) {
+                    const source = product.sources[s];
+                    if (source && source.url && !Array.isArray(source.images)) {
+                        pending.push({
+                            docId: post._id,
+                            fileUrlIndex: i,
+                            frameIndex: -1,
+                            productIndex: p,
+                            sourceIndex: s,
+                            url: source.url,
+                            store: source.store || '',
+                        });
+                    }
+                }
+            }
+        }
+
+        // Frame responses
+        if (file.frames && Array.isArray(file.frames)) {
+            for (let j = 0; j < file.frames.length; j++) {
+                const frame = file.frames[j];
+                if (!frame || !frame.response || !Array.isArray(frame.response.products)) continue;
+                for (let p = 0; p < frame.response.products.length; p++) {
+                    const product = frame.response.products[p];
+                    if (!product || !Array.isArray(product.sources)) continue;
+                    for (let s = 0; s < product.sources.length; s++) {
+                        const source = product.sources[s];
+                        if (source && source.url && !Array.isArray(source.images)) {
+                            pending.push({
+                                docId: post._id,
+                                fileUrlIndex: i,
+                                frameIndex: j,
+                                productIndex: p,
+                                sourceIndex: s,
+                                url: source.url,
+                                store: source.store || '',
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return pending;
+}
+
+async function fetchPostsWithProductResponses(collection, limit) {
+    return collection.find({
+        discarded: { $ne: true },
+        $or: [
+            { 'file_urls.response.products': { $exists: true, $ne: null } },
+            { 'file_urls.frames.response.products': { $exists: true, $ne: null } }
+        ]
+    }).limit(limit).toArray();
+}
+
+async function runExtractorScript(urls, cfg) {
+    const ts = Date.now();
+    const urlsPath = path.join(CONFIG.tmpDir, `extract_urls_${ts}.json`);
+    const outPath  = path.join(CONFIG.tmpDir, `extract_out_${ts}.json`);
+    fs.writeFileSync(urlsPath, JSON.stringify(urls));
+
+    const args = [
+        cfg.scriptPath,
+        '-u', urlsPath,
+        '-o', outPath,
+        '--min-score', String(cfg.minScore),
+        '--hash-threshold', String(cfg.hashThreshold),
+        '--cdp-port', String(cfg.cdpPort),
+    ];
+    if (cfg.lazyExtraction) args.push('--lazy-extraction');
+    else args.push('--no-lazy-extraction');
+    if (cfg.adaptiveCutoff) args.push('--adaptive-cutoff');
+    else args.push('--no-adaptive-cutoff');
+
+    const scriptDir = path.dirname(cfg.scriptPath);
+    return new Promise((resolve, reject) => {
+        const proc = spawn(cfg.pythonPath, args, { stdio: 'pipe', cwd: scriptDir });
+        let stderr = '';
+        let killed = false;
+
+        const timer = setTimeout(() => {
+            killed = true;
+            proc.kill('SIGKILL');
+            reject(new Error(`Product image extraction timed out after ${cfg.timeoutMs}ms`));
+        }, cfg.timeoutMs);
+
+        proc.stderr.on('data', d => { stderr += d; });
+        proc.on('close', code => {
+            clearTimeout(timer);
+            if (killed) return;
+            try { fs.unlinkSync(urlsPath); } catch (_) {}
+
+            if (code !== 0) {
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                return reject(new Error(`Extractor exited ${code}: ${stderr.slice(0, 300)}`));
+            }
+
+            try {
+                const raw = fs.readFileSync(outPath, 'utf8');
+                const parsed = JSON.parse(raw);
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                resolve(parsed);
+            } catch (e) {
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                reject(new Error(`Failed to parse extractor output: ${e.message}`));
+            }
+        });
+        proc.on('error', err => {
+            clearTimeout(timer);
+            try { fs.unlinkSync(urlsPath); } catch (_) {}
+            reject(err);
+        });
+    });
+}
+
+async function runProductImageExtractionStage(db, collection) {
+    log('info', '── Step 7: Product Source Image Extraction ──');
+
+    if (!fs.existsSync(CONFIG.productImageExtraction.scriptPath)) {
+        log('warn', `Extractor script not found at ${CONFIG.productImageExtraction.scriptPath} — skipping.`);
+        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    }
+
+    // Quick sanity check that python is available
+    try {
+        execSync(`${CONFIG.productImageExtraction.pythonPath} --version`, { stdio: 'ignore' });
+    } catch {
+        log('warn', `${CONFIG.productImageExtraction.pythonPath} not available — skipping product image extraction.`);
+        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    }
+
+    const posts = await fetchPostsWithProductResponses(collection, CONFIG.productImageExtraction.batchSize);
+    log('info', `Found ${posts.length} post(s) with product responses.`);
+
+    let allPending = [];
+    for (const post of posts) {
+        allPending.push(...gatherPendingSources(post));
+    }
+
+    log('info', `Discovered ${allPending.length} pending source(s) needing image extraction.`);
+
+    if (allPending.length === 0) {
+        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    }
+
+    // Deduplicate URLs for extraction batches, but keep all path references for mapping back
+    const seenUrls = new Set();
+    const uniquePending = [];
+    for (const item of allPending) {
+        if (!seenUrls.has(item.url)) {
+            seenUrls.add(item.url);
+            uniquePending.push(item);
+        }
+    }
+
+    const batchSize = CONFIG.productImageExtraction.batchSize;
+    const batches = [];
+    for (let i = 0; i < uniquePending.length; i += batchSize) {
+        batches.push(uniquePending.slice(i, i + batchSize));
+    }
+
+    const urlToImages = new Map();
+    let succeeded = 0;
+    let failed = 0;
+
+    for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        const urls = batch.map(x => x.url);
+        log('info', `Extracting batch ${b + 1}/${batches.length} (${urls.length} URL(s))…`);
+
+        try {
+            const results = await runExtractorScript(urls, CONFIG.productImageExtraction);
+            for (const [url, data] of Object.entries(results)) {
+                if (Array.isArray(data)) {
+                    urlToImages.set(url, data);
+                    succeeded++;
+                } else if (data && data.error) {
+                    log('warn', `Extractor error for ${url}: ${data.error}`);
+                    urlToImages.set(url, []);
+                    failed++;
+                } else {
+                    urlToImages.set(url, []);
+                    failed++;
+                }
+            }
+        } catch (err) {
+            log('error', `Batch ${b + 1} extraction failed: ${err.message}`);
+            for (const url of urls) {
+                urlToImages.set(url, []);
+                failed++;
+            }
+        }
+
+        if (b < batches.length - 1) {
+            await sleep(2000);
+        }
+    }
+
+    // Map results back to MongoDB
+    let updatedPosts = 0;
+    const bulkOps = [];
+
+    for (const post of posts) {
+        const pending = gatherPendingSources(post);
+        if (pending.length === 0) continue;
+
+        const $set = {};
+        let hasUpdates = false;
+
+        for (const item of pending) {
+            const images = urlToImages.get(item.url) || [];
+            let dbPath;
+            if (item.frameIndex === -1) {
+                dbPath = `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
+            } else {
+                dbPath = `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
+            }
+            $set[dbPath] = images;
+            hasUpdates = true;
+        }
+
+        if (hasUpdates) {
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: post._id },
+                    update: { $set }
+                }
+            });
+        }
+    }
+
+    if (bulkOps.length > 0) {
+        try {
+            await collection.bulkWrite(bulkOps, { ordered: false });
+            updatedPosts = bulkOps.length;
+            log('info', `Updated ${updatedPosts} post(s) with extracted source images.`);
+        } catch (err) {
+            log('error', `Failed to write source images back to MongoDB: ${err.message}`);
+        }
+    }
+
+    return { processed: allPending.length, succeeded, failed, updatedPosts };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 1 — Sync data.json → MongoDB
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2250,6 +2535,19 @@ async function main() {
         log('info', 'Review stage disabled (ORCH_REVIEW_ENABLED=false) — skipping.');
     }
 
+    // ── Step 7 — Product Source Image Extraction ───────────────────────────────
+    let productImageResults = { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    if (CONFIG.productImageExtraction.enabled) {
+        log('info', '── Step 7: Product Source Image Extraction ──');
+        try {
+            productImageResults = await runProductImageExtractionStage(db, collection);
+        } catch (err) {
+            log('error', `Product image extraction stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'Product image extraction stage disabled (ORCH_PRODUCT_IMG_ENABLED=false) — skipping.');
+    }
+
     // ── MongoDB close ────────────────────────────────────────────────────────
     await mongoClient.close();
 
@@ -2262,6 +2560,7 @@ async function main() {
     if (CONFIG.recording.enabled) log('info', `  Recording: ${RECORDINGS_DIR}`);
     if (CONFIG.review.enabled) log('info', `  Review:   ${reviewResults.reviewed} reviewed | ${reviewResults.kept} kept | ${reviewResults.rejected} rejected | ${reviewResults.collages} collage(s) | ${reviewResults.failed} failed`);
     if (CONFIG.review.enabled && CONFIG.review.saveCollages) log('info', `  Collages: ${COLLAGES_DIR}`);
+    if (CONFIG.productImageExtraction.enabled) log('info', `  Product Images: ${productImageResults.processed} processed | ${productImageResults.succeeded} succeeded | ${productImageResults.failed} failed | ${productImageResults.updatedPosts} post(s) updated`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
     fs.writeFileSync(
@@ -2276,6 +2575,7 @@ async function main() {
             recording: CONFIG.recording.enabled,
             review: CONFIG.review.enabled ? reviewResults : null,
             collagesSaved: CONFIG.review.enabled && CONFIG.review.saveCollages,
+            productImageExtraction: CONFIG.productImageExtraction.enabled ? productImageResults : null,
         }, null, 2)
     );
 
