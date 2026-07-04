@@ -790,41 +790,32 @@ if (IMAGE_PATHS.length === 0 && !CONFIG.mongodb.uri) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PROMPT
 // ═══════════════════════════════════════════════════════════════════════════════
-const PROMPT_TEMPLATE = `Analyze the image and identify EVERY main product visible. Do not stop at the first or most prominent item. Scan the entire image and return a separate entry for each distinct product found, including clothing, footwear, accessories, jewelry, bags, and any other visible items. Each product must be its own object in the products array.
-
-For each distinct main product found, return a separate entry. Do not group multiple items into one description.
+const PROMPT_TEMPLATE = `Analyze the image and identify EVERY main product visible.
 
 Fields per product:
 
 1. title: Product name.
-2. brand: Manufacturer or brand name. Use "UNKNOWN" if not found.
-3. description: What it is, key features, colors, materials.
-4. category: A specific, descriptive category name for this product type, lowercase — e.g. "running shoes", "crossbody bag", "ceramic plant pot", "wireless earbuds", "matte liquid lipstick", "yoga mat". Avoid broad umbrella terms like "clothing", "accessory", "electronics", "beauty", "home" on their own. Avoid restating the title (no brand, color, or model name in the category) — it should be generic enough that other brands' versions of the same product type would share it.
-5. matchType: Use "exact". Only use "similar" if the literal item is unavailable after thorough searching.
-6. price: { current: "lowest price found", original: "original price if on sale else null", currency: "3-letter code e.g. USD" }
-7. availability: Use EXACTLY "IN_STOCK", "SOLD_OUT", "PREORDER", or "UNKNOWN". Reflect the best availability found across all sources (IN_STOCK if any source has it, else PREORDER, else SOLD_OUT, else UNKNOWN).
-8. sizing: Array of size strings. Empty [] if not applicable.
-9. sources: MANDATORY. Array of source objects. You MUST find multiple sources for each product — never return only one source. Find at least 5 verified sources (if possible, VERY IMPORTANT). If you only few, KEEP SEARCHING for more. DO NOT STOP, Check different retailers, marketplaces, and resellers. NEVER return an array of strings. Each source MUST be an object with exactly these keys:
+2. brand: Manufacturer or brand name.
+3. description: What it is, key features, colors, materials, details etc
+4. category: A specific, descriptive category name for this product type, in lowercase.
+5. price: { current: "lowest price found", original: "original price if on sale else null", currency: "3-letter code e.g. USD" }
+6. availability: Use EXACTLY "IN_STOCK", "SOLD_OUT", "PREORDER".
+7. sizing: Array of size strings.
+8. sources: MANDATORY. Array of source objects. You MUST find multiple sources for each product. Find at least 5 sources for the exact products. KEEP SEARCHING for more. DO NOT STOP, Check different retailers, marketplaces, and resellers etc. NEVER return an array of strings. Each source MUST be an object with exactly these keys:
    - store: Retailer name as string.
-   - url: Direct product page URL as string. Must contain a product ID, SKU, or name slug in the path. NEVER include: homepages, category pages, collection pages, search results, or bare domains. If a URL contains /category/, /collection/, /search/, /shop/, or is just a domain with no product path, it is INVALID — skip it.
-   - price: Price at this source as string, or null if unknown.
-   - availability: Use EXACTLY "IN_STOCK", "SOLD_OUT", "PREORDER", or "UNKNOWN".
-   - condition: Use EXACTLY "NEW" or "USED". Infer from listing type: resale/thrift/marketplace listings are typically "USED"; official retailer or brand listings are typically "NEW".
-   - Order by reliability: official brand store first, major retailers next, marketplaces/resellers last.
-   - If you can't verify a real product page for a store, skip that store — do not invent one.
-10. sizingGuide: Fit notes or measurement guidance synthesized across sources. Empty string "" if none found.
-11. shippingAndReturns: Shipping and returns policy summary from the first source in the sources array. Empty string "" if none found.
-12. confidence: Integer 1-10, reflecting confidence in the product identification itself (not the sources). 1 = image unclear or best guess only. 5 = plausible but unverified against a known listing. 10 = confidently matched to a specific, verifiable product.
-
-Search recursively and internionally.
-
-Never guess a value you can't determine — use null, "UNKNOWN", or an empty value per the rules above, not a fabricated one.
+   - url: Direct product page URL as string (VERY IMPORTANT,this is the link to the actual product page where the product can be purchased). REQUIRED
+   - price: Price at this source as string
+   - availability: Use EXACTLY "IN_STOCK", "SOLD_OUT", "PREORDER"
+   - condition: "NEW" or "USED"
+   - Order sources by reliability: official brand store first, major retailers next, marketplaces/resellers last and more
+9. sizingGuide: Fit notes or measurement guidance synthesized across sources.
+10. shippingAndReturns: Shipping and returns policy summary from sources in the sources array.
 
 Return plain JSON text, No markdown, No code blocks, no formatting, everything written in one line.
 
 Your response MUST match this schema exactly. Do not deviate from the structure:
 
-{"products":[{"title":"string","brand":"string","description":"string","category":"string","matchType":"exact|similar","price":{"current":"string","original":"string|null","currency":"string"},"availability":"IN_STOCK|SOLD_OUT|PREORDER|UNKNOWN","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"IN_STOCK|SOLD_OUT|PREORDER|UNKNOWN","condition":"NEW|USED"}],"sizingGuide":"string","shippingAndReturns":"string","confidence":1-10}]}
+{"products":[{"title":"string","brand":"string","description":"string","category":"string","price":{"current":"string","original":"string|null","currency":"string"},"availability":"IN_STOCK|SOLD_OUT|PREORDER","sizing":["string"],"sources":[{"store":"string","url":"string","price":"string|null","availability":"IN_STOCK|SOLD_OUT|PREORDER","condition":"NEW|USED"}],"sizingGuide":"string","shippingAndReturns":"string"}]}
 
 Image URL: {IMAGE_URL}`;
 
