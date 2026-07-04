@@ -79,7 +79,7 @@ const CONFIG = {
     },
     productImageExtraction: {
         enabled:          process.env.ORCH_PRODUCT_IMG_ENABLED !== 'false',
-        batchSize:        parseInt(process.env.ORCH_PRODUCT_IMG_BATCH_SIZE || '100', 10),
+        batchSize:        parseInt(process.env.ORCH_PRODUCT_IMG_BATCH_SIZE || '50', 10),
         lazyExtraction:   process.env.ORCH_PRODUCT_IMG_LAZY !== 'false',
         minScore:         parseInt(process.env.ORCH_PRODUCT_IMG_MIN_SCORE || '3', 10),
         hashThreshold:    parseInt(process.env.ORCH_PRODUCT_IMG_HASH_THRESHOLD || '6', 10),
@@ -1555,7 +1555,11 @@ async function runProductImageExtractionStage(db, collection) {
         } catch (err) {
             log('error', `Batch ${b + 1} extraction failed: ${err.message}`);
             for (const url of urls) {
-                urlToImages.set(url, []);
+                // Intentionally do NOT set urlToImages here. A batch-level failure
+                // (timeout/crash/kill) means we never got a real answer for these
+                // URLs, so we leave them unresolved rather than writing an empty
+                // array — an empty array means "checked, found nothing" and would
+                // otherwise permanently block retry on the next run.
                 failed++;
             }
         }
@@ -1577,7 +1581,12 @@ async function runProductImageExtractionStage(db, collection) {
         let hasUpdates = false;
 
         for (const item of pending) {
-            const images = urlToImages.get(item.url) || [];
+            // No result for this URL (batch timed out/crashed before it could be
+            // processed) — skip it entirely so it's left pending and retried on
+            // the next run, instead of writing an [] that would look "done".
+            if (!urlToImages.has(item.url)) continue;
+
+            const images = urlToImages.get(item.url);
             let dbPath;
             if (item.frameIndex === -1) {
                 dbPath = `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
