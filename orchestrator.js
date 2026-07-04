@@ -79,7 +79,7 @@ const CONFIG = {
     },
     productImageExtraction: {
         enabled:          process.env.ORCH_PRODUCT_IMG_ENABLED !== 'false',
-        batchSize:        parseInt(process.env.ORCH_PRODUCT_IMG_BATCH_SIZE || '8', 10),
+        batchSize:        parseInt(process.env.ORCH_PRODUCT_IMG_BATCH_SIZE || '100', 10),
         lazyExtraction:   process.env.ORCH_PRODUCT_IMG_LAZY !== 'false',
         minScore:         parseInt(process.env.ORCH_PRODUCT_IMG_MIN_SCORE || '3', 10),
         hashThreshold:    parseInt(process.env.ORCH_PRODUCT_IMG_HASH_THRESHOLD || '6', 10),
@@ -1392,8 +1392,32 @@ async function fetchPostsWithProductResponses(collection, limit) {
     return collection.find({
         discarded: { $ne: true },
         $or: [
-            { 'file_urls.response.products': { $exists: true, $ne: null } },
-            { 'file_urls.frames.response.products': { $exists: true, $ne: null } }
+            {
+                file_urls: {
+                    $elemMatch: {
+                        'response.products': {
+                            $elemMatch: {
+                                sources: {
+                                    $elemMatch: { url: { $exists: true }, images: { $exists: false } }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                'file_urls.frames': {
+                    $elemMatch: {
+                        'response.products': {
+                            $elemMatch: {
+                                sources: {
+                                    $elemMatch: { url: { $exists: true }, images: { $exists: false } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         ]
     }).limit(limit).toArray();
 }
