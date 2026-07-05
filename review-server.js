@@ -5,6 +5,7 @@
  * Grouped by post, virtualized rendering, lazy-loaded images, mobile-first.
  * 
  * Auto-flattens nested AI sources into independent 1-to-1 products for dropshipping.
+ * Features live image extraction (Crawl4AI) and clipboard paste uploads.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456)
@@ -12,6 +13,11 @@
 
 import http from 'http';
 import { MongoClient, ObjectId } from 'mongodb';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import crypto from 'crypto';
 
 /* -------------------------------------------------------------------------- */
 /* CONFIG                                                                     */
@@ -38,29 +44,29 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Brutalist / Minimal Technical Aesthetic)                          */
+/* HTML UI (Brutalist Light Mode Aesthetic)                                   */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff">
 <title>DropShip Review</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#000000;
-  --surface:#000000;
-  --surface-2:#111111;
-  --border:#333333;
-  --border-focus:#ffffff;
-  --text:#ffffff;
-  --text-2:#888888;
-  --accent:#ffffff;
+  --bg:#ffffff;
+  --surface:#f9fafb;
+  --surface-2:#f3f4f6;
+  --border:#e5e7eb;
+  --border-focus:#f97316;
+  --text:#111827;
+  --text-2:#6b7280;
+  --accent:#f97316;
 }
 body {
   font-family:'Inter', sans-serif;
@@ -90,15 +96,16 @@ button {
   background:var(--bg);
   color:var(--text);
   min-height:48px;
-  transition:background 0s, color 0s;
+  transition:background 0.1s, color 0.1s;
 }
 button:active { background:var(--text); color:var(--bg); border-color:var(--text); }
 button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
 
-.btn-primary { background:var(--text); color:var(--bg); border-color:var(--text); font-weight:700; }
-.btn-danger { background:var(--bg); color:var(--text); border:1px dashed #666; }
-.btn-danger:active { background:var(--text); color:var(--bg); border:1px solid var(--text); }
-.btn-ghost { border-color:transparent; }
+.btn-primary { background:var(--accent); color:#ffffff; border-color:var(--accent); font-weight:700; }
+.btn-primary:active { background:#ea580c; border-color:#ea580c; color:#ffffff; }
+.btn-danger { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; font-weight:700; }
+.btn-danger:active { background:#dc2626; color:#ffffff; border-color:#dc2626; }
+.btn-ghost { border-color:transparent; background: transparent; color:var(--text-2); }
 
 input, select, textarea {
   background:var(--bg);
@@ -117,15 +124,15 @@ input:focus, select:focus, textarea:focus {
 }
 textarea { resize:vertical; min-height:100px; }
 select {
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23fff'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7280'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;
   background-position:right 14px center;
   padding-right:32px;
 }
 
 img { max-width:100%; display:block; }
-a { color:var(--text); text-decoration:underline; text-underline-offset:4px; }
-a:active { background:var(--text); color:var(--bg); text-decoration:none; }
+a { color:var(--accent); text-decoration:underline; text-underline-offset:4px; }
+a:active { background:var(--accent); color:#fff; text-decoration:none; }
 
 /* Layout Screens */
 .screen { display:none; min-height:100dvh; padding-bottom:90px; }
@@ -133,7 +140,8 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 
 .topbar {
   position:sticky; top:0; z-index:50;
-  background:var(--bg);
+  background:rgba(255, 255, 255, 0.95);
+  backdrop-filter:blur(10px);
   border-bottom:1px solid var(--border);
   padding:12px 16px;
   display:flex; align-items:center; gap:16px;
@@ -145,98 +153,113 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   padding:4px 8px;
   border:1px solid var(--border);
   color:var(--text-2);
-  background:var(--bg);
+  background:var(--surface);
 }
-.badge.pending { color:var(--text); border-color:var(--text); }
-.badge.partial { border-style:dashed; }
-.badge.done { background:var(--text); color:var(--bg); }
+.badge.pending { color:var(--accent); border-color:var(--accent); background:#fff7ed; }
+.badge.partial { border-style:dashed; border-color:var(--text-2); }
+.badge.done { background:var(--text); color:var(--bg); border-color:var(--text); }
 
 /* Lists & Groups */
-.post-group { border-bottom:1px solid var(--border); margin:0; }
+.post-group { border-bottom:1px solid var(--border); margin:0; background:var(--bg); }
 .post-header {
   display:flex; align-items:center; gap:12px;
   padding:16px; cursor:pointer; user-select:none;
 }
-.post-header:active { background:var(--surface-2); }
+.post-header:active { background:var(--surface); }
 .post-thumb {
   width:48px; height:48px;
   background:var(--surface-2); flex-shrink:0; border:1px solid var(--border);
 }
-.post-thumb img { width:100%; height:100%; object-fit:cover; filter:grayscale(100%); transition:filter 0.2s; }
-.post-group.open .post-thumb img { filter:grayscale(0%); }
+.post-thumb img { width:100%; height:100%; object-fit:cover; }
 .post-info { flex:1; min-width:0; }
-.post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700; }
 .post-meta { font-size:12px; color:var(--text-2); margin-top:2px; }
 .post-chevron { width:20px; height:20px; color:var(--text); transition:transform 0.2s; }
 .post-group.open .post-chevron { transform:rotate(180deg); }
 
 .post-items { display:none; padding:0 16px 16px; border-top:1px dashed var(--border); }
-.post-group.open .post-items { display:block; margin-top:0; padding-top:16px; background:var(--surface-2); }
+.post-group.open .post-items { display:block; margin-top:0; padding-top:16px; background:var(--surface); }
 
 .item-row {
   display:flex; align-items:center; gap:12px;
   padding:12px 0; border-bottom:1px solid var(--border); cursor:pointer;
 }
 .item-row:last-child { border-bottom:none; padding-bottom:0; }
-.item-thumb { width:40px; height:56px; background:var(--bg); border:1px solid var(--border); flex-shrink:0; }
+.item-thumb { width:40px; height:56px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
 .item-thumb img { width:100%; height:100%; object-fit:cover; }
 .item-info { flex:1; min-width:0; }
-.item-type { font-size:12px; }
+.item-type { font-size:12px; font-weight:700; }
 .item-status { font-size:10px; color:var(--text-2); margin-top:4px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
 
 /* Hero (Review Main Image) */
-.hero { width:100%; border-bottom:1px solid var(--border); }
-.hero img { width:100%; max-height:65vh; object-fit:contain; background:var(--surface-2); }
+.hero { width:100%; border-bottom:1px solid var(--border); background:var(--bg); position:relative; }
+.hero img { width:100%; max-height:65vh; object-fit:cover; background:var(--surface-2); cursor:pointer; transition: object-fit 0.2s; }
 .hero-meta { padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap; background:var(--bg); border-top:1px solid var(--border); }
 
 /* Section & Cards */
-.section { padding:0; padding-bottom:100px; }
-.section h2 { font-size:14px; padding:16px; border-bottom:1px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; }
+.section { padding:0; padding-bottom:100px; background:var(--bg); }
+.section h2 { font-size:14px; padding:16px; border-bottom:1px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; background:var(--surface); }
 
 .p-card {
   padding:16px; display:flex; gap:16px; cursor:pointer;
-  border-bottom:1px solid var(--border);
+  border-bottom:1px solid var(--border); background:var(--bg);
 }
-.p-card:active { background:var(--surface-2); }
+.p-card:active { background:var(--surface); }
 .p-img { width:80px; height:106px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
 .p-img img { width:100%; height:100%; object-fit:cover; }
 .p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
 .p-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
-.p-title { font-size:15px; font-weight:500; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-title { font-size:15px; font-weight:600; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; }
-.p-status { display:flex; align-items:center; gap:8px; font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
+.p-status { display:flex; align-items:center; gap:8px; font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; font-weight:700; }
 
 /* Modal / Editor */
-.modal { position:fixed; inset:0; z-index:100; background:var(--bg); display:none; flex-direction:column; }
+.modal { position:fixed; inset:0; z-index:100; background:var(--surface); display:none; flex-direction:column; }
 .modal.active { display:flex; }
 .modal-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
-.modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; }
+.modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; font-weight:700; }
 .modal-body { flex:1; overflow-y:auto; padding:0; padding-bottom:100px; }
 
-.card { padding:20px 16px; border-bottom:1px solid var(--border); }
-.card h3 { font-size:12px; color:var(--text); margin-bottom:16px; border-bottom:1px dashed var(--border); padding-bottom:8px; display:block; }
+.card { padding:20px 16px; border-bottom:1px solid var(--border); background:var(--bg); }
+.card h3 { font-size:12px; color:var(--text); margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:8px; display:block; font-weight:700; }
 
-/* Grid Images */
-.img-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:1px; background:var(--border); border:1px solid var(--border); margin-bottom:16px; }
-.img-cell { aspect-ratio:1; background:var(--bg); position:relative; cursor:pointer; }
-.img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.4; transition:opacity 0s; filter:grayscale(100%); }
-.img-cell.on img { opacity:1; filter:grayscale(0%); }
-.img-cell .check { position:absolute; top:4px; right:4px; background:var(--text); color:var(--bg); padding:4px 6px; font-size:10px; font-family:'JetBrains Mono', monospace; display:none; text-transform:uppercase; line-height:1; }
+/* Carousel Images */
+.carousel { 
+  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 12px; 
+  scroll-snap-type: x mandatory; margin-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.carousel::-webkit-scrollbar { height: 6px; }
+.carousel::-webkit-scrollbar-track { background: var(--surface-2); }
+.carousel::-webkit-scrollbar-thumb { background: var(--border); }
+.img-cell { 
+  flex: 0 0 65%; aspect-ratio: 4/5; scroll-snap-align: center; 
+  background:var(--surface-2); position:relative; cursor:pointer; 
+  border: 2px solid transparent; 
+}
+.img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.6; transition:opacity 0.2s; }
+.img-cell.on { border-color:var(--accent); }
+.img-cell.on img { opacity:1; }
+.img-cell .check { 
+  position:absolute; top:8px; right:8px; background:var(--accent); color:#fff; 
+  padding:4px 8px; font-size:10px; font-family:'JetBrains Mono', monospace; 
+  display:none; text-transform:uppercase; line-height:1; font-weight:700;
+}
 .img-cell.on .check { display:block; }
 
 /* Form fields */
 .field { margin-bottom:16px; }
-.field label { display:block; font-size:10px; margin-bottom:8px; color:var(--text-2); font-family:'JetBrains Mono', monospace; text-transform:uppercase; letter-spacing:0.05em; }
+.field label { display:block; font-size:10px; margin-bottom:8px; color:var(--text-2); font-family:'JetBrains Mono', monospace; text-transform:uppercase; letter-spacing:0.05em; font-weight:700; }
 .field-row { display:flex; gap:12px; }
 .field-row .field { flex:1; }
 
 /* Sources */
-.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; }
+.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--surface); }
 .src-row .info { flex:1; min-width:0; }
 .src-row .name { font-size:12px; margin-bottom:4px; font-weight:700; }
 .src-row .url { font-size:10px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'JetBrains Mono', monospace; }
 .src-row .actions { display:flex; gap:4px; }
-.src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; }
+.src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; background:var(--bg); color:var(--text); }
 
 /* Actions Bar */
 .actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:12px; z-index:50; }
@@ -246,13 +269,13 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 
 /* Loading & Utils */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text-2)}
-.spinner{width:32px;height:32px;border:1px solid var(--border);border-top-color:var(--text);border-radius:0;animation:spin .8s linear infinite}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'JetBrains Mono', monospace; text-transform:uppercase; z-index:200; transition:transform 0.2s; border:1px solid var(--text); }
+.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'JetBrains Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.2s; border:1px solid var(--text); font-weight:700; white-space:nowrap;}
 .toast.show { transform:translate(-50%, 0); }
 
-.lazy-img { opacity:0; transition:opacity 0s; }
+.lazy-img { opacity:0; transition:opacity 0.2s; }
 .lazy-img.loaded { opacity:1; }
 .placeholder { background:var(--surface-2); }
 </style>
@@ -273,7 +296,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
       <div style="width:60px"></div>
     </div>
     <div class="hero">
-      <img id="rImage" src="" alt="" loading="lazy">
+      <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
@@ -281,8 +304,8 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">[ DELETE ITEM ]</button>
-      <button class="btn-primary" onclick="commitItem()">COMMIT ITEM</button>
+      <button class="btn-danger" style="background:var(--bg); border:1px dashed var(--border); color:var(--text);" onclick="deleteItem()">[ DELETE ITEM ]</button>
+      <button class="btn-primary" style="background:var(--text); border:1px solid var(--text); color:var(--bg);" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
   <div id="editor" class="modal">
@@ -307,7 +330,7 @@ function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 2500);
+  setTimeout(() => t.classList.remove("show"), 3500);
 }
 
 function escapeHtml(str) {
@@ -462,7 +485,19 @@ function renderItem() {
   }
   
   list.innerHTML = prods.map((p, i) => {
-    const color = p.reviewStatus === "completed" ? "var(--text)" : p.reviewStatus === "rejected" ? "var(--text-2)" : "var(--border)";
+    let statusLabel = p.reviewStatus || "pending";
+    let statusColor = "var(--text)";
+    
+    if (p.reviewStatus === "rejected") {
+      statusLabel = "REJECTED";
+      statusColor = "var(--danger)";
+    } else if (p.reviewStatus === "completed") {
+      statusLabel = "COMPLETED";
+      statusColor = "var(--success)";
+    } else {
+      statusColor = "var(--accent)";
+    }
+
     const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
     const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
 
@@ -472,7 +507,7 @@ function renderItem() {
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
           <div class="p-brand">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
-          <div class="p-status"><span style="color:\${color}">\u25A0</span>\${p.reviewStatus || "pending"}</div>
+          <div class="p-status" style="color:\${statusColor}">\u25A0 \${statusLabel}</div>
         </div>
       </div>
     \`;
@@ -504,6 +539,11 @@ function openProduct(idx) {
   const selectedSet = new Set((p.selectedImages || []).map(String));
   
   let html = \`
+    <div class="card" style="padding-bottom: 0;">
+      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select, Paste to upload)</span></h3>
+      <div class="carousel" id="eImgGrid"></div>
+      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px; border-radius:12px;">+ ADD URL OR PASTE HERE</button>
+    </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
       <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'JetBrains Mono', monospace;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
@@ -517,9 +557,16 @@ function openProduct(idx) {
         <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
       </div>
 
-      <div class="field-row" style="align-items: flex-end;">
-        <div class="field" style="flex: 1;"><label>Supplier URL</label><input id="eUrl" value="\${escapeHtml(p.url || "")}"></div>
-        \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:14px; margin-bottom:16px; font-family:'JetBrains Mono', monospace; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+      <div class="field" style="margin-bottom:24px;">
+        <label>Supplier URL</label>
+        <div style="display:flex; gap:8px;">
+          <input id="eUrl" value="\${escapeHtml(p.url || "")}" style="flex:1;">
+          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:12px; text-decoration:none; background:var(--surface-2);">VISIT</a>\` : ''}
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+          <button class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+        </div>
       </div>
 
       <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(p.category || "")}"></div>
@@ -568,11 +615,6 @@ function openProduct(idx) {
       <div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\${escapeHtml(p.sizingGuide || "")}</textarea></div>
       <div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\${escapeHtml(p.shippingAndReturns || "")}</textarea></div>
     </div>
-    <div class="card">
-      <h3>IMAGES</h3>
-      <div class="img-grid" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border);">+ ADD URL</button>
-    </div>
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
       <div style="display:flex;gap:12px">
@@ -590,7 +632,7 @@ function openProduct(idx) {
 function renderImgGrid(urls, selectedSet) {
   const grid = document.getElementById("eImgGrid");
   if (!urls.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1">NO IMAGES</div>';
+    grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>';
     return;
   }
   
@@ -616,7 +658,80 @@ function addImage() {
   div.className = "img-cell on";
   div.innerHTML = \`<img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">SEL</div>\`;
   div.onclick = function() { this.classList.toggle("on"); };
-  grid.appendChild(div);
+  grid.prepend(div);
+}
+
+// Global Paste Listener for Image Uploads
+document.addEventListener('paste', async (e) => {
+  if (!document.getElementById('editor').classList.contains('active')) return;
+  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  
+  for (let index in items) {
+    const item = items[index];
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      toast("UPLOADING PASTE...");
+      
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64 = event.target.result;
+        try {
+          const r = await fetch('/api/upload', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64, filename: 'paste.jpg' })
+          });
+          const d = await r.json();
+          if (d.url) {
+            const p = state.current.response.products[state.editingIdx];
+            p.customImages = p.customImages || [];
+            p.selectedImages = p.selectedImages || [];
+            p.customImages.unshift(d.url);
+            p.selectedImages.push(d.url);
+            
+            const allImages = getAllImages(p);
+            renderImgGrid(allImages.urls, new Set(p.selectedImages));
+            toast("IMAGE UPLOADED");
+          } else {
+            throw new Error(d.error || "Upload failed");
+          }
+        } catch(err) {
+          toast("ERROR: " + err.message);
+        }
+      };
+      reader.readAsDataURL(blob);
+      break; 
+    }
+  }
+});
+
+async function extractImages(mode) {
+  const url = document.getElementById("eUrl").value;
+  if (!url) return toast("NO URL PROVIDED");
+  
+  toast("EXTRACTING... (MAY TAKE A MINUTE)");
+  try {
+    const r = await fetch("/api/extract", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, mode })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    
+    if (d.images && d.images.length > 0) {
+      const p = state.current.response.products[state.editingIdx];
+      p.customImages = p.customImages || [];
+      // prepend new images
+      p.customImages = [...d.images, ...p.customImages];
+      
+      const allImages = getAllImages(p);
+      renderImgGrid(allImages.urls, new Set(p.selectedImages));
+      toast(\`EXTRACTED \${d.images.length} IMAGES\`);
+    } else {
+      toast("NO IMAGES FOUND");
+    }
+  } catch(e) {
+    toast("ERROR: " + e.message);
+  }
 }
 
 async function saveProduct() {
@@ -654,14 +769,14 @@ async function saveProduct() {
   
   const cells = document.querySelectorAll("#eImgGrid .img-cell");
   p.selectedImages = [];
-  p.customImages = [];
+  p.customImages = p.customImages || [];
   
   cells.forEach(c => {
     const img = c.querySelector("img").src;
     if (c.classList.contains("on")) {
       p.selectedImages.push(img);
     }
-    if (!p.images.includes(img)) {
+    if (!p.images.includes(img) && !p.customImages.includes(img)) {
        p.customImages.push(img);
     }
   });
@@ -686,7 +801,6 @@ function rejectProduct() {
   const p = state.current.response.products[idx];
   p.reviewStatus = "rejected";
   p.selectedImages = [];
-  p.customImages = [];
   saveProduct();
 }
 
@@ -976,13 +1090,68 @@ async function maybeDiscardEmptyPost(collection, docId) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* EXTERNAL API HELPERS (Catbox Upload & Python Extract)                      */
+/* -------------------------------------------------------------------------- */
+
+async function uploadToCatbox(base64Data, filename) {
+    const base64Content = base64Data.split(',')[1];
+    const buffer = Buffer.from(base64Content, 'base64');
+    const blob = new Blob([buffer]);
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', blob, filename || 'upload.jpg');
+    
+    const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: form });
+    const url = (await res.text()).trim();
+    if (!url.startsWith('http')) throw new Error('Upload failed: ' + url);
+    return url;
+}
+
+async function runPythonExtractor(targetUrl, mode) {
+    return new Promise((resolve, reject) => {
+        const runId = crypto.randomBytes(4).toString('hex');
+        const inFile = path.join(os.tmpdir(), `in_${runId}.json`);
+        const outFile = path.join(os.tmpdir(), `out_${runId}.json`);
+        
+        fs.writeFileSync(inFile, JSON.stringify([targetUrl]));
+
+        const args = ['ecom-image-extractor.py', '-u', inFile, '-o', outFile];
+        if (mode === 'lazy') {
+            args.push('--lazy-extraction');
+        } else {
+            args.push('--no-lazy-extraction');
+            args.push('--adaptive-cutoff');
+        }
+
+        const proc = spawn('python3', args);
+        let stderr = '';
+        proc.stderr.on('data', d => stderr += d.toString());
+
+        proc.on('close', code => {
+            if (code !== 0) {
+                try { fs.unlinkSync(inFile); fs.unlinkSync(outFile); } catch(e){}
+                return reject(new Error("Extractor failed: " + stderr));
+            }
+            try {
+                if (!fs.existsSync(outFile)) throw new Error("No output generated");
+                const resultData = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+                fs.unlinkSync(inFile); fs.unlinkSync(outFile);
+                
+                const images = resultData[targetUrl] || [];
+                if (images.error) throw new Error(images.error);
+                resolve(images.map(i => i.url));
+            } catch (err) {
+                reject(err);
+            }
+        });
+    });
+}
+
+/* -------------------------------------------------------------------------- */
 /* NGROK                                                                      */
 /* -------------------------------------------------------------------------- */
 async function startNgrok(port) {
     try {
-        const { spawn } = await import('child_process');
-        
-        // Relies on `ngrok config add-authtoken` being correctly executed by the GitHub Actions workflow environment.
         const ngrok = spawn('ngrok', ['http', String(port)], { stdio: 'pipe' });
 
         let url = null;
@@ -1147,6 +1316,40 @@ async function main() {
             return;
         }
 
+        if (parsed.pathname === '/api/upload' && req.method === 'POST') {
+            let body = '';
+            req.on('data', d => body += d);
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    if (!data.image) throw new Error("No image data");
+                    const url = await uploadToCatbox(data.image, data.filename || 'paste.jpg');
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ url }));
+                } catch (e) {
+                    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        if (parsed.pathname === '/api/extract' && req.method === 'POST') {
+            let body = '';
+            req.on('data', d => body += d);
+            req.on('end', async () => {
+                try {
+                    const { url, mode } = JSON.parse(body);
+                    if (!url) throw new Error("No URL provided");
+                    const images = await runPythonExtractor(url, mode);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ images }));
+                } catch (e) {
+                    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
         if (parsed.pathname === '/api/product' && req.method === 'POST') {
             let body = '';
             req.on('data', d => body += d);
@@ -1293,4 +1496,4 @@ async function main() {
 main().catch(err => {
     log('error', 'Fatal:', err.message);
     process.exit(1);
-}); 
+});
