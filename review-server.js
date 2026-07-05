@@ -298,17 +298,48 @@ async function startNgrok(port) {
         const ngrok = spawn('ngrok', ['http', String(port), '--authtoken', CONFIG.ngrokToken], { stdio: 'pipe' });
 
         let url = null;
-        for await (const chunk of ngrok.stdout) {
-            const text = chunk.toString();
-            const match = text.match(/https:\/\/[a-z0-9-]+\.ngrok-free\.app/);
-            if (match) { url = match[0]; break; }
-        }
+        let buffer = '';
+        let resolved = false;
+
+        const onData = (chunk) => {
+            if (resolved) return;
+            buffer += chunk.toString();
+            // Broader regex: ngrok-free.app, ngrok.app, ngrok.io, etc.
+            const match = buffer.match(/https:\/\/[a-zA-Z0-9-]+\.ngrok(?:-free)?\.(?:app|io)/);
+            if (match) {
+                url = match[0];
+                resolved = true;
+            }
+        };
+
+        ngrok.stdout.on('data', onData);
+        ngrok.stderr.on('data', onData);
+
+        // Wait up to 12s for the URL to appear in logs
+        await new Promise(r => setTimeout(r, 12000));
 
         if (url) {
             log('info', `ngrok tunnel: ${url}`);
             return { url, process: ngrok };
         }
-        log('warn', 'ngrok started but no URL captured');
+
+        // Fallback: query ngrok's local API
+        log('warn', 'ngrok URL not found in logs, trying API fallback...');
+        try {
+            const apiRes = await fetch('http://127.0.0.1:4040/api/tunnels');
+            const apiData = await apiRes.json();
+            const tunnel = apiData.tunnels?.find(t => t.public_url?.startsWith('https'));
+            if (tunnel) {
+                url = tunnel.public_url;
+                log('info', `ngrok tunnel (via API): ${url}`);
+                return { url, process: ngrok };
+            }
+        } catch (e) {
+            log('warn', 'ngrok API fallback failed:', e.message);
+        }
+
+        log('warn', 'ngrok started but no URL captured — check your NGROK_AUTHTOKEN');
+        ngrok.kill();
         return null;
     } catch (err) {
         log('error', 'ngrok failed:', err.message);
