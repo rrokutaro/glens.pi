@@ -38,6 +38,14 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Create package.json type module
+        run: |
+          if [ -f package.json ]; then
+            node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.type='module'; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n'); console.log('Updated package.json with type:module');"
+          else
+            echo '{"name":"review-server","type":"module"}' > package.json
+          fi
+
       - name: Install npm dependencies
         run: npm install mongodb
 
@@ -60,5 +68,4 @@ jobs:
           ORCH_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || 'scraped-posts' }}
           REVIEW_PORT: ${{ github.event.inputs.review_port || '3456' }}
           ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || 'info' }}
-          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: node review-server.js
