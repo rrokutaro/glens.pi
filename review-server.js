@@ -367,7 +367,7 @@ async function buildQueue(collection) {
         for (let i = 0; i < post.file_urls.length; i++) {
             const f = post.file_urls[i];
             if (!f.reviewed || f.humanReviewed) continue;
-            const hasPending = !f.response || f.response.products.some(p => p.reviewStatus !== 'completed');
+            const hasPending = !f.response?.products || f.response.products.some(p => p.reviewStatus !== 'completed');
             if (!hasPending) continue;
             queue.push({
                 _id: post._id.toString(),
