@@ -38,7 +38,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Glassmorphism Aesthetic)                                  */
+/* HTML UI (Brutalist / Minimal Technical Aesthetic)                          */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -47,443 +47,229 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <title>DropShip Review</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#000000;
-  --surface:rgba(255, 255, 255, 0.04);
-  --surface-2:rgba(255, 255, 255, 0.08);
-  --border:rgba(255, 255, 255, 0.1);
+  --surface:#000000;
+  --surface-2:#111111;
+  --border:#333333;
+  --border-focus:#ffffff;
   --text:#ffffff;
-  --text-2:#9ca3af;
-  --accent:#ff5e00; /* Warm Gallery Glow */
-  --accent-glow:rgba(255, 94, 0, 0.25);
-  --accent-2:#ff2a00;
-  --danger:#ef4444;
-  --danger-2:#dc2626;
-  --warn:#f59e0b;
-  --success:#10b981;
+  --text-2:#888888;
+  --accent:#ffffff;
 }
 body {
-  font-family:'Inter',sans-serif;
-  background-color:var(--bg);
-  background-image:radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-  background-size:20px 20px;
+  font-family:'Inter', sans-serif;
+  background:var(--bg);
   color:var(--text);
-  line-height:1.5;
+  line-height:1.4;
   min-height:100dvh;
   overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
 }
-body::before {
-  content:'';
-  position:fixed;
-  top:0;left:0;right:0;bottom:0;
-  background:radial-gradient(circle at 15% 30%, rgba(255, 94, 0, 0.05), transparent 30%),
-             radial-gradient(circle at 85% 70%, rgba(0, 140, 255, 0.05), transparent 30%);
-  z-index:-1;
-  pointer-events:none;
+
+/* Typography Overrides */
+h1, h2, h3, .badge, button, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
+  font-family:'JetBrains Mono', monospace;
+  text-transform:uppercase;
+  font-weight:normal;
+  letter-spacing:-0.02em;
 }
+
+/* Controls */
 button {
   cursor:pointer;
-  border:none;
-  border-radius:20px;
-  padding:14px 20px;
-  font-size:15px;
-  font-weight:600;
-  touch-action:manipulation;
+  border:1px solid var(--border);
+  border-radius:0;
+  padding:12px 16px;
+  font-size:13px;
+  background:var(--bg);
+  color:var(--text);
   min-height:48px;
-  transition:all .2s cubic-bezier(0.16,1,0.3,1);
-  background:var(--surface-2);
-  color:var(--text);
-  border:1px solid var(--border);
-  letter-spacing:-0.01em;
+  transition:background 0s, color 0s;
 }
-button:active{transform:scale(.95)}
-button:disabled{opacity:.4;cursor:not-allowed}
-.btn-primary {
-  background:linear-gradient(135deg, var(--accent), var(--accent-2));
-  color:#fff;
-  border:none;
-  box-shadow:0 8px 24px var(--accent-glow);
-}
-.btn-danger {
-  background:rgba(220, 38, 38, 0.15);
-  color:#f87171;
-  border:1px solid rgba(220, 38, 38, 0.3);
-}
-.btn-ghost{background:transparent;color:var(--text-2);border:1px solid var(--border)}
+button:active { background:var(--text); color:var(--bg); border-color:var(--text); }
+button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
 
-input,select,textarea {
-  background:var(--surface);
+.btn-primary { background:var(--text); color:var(--bg); border-color:var(--text); font-weight:700; }
+.btn-danger { background:var(--bg); color:var(--text); border:1px dashed #666; }
+.btn-danger:active { background:var(--text); color:var(--bg); border:1px solid var(--text); }
+.btn-ghost { border-color:transparent; }
+
+input, select, textarea {
+  background:var(--bg);
   border:1px solid var(--border);
   color:var(--text);
-  padding:16px;
-  border-radius:18px;
-  font-size:15px;
-  font-family:'Inter',sans-serif;
+  padding:14px;
+  border-radius:0;
+  font-size:14px;
+  font-family:'Inter', sans-serif;
   width:100%;
   -webkit-appearance:none;
-  transition:all .3s ease;
 }
-input:focus,select:focus,textarea:focus {
+input:focus, select:focus, textarea:focus {
   outline:none;
-  background:var(--surface-2);
-  border-color:var(--accent);
-  box-shadow:0 0 0 4px var(--accent-glow);
+  border-color:var(--border-focus);
 }
-select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23999'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;padding-right:40px}
-textarea{resize:vertical;min-height:100px}
-img{max-width:100%;display:block}
-a{color:var(--accent);text-decoration:none;transition:opacity .2s}
-a:active{opacity:.6}
+textarea { resize:vertical; min-height:100px; }
+select {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23fff'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 14px center;
+  padding-right:32px;
+}
 
-.screen{display:none;min-height:100dvh;padding-bottom:120px}
-.screen.active{display:block;animation:fadeIn 0.4s ease forwards}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+img { max-width:100%; display:block; }
+a { color:var(--text); text-decoration:underline; text-underline-offset:4px; }
+a:active { background:var(--text); color:var(--bg); text-decoration:none; }
+
+/* Layout Screens */
+.screen { display:none; min-height:100dvh; padding-bottom:90px; }
+.screen.active { display:block; }
 
 .topbar {
-  position:sticky;
-  top:0;
-  z-index:50;
-  background:rgba(5, 5, 5, 0.6);
-  backdrop-filter:blur(24px);
-  -webkit-backdrop-filter:blur(24px);
+  position:sticky; top:0; z-index:50;
+  background:var(--bg);
   border-bottom:1px solid var(--border);
-  padding:16px 20px;
-  display:flex;
-  align-items:center;
-  gap:16px;
+  padding:12px 16px;
+  display:flex; align-items:center; gap:16px;
 }
-.topbar h1{font-size:18px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.02em}
+.topbar h1 { font-size:14px; font-weight:700; flex:1; }
 
 .badge {
-  font-size:12px;
-  font-weight:600;
-  padding:4px 12px;
-  border-radius:24px;
-  background:var(--surface-2);
-  color:var(--text);
+  font-size:10px;
+  padding:4px 8px;
   border:1px solid var(--border);
-  backdrop-filter:blur(10px);
-}
-.badge.pending{background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.3)}
-.badge.partial{background:rgba(96,165,250,0.15);color:#60a5fa;border-color:rgba(96,165,250,0.3)}
-.badge.done{background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3)}
-
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;color:var(--text-2)}
-.spinner{width:36px;height:36px;border:3px solid var(--surface-2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-.post-group {
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:28px;
-  margin:16px;
-  overflow:hidden;
-  backdrop-filter:blur(16px);
-  -webkit-backdrop-filter:blur(16px);
-}
-.post-header {
-  display:flex;
-  align-items:center;
-  gap:16px;
-  padding:16px;
-  cursor:pointer;
-  user-select:none;
-  transition:background .2s;
-}
-.post-header:active{background:var(--surface-2)}
-.post-thumb {
-  width:64px;height:64px;
-  border-radius:18px;
-  overflow:hidden;
+  color:var(--text-2);
   background:var(--bg);
-  flex-shrink:0;
-  border:1px solid var(--border);
 }
-.post-thumb img{width:100%;height:100%;object-fit:cover}
-.post-info{flex:1;min-width:0}
-.post-id{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.post-meta{font-size:13px;color:var(--text-2);margin-top:4px}
-.post-chevron{width:24px;height:24px;transition:transform .3s cubic-bezier(0.16,1,0.3,1);color:var(--text-2)}
-.post-group.open .post-chevron{transform:rotate(180deg)}
-.post-items{display:none;padding:0 16px 16px}
-.post-group.open .post-items{display:block;animation:fadeIn .3s ease}
+.badge.pending { color:var(--text); border-color:var(--text); }
+.badge.partial { border-style:dashed; }
+.badge.done { background:var(--text); color:var(--bg); }
+
+/* Lists & Groups */
+.post-group { border-bottom:1px solid var(--border); margin:0; }
+.post-header {
+  display:flex; align-items:center; gap:12px;
+  padding:16px; cursor:pointer; user-select:none;
+}
+.post-header:active { background:var(--surface-2); }
+.post-thumb {
+  width:48px; height:48px;
+  background:var(--surface-2); flex-shrink:0; border:1px solid var(--border);
+}
+.post-thumb img { width:100%; height:100%; object-fit:cover; filter:grayscale(100%); transition:filter 0.2s; }
+.post-group.open .post-thumb img { filter:grayscale(0%); }
+.post-info { flex:1; min-width:0; }
+.post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.post-meta { font-size:12px; color:var(--text-2); margin-top:2px; }
+.post-chevron { width:20px; height:20px; color:var(--text); transition:transform 0.2s; }
+.post-group.open .post-chevron { transform:rotate(180deg); }
+
+.post-items { display:none; padding:0 16px 16px; border-top:1px dashed var(--border); }
+.post-group.open .post-items { display:block; margin-top:0; padding-top:16px; background:var(--surface-2); }
 
 .item-row {
-  display:flex;
-  align-items:center;
-  gap:14px;
-  padding:12px;
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:20px;
-  margin-bottom:10px;
-  cursor:pointer;
-  transition:all .2s;
+  display:flex; align-items:center; gap:12px;
+  padding:12px 0; border-bottom:1px solid var(--border); cursor:pointer;
 }
-.item-row:last-child{margin-bottom:0}
-.item-row:active{transform:scale(0.97);background:var(--surface-2)}
-.item-thumb {
-  width:52px;height:68px;
-  border-radius:14px;
-  overflow:hidden;
-  background:var(--bg);
-  flex-shrink:0;
-}
-.item-thumb img{width:100%;height:100%;object-fit:cover}
-.item-info{flex:1;min-width:0}
-.item-type{font-size:14px;font-weight:600}
-.item-status{font-size:13px;color:var(--text-2);margin-top:2px}
+.item-row:last-child { border-bottom:none; padding-bottom:0; }
+.item-thumb { width:40px; height:56px; background:var(--bg); border:1px solid var(--border); flex-shrink:0; }
+.item-thumb img { width:100%; height:100%; object-fit:cover; }
+.item-info { flex:1; min-width:0; }
+.item-type { font-size:12px; }
+.item-status { font-size:10px; color:var(--text-2); margin-top:4px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
 
-.hero {
-  position:relative;
-  margin:16px;
-  border-radius:36px;
-  background:var(--surface);
-  padding:8px;
-  border:1px solid var(--border);
-  box-shadow:0 30px 60px rgba(0,0,0,0.6);
-}
-.hero::before {
-  content:'';
-  position:absolute;
-  inset:20px;
-  background:var(--accent);
-  filter:blur(60px);
-  opacity:0.15;
-  z-index:-1;
-}
-.hero img {
-  width:100%;
-  aspect-ratio:4/5;
-  object-fit:cover;
-  border-radius:28px;
-  background:var(--bg);
-}
-.hero-meta {
-  position:absolute;
-  bottom:8px;left:8px;right:8px;
-  padding:40px 20px 20px;
-  background:linear-gradient(transparent, rgba(0,0,0,0.9));
-  border-bottom-left-radius:28px;
-  border-bottom-right-radius:28px;
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-}
+/* Hero (Review Main Image) */
+.hero { width:100%; border-bottom:1px solid var(--border); }
+.hero img { width:100%; max-height:65vh; object-fit:contain; background:var(--surface-2); }
+.hero-meta { padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap; background:var(--bg); border-top:1px solid var(--border); }
 
-.section{padding:16px;padding-bottom:20px}
-.section h2{font-size:20px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:10px;letter-spacing:-0.02em}
+/* Section & Cards */
+.section { padding:0; padding-bottom:100px; }
+.section h2 { font-size:14px; padding:16px; border-bottom:1px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; }
 
 .p-card {
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:24px;
-  padding:16px;
-  display:flex;
-  gap:16px;
-  cursor:pointer;
-  margin-bottom:12px;
-  backdrop-filter:blur(16px);
-  transition:all .2s cubic-bezier(0.16,1,0.3,1);
-}
-.p-card:active{transform:scale(0.97);background:var(--surface-2)}
-.p-img {
-  width:88px;height:88px;
-  border-radius:18px;
-  overflow:hidden;
-  background:var(--bg);
-  flex-shrink:0;
-  border:1px solid var(--border);
-}
-.p-img img{width:100%;height:100%;object-fit:cover}
-.p-img .no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-2);font-size:12px}
-.p-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
-.p-title{font-size:16px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.p-brand{font-size:14px;color:var(--accent);font-weight:500;margin-bottom:8px}
-.p-status{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--text-2)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor}
-
-.actions-bar {
-  position:fixed;
-  bottom:32px;
-  left:50%;
-  transform:translateX(-50%);
-  width:calc(100% - 32px);
-  max-width:400px;
-  background:rgba(20, 20, 20, 0.7);
-  backdrop-filter:blur(30px);
-  -webkit-backdrop-filter:blur(30px);
-  border:1px solid rgba(255, 255, 255, 0.12);
-  border-radius:100px;
-  padding:8px;
-  display:flex;
-  gap:8px;
-  z-index:100;
-  box-shadow:0 24px 48px rgba(0,0,0,0.6);
-}
-.actions-bar button {
-  flex:1;
-  border-radius:100px;
-  padding:16px;
-  font-size:16px;
-}
-
-.modal {
-  position:fixed;
-  inset:0;
-  z-index:200;
-  background:rgba(0,0,0,0.8);
-  backdrop-filter:blur(10px);
-  -webkit-backdrop-filter:blur(10px);
-  display:none;
-  flex-direction:column;
-}
-.modal.active {
-  display:flex;
-  animation:slideUp .4s cubic-bezier(0.16,1,0.3,1) forwards;
-}
-@keyframes slideUp {
-  from { opacity:0; transform:translateY(40px) scale(0.98); }
-  to { opacity:1; transform:translateY(0) scale(1); }
-}
-
-.modal-header {
-  position:sticky;
-  top:0;
-  z-index:10;
-  background:rgba(10,10,10,0.8);
-  backdrop-filter:blur(24px);
+  padding:16px; display:flex; gap:16px; cursor:pointer;
   border-bottom:1px solid var(--border);
-  padding:16px 20px;
-  display:flex;
-  align-items:center;
-  gap:16px;
 }
-.modal-header h2{font-size:18px;font-weight:700;flex:1;text-align:center}
-.modal-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:140px}
+.p-card:active { background:var(--surface-2); }
+.p-img { width:80px; height:106px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
+.p-img img { width:100%; height:100%; object-fit:cover; }
+.p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
+.p-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
+.p-title { font-size:15px; font-weight:500; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; }
+.p-status { display:flex; align-items:center; gap:8px; font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
 
-.card {
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:28px;
-  padding:20px;
-  margin-bottom:16px;
-}
-.card h3 {
-  font-size:13px;
-  text-transform:uppercase;
-  letter-spacing:0.06em;
-  color:var(--text-2);
-  margin-bottom:16px;
-  font-weight:700;
-}
+/* Modal / Editor */
+.modal { position:fixed; inset:0; z-index:100; background:var(--bg); display:none; flex-direction:column; }
+.modal.active { display:flex; }
+.modal-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
+.modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; }
+.modal-body { flex:1; overflow-y:auto; padding:0; padding-bottom:100px; }
 
-.img-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
-.img-cell {
-  aspect-ratio:1;
-  border-radius:18px;
-  overflow:hidden;
-  position:relative;
-  border:2px solid transparent;
-  background:var(--bg);
-  cursor:pointer;
-  transition:all .3s cubic-bezier(0.16,1,0.3,1);
-}
-.img-cell.on {
-  border-color:var(--accent);
-  transform:scale(0.94);
-  box-shadow:0 0 20px var(--accent-glow);
-}
-.img-cell img{width:100%;height:100%;object-fit:cover}
-.img-cell .check {
-  position:absolute;
-  top:8px;right:8px;
-  width:26px;height:26px;
-  background:var(--accent);
-  border-radius:50%;
-  display:none;
-  align-items:center;
-  justify-content:center;
-  font-size:14px;
-  color:#fff;
-  font-weight:700;
-  box-shadow:0 4px 10px rgba(0,0,0,0.3);
-}
-.img-cell.on .check{display:flex}
+.card { padding:20px 16px; border-bottom:1px solid var(--border); }
+.card h3 { font-size:12px; color:var(--text); margin-bottom:16px; border-bottom:1px dashed var(--border); padding-bottom:8px; display:block; }
 
-.src-row {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:14px;
-  background:rgba(0,0,0,0.4);
-  border:1px solid var(--border);
-  border-radius:18px;
-  margin-bottom:10px;
-}
-.src-row .info{flex:1;min-width:0}
-.src-row .name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.src-row .url{font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.src-row .actions{display:flex;gap:8px;flex-shrink:0}
-.src-row a, .src-row button {
-  padding:10px 14px;
-  font-size:13px;
-  min-height:40px;
-  border-radius:14px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-}
-.src-row a{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+/* Grid Images */
+.img-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:1px; background:var(--border); border:1px solid var(--border); margin-bottom:16px; }
+.img-cell { aspect-ratio:1; background:var(--bg); position:relative; cursor:pointer; }
+.img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.4; transition:opacity 0s; filter:grayscale(100%); }
+.img-cell.on img { opacity:1; filter:grayscale(0%); }
+.img-cell .check { position:absolute; top:4px; right:4px; background:var(--text); color:var(--bg); padding:4px 6px; font-size:10px; font-family:'JetBrains Mono', monospace; display:none; text-transform:uppercase; line-height:1; }
+.img-cell.on .check { display:block; }
 
-.field{margin-bottom:16px}
-.field label{display:block;font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em}
-.field-row{display:flex;gap:12px}
-.field-row .field{flex:1}
+/* Form fields */
+.field { margin-bottom:16px; }
+.field label { display:block; font-size:10px; margin-bottom:8px; color:var(--text-2); font-family:'JetBrains Mono', monospace; text-transform:uppercase; letter-spacing:0.05em; }
+.field-row { display:flex; gap:12px; }
+.field-row .field { flex:1; }
 
-.empty{color:var(--text-2);text-align:center;padding:32px;font-size:15px}
+/* Sources */
+.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; }
+.src-row .info { flex:1; min-width:0; }
+.src-row .name { font-size:12px; margin-bottom:4px; font-weight:700; }
+.src-row .url { font-size:10px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'JetBrains Mono', monospace; }
+.src-row .actions { display:flex; gap:4px; }
+.src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; }
 
-.toast {
-  position:fixed;
-  top:24px;
-  left:50%;
-  transform:translateX(-50%) translateY(-120px);
-  background:rgba(20,20,20,0.9);
-  backdrop-filter:blur(16px);
-  color:var(--text);
-  padding:14px 24px;
-  border-radius:100px;
-  font-size:15px;
-  font-weight:600;
-  z-index:300;
-  transition:transform .4s cubic-bezier(0.16,1,0.3,1);
-  border:1px solid rgba(255,255,255,0.15);
-  box-shadow:0 20px 40px rgba(0,0,0,0.5);
-}
-.toast.show{transform:translateX(-50%) translateY(0)}
+/* Actions Bar */
+.actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:12px; z-index:50; }
+.actions-bar button { flex:1; }
 
-.lazy-img{opacity:0;transition:opacity .4s ease}
-.lazy-img.loaded{opacity:1}
-.placeholder{background:var(--surface-2);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.empty { padding:40px 16px; text-align:center; color:var(--text-2); font-size:12px; }
+
+/* Loading & Utils */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text-2)}
+.spinner{width:32px;height:32px;border:1px solid var(--border);border-top-color:var(--text);border-radius:0;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'JetBrains Mono', monospace; text-transform:uppercase; z-index:200; transition:transform 0.2s; border:1px solid var(--text); }
+.toast.show { transform:translate(-50%, 0); }
+
+.lazy-img { opacity:0; transition:opacity 0s; }
+.lazy-img.loaded { opacity:1; }
+.placeholder { background:var(--surface-2); }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p>Loading queue...</p></div>
+    <div class="loading"><div class="spinner"></div><p class="empty">Loading queue...</p></div>
   </div>
   <div id="queue" class="screen">
-    <div class="topbar"><h1>Review Queue</h1><span class="badge" id="qCount">0</span></div>
+    <div class="topbar"><h1>REVIEW QUEUE</h1><span class="badge" id="qCount">0</span></div>
     <div id="qList"></div>
   </div>
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 16px; min-height:40px;">Back</button>
-      <h1 id="rTitle">Item</h1>
+      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--border);">BACK</button>
+      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
       <div style="width:60px"></div>
     </div>
     <div class="hero">
@@ -491,19 +277,19 @@ a:active{opacity:.6}
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>Products <span class="badge" id="pCount">0</span></h2>
+      <h2>PRODUCTS <span class="badge" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">Delete Item</button>
-      <button class="btn-primary" onclick="commitItem()">Commit Item</button>
+      <button class="btn-danger" onclick="deleteItem()">[ DELETE ITEM ]</button>
+      <button class="btn-primary" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 16px; min-height:40px;">Cancel</button>
-      <h2>Edit Product</h2>
-      <button class="btn-primary" onclick="saveProduct()" style="padding:10px 20px; min-height:40px;">Save</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--border);">CANCEL</button>
+      <h2>EDIT PRODUCT</h2>
+      <button class="btn-primary" onclick="saveProduct()" style="padding:10px 16px; min-height:0;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
@@ -609,7 +395,7 @@ function renderQueue() {
           <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>
           <div class="post-info">
             <div class="post-id">\${escapeHtml(pid)}</div>
-            <div class="post-meta">\${items.length} item(s) &middot; \${pending} pending</div>
+            <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
           </div>
           <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
         </div>
@@ -618,10 +404,10 @@ function renderQueue() {
             <div class="item-row" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
               <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>
               <div class="item-info">
-                <div class="item-type">\${it.type === "frame" ? "Frame" : "Image"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
+                <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
                 <div class="item-status">\${escapeHtml(it.status)}</div>
               </div>
-              <span class="item-badge \${it.status}">\${it.status}</span>
+              <span class="badge \${it.status}">\${it.status}</span>
             </div>
           \`).join('')}
         </div>
@@ -662,9 +448,9 @@ function renderItem() {
   const pending = prods.filter(p => p.reviewStatus !== "completed" && p.reviewStatus !== "rejected").length;
   
   document.getElementById("rMeta").innerHTML = \`
-    <span class="badge">\${item.type === "frame" ? "Frame" : "Image"}</span>
-    <span class="badge">\${prods.length} products</span>
-    \${pending ? \`<span class="badge pending">\${pending} pending</span>\` : ""}
+    <span class="badge">\${item.type === "frame" ? "FRAME" : "IMAGE"}</span>
+    <span class="badge">\${prods.length} PROD</span>
+    \${pending ? \`<span class="badge pending">\${pending} PEND</span>\` : ""}
   \`;
   
   document.getElementById("pCount").textContent = prods.length;
@@ -676,17 +462,17 @@ function renderItem() {
   }
   
   list.innerHTML = prods.map((p, i) => {
-    const color = p.reviewStatus === "completed" ? "var(--success)" : p.reviewStatus === "rejected" ? "var(--danger)" : "var(--warn)";
+    const color = p.reviewStatus === "completed" ? "var(--text)" : p.reviewStatus === "rejected" ? "var(--text-2)" : "var(--border)";
     const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
     const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
 
     return \`
       <div class="p-card" onclick="openProduct(\${i})">
-        <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy">\` : \`<div class="no-img">No img</div>\`}</div>
+        <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy">\` : \`<div class="no-img">N/A</div>\`}</div>
         <div class="p-info">
-          <div class="p-title">\${escapeHtml(p.title || "Untitled")}</div>
+          <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
           <div class="p-brand">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
-          <div class="p-status"><span class="dot" style="background:\${color}"></span>\${p.reviewStatus || "pending"}</div>
+          <div class="p-status"><span style="color:\${color}">\u25A0</span>\${p.reviewStatus || "pending"}</div>
         </div>
       </div>
     \`;
@@ -719,21 +505,21 @@ function openProduct(idx) {
   
   let html = \`
     <div class="card">
-      <h3>AI Viability Score: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 14px; color: var(--text-2); margin-bottom: 4px; line-height: 1.6;">\${escapeHtml(p.dropshipViability?.reasoning || 'No reasoning provided')}</p>
+      <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
+      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'JetBrains Mono', monospace;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
     </div>
     <div class="card">
-      <h3>Basic Info</h3>
+      <h3>BASIC INFO</h3>
       <div class="field"><label>Product Title</label><input id="eTitle" value="\${escapeHtml(p.title || "")}"></div>
       
       <div class="field-row">
         <div class="field"><label>Store / Supplier Name</label><input id="eStore" value="\${escapeHtml(p.store || "")}"></div>
-        <div class="field"><label>Brand (Optional)</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
+        <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
       </div>
 
       <div class="field-row" style="align-items: flex-end;">
         <div class="field" style="flex: 1;"><label>Supplier URL</label><input id="eUrl" value="\${escapeHtml(p.url || "")}"></div>
-        \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="height:48px; display:flex; align-items:center; margin-bottom:16px; border-radius:18px;">Visit</a>\` : ''}
+        \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:14px; margin-bottom:16px; font-family:'JetBrains Mono', monospace; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
       </div>
 
       <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(p.category || "")}"></div>
@@ -755,17 +541,17 @@ function openProduct(idx) {
       <div class="field">
         <label>Availability</label>
         <select id="eAvail">
-          <option \${p.availability === "In stock" ? "selected" : ""}>In stock</option>
-          <option \${p.availability === "Out of stock" ? "selected" : ""}>Out of stock</option>
-          <option \${p.availability === "Pre-order" ? "selected" : ""}>Pre-order</option>
+          <option \${p.availability === "In stock" ? "selected" : ""}>IN STOCK</option>
+          <option \${p.availability === "Out of stock" ? "selected" : ""}>OUT OF STOCK</option>
+          <option \${p.availability === "Pre-order" ? "selected" : ""}>PRE-ORDER</option>
         </select>
       </div>
       <div class="field-row">
         <div class="field">
           <label>Markup Type</label>
           <select id="eMarkupType">
-            <option \${p.recommendedMarkup?.type === 'fixed' ? 'selected' : ''}>fixed</option>
-            <option \${p.recommendedMarkup?.type === 'percentage' || !p.recommendedMarkup?.type ? 'selected' : ''}>percentage</option>
+            <option \${p.recommendedMarkup?.type === 'fixed' ? 'selected' : ''}>FIXED</option>
+            <option \${p.recommendedMarkup?.type === 'percentage' || !p.recommendedMarkup?.type ? 'selected' : ''}>PERCENTAGE</option>
           </select>
         </div>
         <div class="field">
@@ -777,21 +563,21 @@ function openProduct(idx) {
         <div class="field"><label>Shipping Cost</label><input id="eShippingCost" value="\${escapeHtml(p.recommendedShippingRate?.amount || '')}"></div>
         <div class="field"><label>Shipping Cov</label><input id="eShippingCov" value="\${escapeHtml(p.recommendedShippingRate?.coverage || '')}"></div>
       </div>
-      <div class="field"><label>Sizes (comma separated)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
+      <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
       <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(p.description || "")}</textarea></div>
       <div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\${escapeHtml(p.sizingGuide || "")}</textarea></div>
       <div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\${escapeHtml(p.shippingAndReturns || "")}</textarea></div>
     </div>
     <div class="card">
-      <h3>Images &mdash; Tap to select</h3>
+      <h3>IMAGES</h3>
       <div class="img-grid" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%;margin-top:8px">+ Add Image URL</button>
+      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border);">+ ADD URL</button>
     </div>
-    <div class="card" style="margin-bottom:0">
-      <h3>Actions</h3>
+    <div class="card" style="border-bottom:none;">
+      <h3>ACTIONS</h3>
       <div style="display:flex;gap:12px">
-        <button class="btn-danger" onclick="rejectProduct()" style="flex:1">Reject Product</button>
-        <button class="btn-primary" onclick="saveProduct()" style="flex:1">Save Product</button>
+        <button class="btn-danger" onclick="rejectProduct()" style="flex:1">[ REJECT ]</button>
+        <button class="btn-primary" onclick="saveProduct()" style="flex:1">SAVE</button>
       </div>
     </div>
   \`;
@@ -804,7 +590,7 @@ function openProduct(idx) {
 function renderImgGrid(urls, selectedSet) {
   const grid = document.getElementById("eImgGrid");
   if (!urls.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1">No images available</div>';
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1">NO IMAGES</div>';
     return;
   }
   
@@ -813,14 +599,14 @@ function renderImgGrid(urls, selectedSet) {
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="this.classList.toggle('on')">
         <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-        <div class="check">&#10003;</div>
+        <div class="check">SEL</div>
       </div>
     \`;
   }).join("");
 }
 
 function addImage() {
-  const url = prompt("Paste image URL:"); 
+  const url = prompt("IMAGE URL:"); 
   if (!url) return;
   const grid = document.getElementById("eImgGrid");
   const empty = grid.querySelector(".empty");
@@ -828,7 +614,7 @@ function addImage() {
   
   const div = document.createElement("div");
   div.className = "img-cell on";
-  div.innerHTML = \`<img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">&#10003;</div>\`;
+  div.innerHTML = \`<img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">SEL</div>\`;
   div.onclick = function() { this.classList.toggle("on"); };
   grid.appendChild(div);
 }
@@ -887,11 +673,11 @@ async function saveProduct() {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx, prodIdx: idx, product: p };
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
-    toast("Saved");
+    toast("SAVED");
     renderItem();
     closeEditor();
   } catch(e) {
-    toast("Save failed: " + e.message);
+    toast("ERROR: " + e.message);
   }
 }
 
@@ -910,31 +696,31 @@ async function commitItem() {
   const prods = state.current.response && state.current.response.products ? state.current.response.products : [];
   const pending = prods.filter(p => p.reviewStatus !== "completed" && p.reviewStatus !== "rejected");
   if (pending.length) {
-    if (!confirm(pending.length + " product(s) still pending. Commit anyway?")) return;
+    if (!confirm(pending.length + " PENDING. COMMIT ANYWAY?")) return;
   }
   try {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
     const r = await fetch("/api/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Commit failed");
-    toast("Committed");
+    toast("COMMITTED");
     showQueue();
     await loadQueue();
   } catch(e) {
-    toast("Commit failed: " + e.message);
+    toast("ERROR: " + e.message);
   }
 }
 
 async function deleteItem() {
-  if (!confirm("Delete this item? It will be marked as discarded.")) return;
+  if (!confirm("DELETE ITEM?")) return;
   try {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
     const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Delete failed");
-    toast("Deleted");
+    toast("DELETED");
     showQueue();
     await loadQueue();
   } catch(e) {
-    toast("Delete failed: " + e.message);
+    toast("ERROR: " + e.message);
   }
 }
 
@@ -1507,4 +1293,4 @@ async function main() {
 main().catch(err => {
     log('error', 'Fatal:', err.message);
     process.exit(1);
-});
+}); 
