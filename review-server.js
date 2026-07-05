@@ -184,7 +184,7 @@ async function load(){
   renderQueue();
 }
 function renderQueue(){
-  document.getElementById('queue').innerHTML=queue.map((q,i)=>\`<div class="qitem" onclick="openPost(${i})"><img src="${q.thumb}" loading="lazy"><span class="badge ${q.status}">${q.status}</span><div class="id">${q.postId}</div></div>\`).join('');
+  document.getElementById('queue').innerHTML=queue.map((q,i)=>\`<div class="qitem" onclick="openPost(\${i})"><img src="\${q.thumb}" loading="lazy"><span class="badge \${q.status}">\${q.status}</span><div class="id">\${q.postId}</div></div>\`).join('');
 }
 function openPost(i){
   post=queue[i];fileIdx=0;prodIdx=0;
@@ -196,7 +196,7 @@ function openPost(i){
 function back(){document.getElementById('reviewView').classList.add('hide');document.getElementById('queueView').classList.remove('hide');load();}
 function renderMedia(){
   const files=post.fileUrl.fileUrls;
-  document.getElementById('mediaScroll').innerHTML=files.map((f,i)=>\`<div class="media-item ${i===fileIdx?'on':''}" onclick="selFile(${i})"><img src="${f.url}"><div class="label">${f.type} ${i+1}/${files.length}</div></div>\`).join('');
+  document.getElementById('mediaScroll').innerHTML=files.map((f,i)=>\`<div class="media-item \${i===fileIdx?'on':''}" onclick="selFile(\${i})"><img src="\${f.url}"><div class="label">\${f.type} \${i+1}/\${files.length}</div></div>\`).join('');
   setTimeout(()=>{const el=document.querySelectorAll('.media-item')[fileIdx];if(el)el.scrollIntoView({behavior:'smooth',inline:'center'});},50);
 }
 function selFile(i){fileIdx=i;prodIdx=0;renderMedia();renderChips();closeEditor();}
@@ -204,7 +204,7 @@ function renderChips(){
   const prods=post.fileUrl.fileUrls[fileIdx].response?.products||[];
   document.getElementById('chips').innerHTML=prods.map((p,i)=>{
     const color=p.reviewStatus==='completed'?'#4ade80':p.reviewStatus==='rejected'?'#dc2626':'#f59e0b';
-    return \`<div class="chip ${i===prodIdx?'on':''}" onclick="openProduct(${i})"><span class="dot" style="background:${color}"></span>${p.title}</div>\`;
+    return \`<div class="chip \${i===prodIdx?'on':''}" onclick="openProduct(\${i})"><span class="dot" style="background:\${color}"></span>\${p.title}</div>\`;
   }).join('');
 }
 function openProduct(i){
@@ -225,14 +225,14 @@ function openProduct(i){
 function closeEditor(){document.getElementById('editor').classList.add('hide');}
 function renderImages(p){
   const imgs=p.images||[];
-  let html=imgs.length?imgs.map((u,i)=>\`<div class="img-cell ${selected.has(i)?'on':''}" onclick="togImg(${i})"><img src="${u}" loading="lazy"><div class="check">✓</div></div>\`).join(''):'<div style="color:#666;padding:20px;text-align:center">No images extracted</div>';
+  let html=imgs.length?imgs.map((u,i)=>\`<div class="img-cell \${selected.has(i)?'on':''}" onclick="togImg(\${i})"><img src="\${u}" loading="lazy"><div class="check">✓</div></div>\`).join(''):'<div style="color:#666;padding:20px;text-align:center">No images extracted</div>';
   document.getElementById('imgGrid').innerHTML=html;
 }
 function togImg(i){selected.has(i)?selected.delete(i):selected.add(i);renderImages(post.fileUrl.fileUrls[fileIdx].response.products[prodIdx]);}
 function addImage(){const u=prompt('Paste image URL:');if(!u)return;const p=post.fileUrl.fileUrls[fileIdx].response.products[prodIdx];p.images=p.images||[];p.images.push(u);selected.add(p.images.length-1);renderImages(p);}
 function renderSources(p){
   const srcs=p.sources||[];
-  document.getElementById('srcList').innerHTML=srcs.map((s,i)=>\`<div class="source-row"><div class="info"><div class="name">${s.store}</div><div class="price">${s.price}</div></div><div class="actions"><button class="ghost" onclick="window.open('${s.url}')">Visit</button><button class="danger" onclick="rmSrc(${i})">Remove</button></div></div>\`).join('');
+  document.getElementById('srcList').innerHTML=srcs.map((s,i)=>\`<div class="source-row"><div class="info"><div class="name">\${s.store}</div><div class="price">\${s.price}</div></div><div class="actions"><button class="ghost" onclick="window.open('\${s.url}')">Visit</button><button class="danger" onclick="rmSrc(\${i})">Remove</button></div></div>\`).join('');
 }
 function rmSrc(i){post.fileUrl.fileUrls[fileIdx].response.products[prodIdx].sources.splice(i,1);renderSources(post.fileUrl.fileUrls[fileIdx].response.products[prodIdx]);}
 function addSource(){const u=prompt('Paste source product URL:');if(!u)return;const p=post.fileUrl.fileUrls[fileIdx].response.products[prodIdx];p.sources=p.sources||[];p.sources.push({store:'Custom',price:'TBD',url:u});renderSources(p);}
@@ -274,7 +274,7 @@ async function commitItem(){
 }
 function showSheet(title,options){
   document.getElementById('sheetTitle').textContent=title;
-  document.getElementById('sheetContent').innerHTML=options.map(o=>\`<div class="option" onclick="(${o.action.toString()})()">${o.text}</div>\`).join('');
+  document.getElementById('sheetContent').innerHTML=options.map(o=>\`<div class="option" onclick="(\${o.action.toString()})()">\${o.text}</div>\`).join('');
   document.getElementById('overlay').classList.add('on');
   document.getElementById('sheet').classList.add('open');
 }
@@ -521,4 +521,4 @@ async function main() {
 main().catch(err => {
     log('error', 'Fatal:', err.message);
     process.exit(1);
-});
+}); 
