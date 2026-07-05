@@ -1,0 +1,64 @@
+name: Review Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      mongodb_uri:
+        description: 'MongoDB URI (or leave empty to use secrets.ORCHESTRATOR_MONGODB_URI)'
+        required: false
+        default: ''
+      mongodb_db:
+        description: 'MongoDB database name'
+        required: false
+        default: 'ugc-dropship'
+      mongodb_collection:
+        description: 'MongoDB collection name'
+        required: false
+        default: 'scraped-posts'
+      review_port:
+        description: 'Port for review server'
+        required: false
+        default: '3456'
+      log_level:
+        description: 'Log verbosity: debug | info | warn | error'
+        required: false
+        default: 'info'
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install npm dependencies
+        run: npm install mongodb
+
+      - name: Install ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update && sudo apt install -y ngrok
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
+
+      - name: Mask secrets
+        env:
+          MONGO: ${{ github.event.inputs.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI }}
+        run: echo "::add-mask::$MONGO"
+
+      - name: Run Review Server
+        env:
+          ORCH_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI || '' }}
+          ORCH_MONGODB_DB: ${{ github.event.inputs.mongodb_db || 'ugc-dropship' }}
+          ORCH_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || 'scraped-posts' }}
+          REVIEW_PORT: ${{ github.event.inputs.review_port || '3456' }}
+          ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || 'info' }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: node review-server.js
