@@ -2,8 +2,7 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Serves a mobile-first review UI for validating AI-identified products,
- * sources, images, and metadata before dropshipping pages are created.
+ * Grouped by post, virtualized rendering, lazy-loaded images, mobile-first.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), NGROK_AUTHTOKEN
@@ -38,7 +37,7 @@ function log(level, ...args) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  HTML UI (static string — no template literals to avoid escaping issues)
+//  HTML UI
 // ═══════════════════════════════════════════════════════════════════════════════
 const REVIEW_UI_HTML = [
 '<!DOCTYPE html>',
@@ -46,92 +45,106 @@ const REVIEW_UI_HTML = [
 '<head>',
 '<meta charset="utf-8">',
 '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">',
-'<meta name="theme-color" content="#0a0a0a">',
+'<meta name="theme-color" content="#0f0f0f">',
 '<title>DropShip Review</title>',
 '<style>',
 '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}',
-'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0a0a0a;color:#e5e5e5;line-height:1.5;min-height:100dvh;overflow-x:hidden}',
-'button{cursor:pointer;border:none;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:600;touch-action:manipulation;min-height:44px;transition:transform .05s,opacity .15s}',
+':root{--bg:#0f0f0f;--surface:#1a1a1a;--surface-2:#242424;--border:#2a2a2a;--text:#e8e8e8;--text-2:#999;--accent:#5eead4;--accent-2:#0d9488;--danger:#f87171;--danger-2:#dc2626;--warn:#fbbf24;--success:#34d399;--success-2:#059669}',
+'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100dvh;overflow-x:hidden}',
+'button{cursor:pointer;border:none;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:600;touch-action:manipulation;min-height:44px;transition:transform .06s,opacity .15s;background:var(--surface-2);color:var(--text);border:1px solid var(--border)}',
 'button:active{transform:scale(.97)}',
-'button:disabled{opacity:.5;cursor:not-allowed}',
-'.btn-primary{background:#4ade80;color:#000}',
-'.btn-danger{background:#dc2626;color:#fff}',
-'.btn-ghost{background:#1a1a1a;color:#e5e5e5;border:1px solid #333}',
-'.btn-secondary{background:#262626;color:#e5e5e5}',
-'input,select,textarea{background:#141414;border:1px solid #2a2a2a;color:#e5e5e5;padding:12px 14px;border-radius:10px;font-size:15px;width:100%;-webkit-appearance:none}',
-'input:focus,select:focus,textarea:focus{outline:none;border-color:#4ade80}',
-'select{background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' fill=\'%23888\'%3E%3Cpath d=\'M6 8L1 3h10z\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}',
+'button:disabled{opacity:.4;cursor:not-allowed}',
+'.btn-primary{background:var(--accent);color:#000;border-color:var(--accent)}',
+'.btn-danger{background:var(--danger-2);color:#fff;border-color:var(--danger-2)}',
+'.btn-ghost{background:transparent;color:var(--text-2);border:1px solid var(--border)}',
+'.btn-warn{background:var(--warn);color:#000;border-color:var(--warn)}',
+'input,select,textarea{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-size:15px;width:100%;-webkit-appearance:none}',
+'input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}',
+'select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23999'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}',
 'textarea{resize:vertical;min-height:80px}',
 'img{max-width:100%;display:block}',
-'.screen{display:none;min-height:100dvh}',
+'a{color:var(--accent);text-decoration:none}',
+'a:active{opacity:.7}',
+'.screen{display:none;min-height:100dvh;padding-bottom:80px}',
 '.screen.active{display:block}',
-'.topbar{position:sticky;top:0;z-index:50;background:rgba(10,10,10,.92);backdrop-filter:blur(10px);border-bottom:1px solid #222;padding:12px 16px;display:flex;align-items:center;gap:12px}',
+'.topbar{position:sticky;top:0;z-index:50;background:rgba(15,15,15,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px}',
 '.topbar h1{font-size:17px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.badge{font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;background:#333}',
-'.badge.pending{background:#f59e0b;color:#000}',
-'.badge.partial{background:#3b82f6;color:#fff}',
-'.badge.done{background:#4ade80;color:#000}',
-'.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;color:#888}',
-'.spinner{width:32px;height:32px;border:3px solid #333;border-top-color:#4ade80;border-radius:50%;animation:spin .8s linear infinite}',
+'.badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:var(--surface-2);color:var(--text-2)}',
+'.badge.pending{background:var(--warn);color:#000}',
+'.badge.partial{background:#60a5fa;color:#000}',
+'.badge.done{background:var(--success);color:#000}',
+'.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;color:var(--text-2)}',
+'.spinner{width:32px;height:32px;border:3px solid var(--surface-2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}',
 '@keyframes spin{to{transform:rotate(360deg)}}',
-'.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:12px}',
-'@media(min-width:500px){.grid{grid-template-columns:repeat(3,1fr)}}',
-'@media(min-width:768px){.grid{grid-template-columns:repeat(4,1fr)}}',
-'.q-card{background:#141414;border:1px solid #222;border-radius:16px;overflow:hidden;cursor:pointer}',
-'.q-card:active{transform:scale(.98)}',
-'.q-thumb{position:relative;aspect-ratio:3/4;background:#1a1a1a}',
-'.q-thumb img{width:100%;height:100%;object-fit:cover}',
-'.q-badge{position:absolute;top:8px;left:8px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;background:rgba(0,0,0,.75);backdrop-filter:blur(4px)}',
-'.q-info{padding:10px 12px}',
-'.q-id{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.q-type{font-size:12px;color:#888;margin-top:2px}',
-'.hero{position:relative;background:#111}',
-'.hero img{width:100%;aspect-ratio:3/4;object-fit:contain;background:#0a0a0a}',
+'.post-group{background:var(--surface);border:1px solid var(--border);border-radius:16px;margin:10px 12px;overflow:hidden}',
+'.post-header{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;user-select:none}',
+'.post-header:active{background:var(--surface-2)}',
+'.post-thumb{width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--bg);flex-shrink:0}',
+'.post-thumb img{width:100%;height:100%;object-fit:cover}',
+'.post-info{flex:1;min-width:0}',
+'.post-id{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+'.post-meta{font-size:12px;color:var(--text-2);margin-top:2px}',
+'.post-chevron{width:24px;height:24px;transition:transform .2s;color:var(--text-2)}',
+'.post-group.open .post-chevron{transform:rotate(180deg)}',
+'.post-items{display:none;padding:0 12px 12px}',
+'.post-group.open .post-items{display:block}',
+'.item-row{display:flex;align-items:center;gap:12px;padding:10px;background:var(--bg);border-radius:12px;margin-bottom:8px;cursor:pointer}',
+'.item-row:last-child{margin-bottom:0}',
+'.item-row:active{background:var(--surface-2)}',
+'.item-thumb{width:48px;height:64px;border-radius:10px;overflow:hidden;background:var(--surface);flex-shrink:0}',
+'.item-thumb img{width:100%;height:100%;object-fit:cover}',
+'.item-info{flex:1;min-width:0}',
+'.item-type{font-size:13px;font-weight:600}',
+'.item-status{font-size:12px;color:var(--text-2);margin-top:2px}',
+'.item-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:auto;flex-shrink:0}',
+'.hero{position:relative;background:var(--bg)}',
+'.hero img{width:100%;aspect-ratio:3/4;object-fit:contain;background:var(--bg)}',
 '.hero-meta{position:absolute;bottom:0;left:0;right:0;padding:40px 16px 16px;background:linear-gradient(transparent,rgba(0,0,0,.85));display:flex;gap:8px;flex-wrap:wrap}',
-'.section{padding:16px}',
+'.section{padding:16px;padding-bottom:100px}',
 '.section h2{font-size:18px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}',
-'.p-card{background:#141414;border:1px solid #222;border-radius:16px;padding:12px;display:flex;gap:12px;cursor:pointer;margin-bottom:10px}',
-'.p-card:active{transform:scale(.98)}',
-'.p-img{width:80px;height:80px;border-radius:12px;overflow:hidden;background:#1a1a1a;flex-shrink:0}',
+'.p-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px;display:flex;gap:12px;cursor:pointer;margin-bottom:10px}',
+'.p-card:active{background:var(--surface-2)}',
+'.p-img{width:80px;height:80px;border-radius:12px;overflow:hidden;background:var(--bg);flex-shrink:0}',
 '.p-img img{width:100%;height:100%;object-fit:cover}',
-'.p-img .no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666;font-size:11px}',
+'.p-img .no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-2);font-size:11px}',
 '.p-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}',
 '.p-title{font-size:15px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.p-brand{font-size:13px;color:#888;margin-bottom:6px}',
+'.p-brand{font-size:13px;color:var(--text-2);margin-bottom:6px}',
 '.p-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500}',
 '.dot{width:8px;height:8px;border-radius:50%;display:inline-block}',
-'.actions-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px 24px;background:linear-gradient(transparent,#0a0a0a 30%);display:flex;gap:10px;z-index:40}',
-'.actions-bar button{flex:1;padding:14px;font-size:16px}',
-'.modal{position:fixed;inset:0;z-index:100;background:#0a0a0a;display:none;flex-direction:column}',
+'.actions-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px 24px;background:linear-gradient(transparent,var(--bg) 40%);display:flex;gap:10px;z-index:40;border-top:1px solid var(--border)}',
+'.actions-bar button{flex:1;padding:14px;font-size:16px;border-radius:12px}',
+'.modal{position:fixed;inset:0;z-index:100;background:var(--bg);display:none;flex-direction:column}',
 '.modal.active{display:flex}',
-'.modal-header{position:sticky;top:0;z-index:10;background:rgba(10,10,10,.95);backdrop-filter:blur(10px);border-bottom:1px solid #222;padding:12px 16px;display:flex;align-items:center;gap:12px}',
+'.modal-header{position:sticky;top:0;z-index:10;background:rgba(15,15,15,.95);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px}',
 '.modal-header h2{font-size:17px;font-weight:700;flex:1}',
-'.modal-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:100px}',
-'.card{background:#141414;border:1px solid #222;border-radius:16px;padding:16px;margin-bottom:12px}',
-'.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:12px;font-weight:700}',
+'.modal-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:120px}',
+'.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px}',
+'.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-2);margin-bottom:12px;font-weight:700}',
 '.img-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}',
-'.img-cell{aspect-ratio:1;border-radius:12px;overflow:hidden;position:relative;border:2px solid transparent;background:#1a1a1a;cursor:pointer}',
-'.img-cell.on{border-color:#4ade80}',
+'.img-cell{aspect-ratio:1;border-radius:12px;overflow:hidden;position:relative;border:2px solid transparent;background:var(--bg);cursor:pointer}',
+'.img-cell.on{border-color:var(--accent)}',
 '.img-cell img{width:100%;height:100%;object-fit:cover}',
-'.img-cell .check{position:absolute;top:6px;right:6px;width:24px;height:24px;background:#4ade80;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:14px;color:#000;font-weight:700}',
+'.img-cell .check{position:absolute;top:6px;right:6px;width:24px;height:24px;background:var(--accent);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:14px;color:#000;font-weight:700}',
 '.img-cell.on .check{display:flex}',
-'.src-row{display:flex;align-items:center;gap:10px;padding:12px;background:#1a1a1a;border-radius:10px;margin-bottom:8px}',
+'.src-row{display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg);border-radius:10px;margin-bottom:8px}',
 '.src-row .info{flex:1;min-width:0}',
 '.src-row .name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.src-row .url{font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.src-row .actions{display:flex;gap:6px}',
-'.src-row button{padding:8px 12px;font-size:12px;min-height:36px;border-radius:8px}',
+'.src-row .url{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+'.src-row .actions{display:flex;gap:6px;flex-shrink:0}',
+'.src-row a,.src-row button{padding:8px 12px;font-size:12px;min-height:36px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}',
+'.src-row a{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}',
 '.field{margin-bottom:14px}',
-'.field label{display:block;font-size:12px;font-weight:600;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}',
+'.field label{display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}',
 '.field-row{display:flex;gap:10px}',
 '.field-row .field{flex:1}',
-'.empty{color:#666;text-align:center;padding:24px;font-size:14px}',
-'.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-100px);background:#262626;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:500;z-index:200;transition:transform .3s ease;border:1px solid #333}',
+'.empty{color:var(--text-2);text-align:center;padding:24px;font-size:14px}',
+'.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-120px);background:var(--surface-2);color:var(--text);padding:12px 20px;border-radius:12px;font-size:14px;font-weight:500;z-index:200;transition:transform .3s ease;border:1px solid var(--border)}',
 '.toast.show{transform:translateX(-50%) translateY(0)}',
-'.check-indicator{font-size:11px;font-weight:700;padding:2px 6px;border-radius:6px;margin-left:auto}',
-'.check-indicator.ok{background:#4ade80;color:#000}',
-'.check-indicator.fail{background:#dc2626;color:#fff}',
-'.check-indicator.warn{background:#f59e0b;color:#000}',
+'.lazy-img{opacity:0;transition:opacity .3s}',
+'.lazy-img.loaded{opacity:1}',
+'.placeholder{background:var(--surface-2);animation:pulse 1.5s infinite}',
+'@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}',
 '</style>',
 '</head>',
 '<body>',
@@ -139,7 +152,7 @@ const REVIEW_UI_HTML = [
 '  <div id="loading" class="screen active"><div class="loading"><div class="spinner"></div><p>Loading queue...</p></div></div>',
 '  <div id="queue" class="screen">',
 '    <div class="topbar"><h1>Review Queue</h1><span class="badge" id="qCount">0</span></div>',
-'    <div class="grid" id="qGrid"></div>',
+'    <div id="qList"></div>',
 '  </div>',
 '  <div id="review" class="screen">',
 '    <div class="topbar">',
@@ -148,7 +161,7 @@ const REVIEW_UI_HTML = [
 '      <div style="width:60px"></div>',
 '    </div>',
 '    <div class="hero">',
-'      <img id="rImage" src="" alt="">',
+'      <img id="rImage" src="" alt="" loading="lazy">',
 '      <div class="hero-meta" id="rMeta"></div>',
 '    </div>',
 '    <div class="section">',
@@ -171,42 +184,79 @@ const REVIEW_UI_HTML = [
 '</div>',
 '<div class="toast" id="toast"></div>',
 '<script>',
-'const state={queue:[],current:null,editingIdx:null};',
+'const state={queue:[],posts:{},current:null,editingIdx:null,io:null};',
 'function showScreen(id){document.querySelectorAll(".screen,.modal").forEach(function(el){el.classList.remove("active");});document.getElementById(id).classList.add("active");}',
 'function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2500);}',
 'function escapeHtml(str){if(str==null)return"";return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}',
 'function getImageUrl(u){if(!u)return"";if(typeof u==="object"&&u!==null&&u.url)return String(u.url);return String(u);}',
 'function formatPrice(p){if(!p)return"TBD";if(typeof p==="string")return p;if(typeof p==="object"&&p!==null){if(p.current)return p.current+(p.currency?" "+p.currency:"");return JSON.stringify(p);}return String(p);}',
-'function formatAvail(a){if(!a)return"Unknown";return String(a);}',
+
+'function initLazyImages(){',
+'  if(state.io)return;',
+'  state.io=new IntersectionObserver(function(entries){',
+'    entries.forEach(function(entry){',
+'      if(entry.isIntersecting){',
+'        const img=entry.target;',
+'        const src=img.dataset.src;',
+'        if(src){img.src=src;img.classList.add("loaded");img.removeAttribute("data-src");}',
+'        state.io.unobserve(img);',
+'      }',
+'    });',
+'  },{rootMargin:"200px"});',
+'}',
+
+'function observeImage(img){if(state.io)state.io.observe(img);}',
 
 'async function loadQueue(){',
-'  try{const r=await fetch("/api/queue");state.queue=await r.json();}',
-'  catch(e){state.queue=[];toast("Failed to load queue");}',
+'  try{const r=await fetch("/api/queue");const data=await r.json();state.posts=data.posts||{};state.queue=data.items||[];}',
+'  catch(e){state.posts={};state.queue=[];toast("Failed to load queue");}',
 '  document.getElementById("loading").classList.remove("active");',
-'  showScreen("queue");renderQueue();',
+'  showScreen("queue");initLazyImages();renderQueue();',
 '}',
 
 'function renderQueue(){',
-'  const grid=document.getElementById("qGrid");',
-'  if(!state.queue.length){grid.innerHTML=\'<div class="empty" style="grid-column:1/-1">Nothing to review</div>\';document.getElementById("qCount").textContent="0";return;}',
-'  grid.innerHTML=state.queue.map(function(item,i){',
-'    return \'<div class="q-card" onclick="openItem(\'+i+\')">\'+',
-'      \'<div class="q-thumb"><img src="\'+escapeHtml(item.thumb)+\'" loading="lazy" alt=""><span class="q-badge \'+item.status+\'">\'+item.status+\'</span></div>\'+',
-'      \'<div class="q-info"><div class="q-id">\'+escapeHtml(item.postId)+\'</div><div class="q-type">\'+(item.type==="frame"?"Frame":"Image")+" #"+(item.frameIdx!==null?item.frameIdx:item.fileIdx)+\'</div></div>\'+',
-'    \'</div>\';',
+'  const list=document.getElementById("qList");',
+'  const postIds=Object.keys(state.posts);',
+'  if(!postIds.length){list.innerHTML='<div class="empty">Nothing to review</div>';document.getElementById("qCount").textContent="0";return;}',
+'  let totalItems=0;',
+'  list.innerHTML=postIds.map(function(pid){',
+'    const post=state.posts[pid];',
+'    const items=post.items||[];',
+'    totalItems+=items.length;',
+'    const pending=items.filter(function(it){return it.status==="pending"||it.status==="partial";}).length;',
+'    const thumb=items[0]?items[0].thumb:"";',
+'    return '<div class="post-group" id="g_'+pid+'" onclick="toggleGroup(event,''+pid+'')">'+',
+'      '<div class="post-header">'+',
+'        '<div class="post-thumb"><img data-src="'+escapeHtml(thumb)+'" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>'+',
+'        '<div class="post-info"><div class="post-id">'+escapeHtml(pid)+'</div><div class="post-meta">'+items.length+" item"+(items.length>1?"s":"")+" &middot; "+pending+" pending</div></div>'+',
+'        '<svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>'+',
+'      '</div>'+',
+'      '<div class="post-items" onclick="event.stopPropagation()">'+items.map(function(it,i){',
+'        return '<div class="item-row" onclick="openItem(''+it._id+'','+it.fileIdx+','+(it.frameIdx!==null?it.frameIdx:"null")+')">'+',
+'          '<div class="item-thumb"><img data-src="'+escapeHtml(it.thumb)+'" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>'+',
+'          '<div class="item-info"><div class="item-type">'+(it.type==="frame"?"Frame":"Image")+" #"+(it.frameIdx!==null?it.frameIdx:it.fileIdx)+'</div><div class="item-status">'+escapeHtml(it.status)+'</div></div>'+',
+'          '<span class="item-badge '+it.status+'">'+it.status+'</span>'+',
+'        '</div>';',
+'      }).join("")+'</div>'+',
+'    '</div>';',
 '  }).join("");',
-'  document.getElementById("qCount").textContent=state.queue.length;',
+'  document.getElementById("qCount").textContent=totalItems;',
+'  document.querySelectorAll(".lazy-img[data-src]").forEach(observeImage);',
 '}',
 
-'async function openItem(queueIdx){',
-'  const item=state.queue[queueIdx];',
+'function toggleGroup(ev,pid){',
+'  if(ev.target.closest(".item-row"))return;',
+'  document.getElementById("g_"+pid).classList.toggle("open");',
+'}',
+
+'async function openItem(_id,fileIdx,frameIdx){',
+'  frameIdx=frameIdx==="null"?null:parseInt(frameIdx,10);',
 '  try{',
-'    let url="/api/item/"+item._id+"/"+item.fileIdx;',
-'    if(item.frameIdx!==null)url+="/"+item.frameIdx;',
+'    let url="/api/item/"+_id+"/"+fileIdx;',
+'    if(frameIdx!==null)url+="/"+frameIdx;',
 '    const r=await fetch(url);',
 '    if(!r.ok)throw new Error("Fetch failed");',
 '    state.current=await r.json();',
-'    state.current._queueIdx=queueIdx;',
 '  }catch(e){toast("Failed to load item");return;}',
 '  renderItem();showScreen("review");',
 '}',
@@ -217,17 +267,17 @@ const REVIEW_UI_HTML = [
 '  document.getElementById("rImage").src=item.url;',
 '  const prods=item.response&&item.response.products?item.response.products:[];',
 '  const pending=prods.filter(function(p){return p.reviewStatus!=="completed"&&p.reviewStatus!=="rejected";}).length;',
-'  document.getElementById("rMeta").innerHTML=\'<span class="badge">\'+(item.type==="frame"?"Frame":"Image")+\'</span><span class="badge">\'+prods.length+\' products</span>\'+(pending?\'<span class="badge pending">\'+pending+\' pending</span>\':"");',
+'  document.getElementById("rMeta").innerHTML='<span class="badge">'+(item.type==="frame"?"Frame":"Image")+'</span><span class="badge">'+prods.length+' products</span>'+(pending?'<span class="badge pending">'+pending+' pending</span>':"");',
 '  document.getElementById("pCount").textContent=prods.length;',
 '  const list=document.getElementById("pList");',
-'  if(!prods.length){list.innerHTML=\'<div class="empty">No products identified by AI</div>\';return;}',
+'  if(!prods.length){list.innerHTML='<div class="empty">No products identified</div>';return;}',
 '  list.innerHTML=prods.map(function(p,i){',
-'    const color=p.reviewStatus==="completed"?"#4ade80":p.reviewStatus==="rejected"?"#dc2626":"#f59e0b";',
+'    const color=p.reviewStatus==="completed"?"var(--success)":p.reviewStatus==="rejected"?"var(--danger)":"var(--warn)";',
 '    const imgUrl=getImageUrl((p.selectedImages&&p.selectedImages[0])||(p.sources&&p.sources[0]&&p.sources[0].images&&p.sources[0].images[0]));',
-'    return \'<div class="p-card" onclick="openProduct(\'+i+\')">\'+',
-'      \'<div class="p-img">\'+(imgUrl?\'<img src="\'+escapeHtml(imgUrl)+\'" alt="">\':\'<div class="no-img">No img</div>\')+\'</div>\'+',
-'      \'<div class="p-info"><div class="p-title">\'+escapeHtml(p.title||"Untitled")+\'</div><div class="p-brand">\'+escapeHtml(p.brand||"Unknown")+" &middot; "+escapeHtml(formatPrice(p.price))+\'</div><div class="p-status"><span class="dot" style="background:\'+color+\'"></span>\'+(p.reviewStatus||"pending")+\'</div></div>\'+',
-'    \'</div>\';',
+'    return '<div class="p-card" onclick="openProduct('+i+')">'+',
+'      '<div class="p-img">'+(imgUrl?'<img src="'+escapeHtml(imgUrl)+'" alt="" loading="lazy">':'<div class="no-img">No img</div>')+'</div>'+',
+'      '<div class="p-info"><div class="p-title">'+escapeHtml(p.title||"Untitled")+'</div><div class="p-brand">'+escapeHtml(p.brand||"Unknown")+" &middot; "+escapeHtml(formatPrice(p.price))+'</div><div class="p-status"><span class="dot" style="background:'+color+'"></span>'+(p.reviewStatus||"pending")+'</div></div>'+',
+'    '</div>';',
 '  }).join("");',
 '}',
 
@@ -250,28 +300,28 @@ const REVIEW_UI_HTML = [
 '  const p=state.current.response.products[idx];',
 '  const allImages=getAllImages(p);',
 '  const selectedSet=new Set((p.selectedImages||[]).map(String));',
-'  let html=\'<div class="card"><h3>Basic Info</h3>\'+',
-'    \'<div class="field"><label>Title</label><input id="eTitle" value="\'+escapeHtml(p.title||"")+\'"></div>\'+',
-'    \'<div class="field"><label>Brand</label><input id="eBrand" value="\'+escapeHtml(p.brand||"")+\'"></div>\'+',
-'    \'<div class="field"><label>Category</label><input id="eCategory" value="\'+escapeHtml(p.category||"")+\'"></div>\'+',
-'    \'<div class="field-row"><div class="field"><label>Price</label><input id="ePrice" value="\'+escapeHtml((p.price&&p.price.current)?p.price.current:"")+\'"></div><div class="field" style="width:100px"><label>Currency</label><select id="eCurrency">\'+',
-'      \'<option \'+(p.price&&p.price.currency==="USD"?"selected":"")+\'>USD</option>\'+',
-'      \'<option \'+(p.price&&p.price.currency==="EUR"?"selected":"")+\'>EUR</option>\'+',
-'      \'<option \'+(p.price&&p.price.currency==="GBP"?"selected":"")+\'>GBP</option>\'+',
-'      \'<option \'+(p.price&&p.price.currency==="CAD"?"selected":"")+\'>CAD</option>\'+',
-'      \'<option \'+(p.price&&p.price.currency==="AUD"?"selected":"")+\'>AUD</option>\'+',
-'      \'<option \'+(p.price&&p.price.currency==="JPY"?"selected":"")+\'>JPY</option>\'+',
-'    \'</select></div></div>\'+',
-'    \'<div class="field"><label>Base Price</label><input id="eBasePrice" value="\'+escapeHtml(p.basePrice||"")+\'"></div>\'+',
-'    \'<div class="field"><label>Availability</label><select id="eAvail"><option \'+(p.availability==="In stock"?"selected":"")+\'>In stock</option><option \'+(p.availability==="Out of stock"?"selected":"")+\'>Out of stock</option><option \'+(p.availability==="Pre-order"?"selected":"")+\'>Pre-order</option></select></div>\'+',
-'    \'<div class="field"><label>Sizes (comma separated)</label><input id="eSizes" value="\'+escapeHtml((p.sizing||[]).join(", "))+\'"></div>\'+',
-'    \'<div class="field"><label>Description</label><textarea id="eDesc">\'+escapeHtml(p.description||"")+\'</textarea></div>\'+',
-'    \'<div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\'+escapeHtml(p.sizingGuide||"")+\'</textarea></div>\'+',
-'    \'<div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\'+escapeHtml(p.shippingAndReturns||"")+\'</textarea></div>\'+',
-'  \'</div>\'+',
-'  \'<div class="card"><h3>Images &mdash; Tap to select</h3><div class="img-grid" id="eImgGrid"></div><button class="btn-ghost" onclick="addImage()" style="width:100%;margin-top:8px">+ Add Image URL</button></div>\'+',
-'  \'<div class="card"><h3>Sources</h3><div id="eSrcList"></div><button class="btn-ghost" onclick="addSource()" style="width:100%;margin-top:8px">+ Add Source</button></div>\'+',
-'  \'<div class="card"><h3>Actions</h3><div style="display:flex;gap:10px"><button class="btn-danger" onclick="rejectProduct()" style="flex:1">Reject Product</button><button class="btn-primary" onclick="saveProduct()" style="flex:1">Save Product</button></div></div>\';',
+'  let html='<div class="card"><h3>Basic Info</h3>'+',
+'    '<div class="field"><label>Title</label><input id="eTitle" value="'+escapeHtml(p.title||"")+'"></div>'+',
+'    '<div class="field"><label>Brand</label><input id="eBrand" value="'+escapeHtml(p.brand||"")+'"></div>'+',
+'    '<div class="field"><label>Category</label><input id="eCategory" value="'+escapeHtml(p.category||"")+'"></div>'+',
+'    '<div class="field-row"><div class="field"><label>Price</label><input id="ePrice" value="'+escapeHtml((p.price&&p.price.current)?p.price.current:"")+'"></div><div class="field" style="width:100px"><label>Currency</label><select id="eCurrency">'+',
+'      '<option '+(p.price&&p.price.currency==="USD"?"selected":"")+'>USD</option>'+',
+'      '<option '+(p.price&&p.price.currency==="EUR"?"selected":"")+'>EUR</option>'+',
+'      '<option '+(p.price&&p.price.currency==="GBP"?"selected":"")+'>GBP</option>'+',
+'      '<option '+(p.price&&p.price.currency==="CAD"?"selected":"")+'>CAD</option>'+',
+'      '<option '+(p.price&&p.price.currency==="AUD"?"selected":"")+'>AUD</option>'+',
+'      '<option '+(p.price&&p.price.currency==="JPY"?"selected":"")+'>JPY</option>'+',
+'    '</select></div></div>'+',
+'    '<div class="field"><label>Base Price</label><input id="eBasePrice" value="'+escapeHtml(p.basePrice||"")+'"></div>'+',
+'    '<div class="field"><label>Availability</label><select id="eAvail"><option '+(p.availability==="In stock"?"selected":"")+'>In stock</option><option '+(p.availability==="Out of stock"?"selected":"")+'>Out of stock</option><option '+(p.availability==="Pre-order"?"selected":"")+'>Pre-order</option></select></div>'+',
+'    '<div class="field"><label>Sizes (comma separated)</label><input id="eSizes" value="'+escapeHtml((p.sizing||[]).join(", "))+'"></div>'+',
+'    '<div class="field"><label>Description</label><textarea id="eDesc">'+escapeHtml(p.description||"")+'</textarea></div>'+',
+'    '<div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">'+escapeHtml(p.sizingGuide||"")+'</textarea></div>'+',
+'    '<div class="field"><label>Shipping & Returns</label><textarea id="eShipping">'+escapeHtml(p.shippingAndReturns||"")+'</textarea></div>'+',
+'  '</div>'+',
+'  '<div class="card"><h3>Images &mdash; Tap to select</h3><div class="img-grid" id="eImgGrid"></div><button class="btn-ghost" onclick="addImage()" style="width:100%;margin-top:8px">+ Add Image URL</button></div>'+',
+'  '<div class="card"><h3>Sources</h3><div id="eSrcList"></div><button class="btn-ghost" onclick="addSource()" style="width:100%;margin-top:8px">+ Add Source</button></div>'+',
+'  '<div class="card"><h3>Actions</h3><div style="display:flex;gap:10px"><button class="btn-danger" onclick="rejectProduct()" style="flex:1">Reject Product</button><button class="btn-primary" onclick="saveProduct()" style="flex:1">Save Product</button></div></div>';',
 '  document.getElementById("eBody").innerHTML=html;',
 '  renderImgGrid(allImages.urls,selectedSet,allImages.sourceUrls);',
 '  renderSrcList(p);',
@@ -280,11 +330,11 @@ const REVIEW_UI_HTML = [
 
 'function renderImgGrid(urls,selectedSet,sourceUrls){',
 '  const grid=document.getElementById("eImgGrid");',
-'  if(!urls.length){grid.innerHTML=\'<div class="empty" style="grid-column:1/-1">No images available</div>\';return;}',
+'  if(!urls.length){grid.innerHTML='<div class="empty" style="grid-column:1/-1">No images available</div>';return;}',
 '  grid.innerHTML=urls.map(function(url){',
 '    const isOn=selectedSet.has(url);',
 '    const isFromSource=sourceUrls.has(url);',
-'    return \'<div class="img-cell \'+(isOn?"on":"")+\'" data-source="\'+isFromSource+\'" onclick="this.classList.toggle(\\\'on\\\')"><img src="\'+escapeHtml(url)+\'" loading="lazy" alt=""><div class="check">&#10003;</div></div>\';',
+'    return '<div class="img-cell '+(isOn?"on":"")+'" data-source="'+isFromSource+'" onclick="this.classList.toggle('on')"><img src="'+escapeHtml(url)+'" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">&#10003;</div></div>';',
 '  }).join("");',
 '}',
 
@@ -293,7 +343,7 @@ const REVIEW_UI_HTML = [
 '  const grid=document.getElementById("eImgGrid");',
 '  const empty=grid.querySelector(".empty");if(empty)empty.remove();',
 '  const div=document.createElement("div");div.className="img-cell on";div.dataset.source="false";',
-'  div.innerHTML=\'<img src="\'+escapeHtml(url)+\'" loading="lazy" alt=""><div class="check">&#10003;</div>\';',
+'  div.innerHTML='<img src="'+escapeHtml(url)+'" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">&#10003;</div>';',
 '  div.onclick=function(){this.classList.toggle("on");};',
 '  grid.appendChild(div);',
 '}',
@@ -303,13 +353,13 @@ const REVIEW_UI_HTML = [
 '  const all=[];',
 '  (p.sources||[]).forEach(function(s,i){all.push({store:s.store,url:s.url,price:s.price,availability:s.availability,idx:i,type:"ai",images:s.images});});',
 '  (p.customSources||[]).forEach(function(s,i){all.push({store:s.store,url:s.url,price:s.price,availability:s.availability,idx:i,type:"custom",images:s.images});});',
-'  if(!all.length){list.innerHTML=\'<div class="empty">No sources</div>\';return;}',
+'  if(!all.length){list.innerHTML='<div class="empty">No sources</div>';return;}',
 '  list.innerHTML=all.map(function(s){',
 '    const imagesAttr=s.images&&s.images.length?encodeURIComponent(JSON.stringify(s.images)):"";',
-'    return \'<div class="src-row" data-type="\'+s.type+\'" data-idx="\'+s.idx+\'" data-images="\'+imagesAttr+\'">\'+',
-'      \'<div class="info"><div class="name">\'+escapeHtml(s.store||"Unknown")+(s.type==="ai"?" <span style=\\\'opacity:.5\\\'>AI</span>":" <span style=\\\'opacity:.5\\\'>Custom</span>")+\'</div><div class="url">\'+escapeHtml(s.url)+\'</div></div>\'+',
-'      \'<div class="actions"><button class="btn-secondary" onclick="window.open(\\\'\'+escapeHtml(s.url)+\'\\\',\\\'_blank\\\')">Visit</button><button class="btn-ghost" onclick="validateSource(this)">Check</button><button class="btn-danger" onclick="removeSource(this)">Remove</button></div>\'+',
-'    \'</div>\';',
+'    return '<div class="src-row" data-type="'+s.type+'" data-idx="'+s.idx+'" data-images="'+imagesAttr+'">'+',
+'      '<div class="info"><div class="name">'+escapeHtml(s.store||"Unknown")+(s.type==="ai"?" <span style=\'opacity:.5\'>AI</span>":" <span style=\'opacity:.5\'>Custom</span>")+'</div><div class="url">'+escapeHtml(s.url)+'</div></div>'+',
+'      '<div class="actions"><a href="'+escapeHtml(s.url)+'" target="_blank" rel="noopener">Visit</a><button class="btn-danger" onclick="removeSource(this)">Remove</button></div>'+',
+'    '</div>';',
 '  }).join("");',
 '}',
 
@@ -320,21 +370,8 @@ const REVIEW_UI_HTML = [
 '  const list=document.getElementById("eSrcList");',
 '  const empty=list.querySelector(".empty");if(empty)empty.remove();',
 '  const div=document.createElement("div");div.className="src-row";div.dataset.type="custom";div.dataset.idx="new";div.dataset.images="";',
-'  div.innerHTML=\'<div class="info"><div class="name">\'+escapeHtml(store)+\' <span style="opacity:.5">Custom</span></div><div class="url">\'+escapeHtml(url)+\'</div></div><div class="actions"><button class="btn-secondary" onclick="window.open(\\\'\'+escapeHtml(url)+\'\\\',\\\'_blank\\\')">Visit</button><button class="btn-ghost" onclick="validateSource(this)">Check</button><button class="btn-danger" onclick="removeSource(this)">Remove</button></div>\';',
+'  div.innerHTML='<div class="info"><div class="name">'+escapeHtml(store)+' <span style="opacity:.5">Custom</span></div><div class="url">'+escapeHtml(url)+'</div></div><div class="actions"><a href="'+escapeHtml(url)+'" target="_blank" rel="noopener">Visit</a><button class="btn-danger" onclick="removeSource(this)">Remove</button></div>';',
 '  list.appendChild(div);',
-'}',
-
-'async function validateSource(btn){',
-'  const row=btn.closest(".src-row");',
-'  const url=row.querySelector(".url").textContent;',
-'  btn.textContent="...";btn.disabled=true;',
-'  try{',
-'    const r=await fetch("/api/validate-source",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:url})});',
-'    const data=await r.json();',
-'    if(data.ok){btn.textContent="OK";btn.style.background="#4ade80";btn.style.color="#000";}',
-'    else{btn.textContent="FAIL";btn.style.background="#dc2626";}',
-'  }catch(e){btn.textContent="ERR";btn.style.background="#f59e0b";}',
-'  setTimeout(function(){btn.textContent="Check";btn.disabled=false;btn.style.background="";btn.style.color="";},2000);',
 '}',
 
 'async function saveProduct(){',
@@ -398,7 +435,7 @@ const REVIEW_UI_HTML = [
 '    const body={docId:state.current._id,fileIdx:state.current.fileIdx,frameIdx:state.current.frameIdx};',
 '    const r=await fetch("/api/commit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});',
 '    if(!r.ok)throw new Error("Commit failed");',
-'    toast("Committed");state.queue.splice(state.current._queueIdx,1);showQueue();renderQueue();',
+'    toast("Committed");showQueue();await loadQueue();',
 '  }catch(e){toast("Commit failed: "+e.message);}',
 '}',
 
@@ -408,7 +445,7 @@ const REVIEW_UI_HTML = [
 '    const body={docId:state.current._id,fileIdx:state.current.fileIdx,frameIdx:state.current.frameIdx};',
 '    const r=await fetch("/api/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});',
 '    if(!r.ok)throw new Error("Delete failed");',
-'    toast("Deleted");state.queue.splice(state.current._queueIdx,1);showQueue();renderQueue();',
+'    toast("Deleted");showQueue();await loadQueue();',
 '  }catch(e){toast("Delete failed: "+e.message);}',
 '}',
 
@@ -490,16 +527,17 @@ async function buildQueue(collection) {
         ]
     }).project({ post_id: 1, file_urls: 1 }).limit(100).toArray();
 
-    const queue = [];
+    const grouped = {};
     for (const post of posts) {
         if (!Array.isArray(post.file_urls)) continue;
+        const postItems = [];
         for (let i = 0; i < post.file_urls.length; i++) {
             const f = post.file_urls[i];
             if (!f || f.discarded) continue;
 
             if (f.type === 'image') {
                 if (f.reviewed && !f.humanReviewed) {
-                    queue.push({
+                    postItems.push({
                         _id: post._id.toString(),
                         postId: post.post_id,
                         fileIdx: i,
@@ -513,7 +551,7 @@ async function buildQueue(collection) {
                 for (let j = 0; j < f.frames.length; j++) {
                     const frame = f.frames[j];
                     if (frame && frame.reviewed && !frame.humanReviewed && !frame.discarded) {
-                        queue.push({
+                        postItems.push({
                             _id: post._id.toString(),
                             postId: post.post_id,
                             fileIdx: i,
@@ -526,8 +564,17 @@ async function buildQueue(collection) {
                 }
             }
         }
+        if (postItems.length > 0) {
+            grouped[post.post_id] = {
+                postId: post.post_id,
+                _id: post._id.toString(),
+                items: postItems
+            };
+        }
     }
-    return queue;
+
+    const items = Object.values(grouped).flatMap(g => g.items);
+    return { posts: grouped, items };
 }
 
 async function checkDone(collection) {
@@ -560,29 +607,28 @@ async function checkDone(collection) {
     return remaining;
 }
 
-async function validateSourceUrl(url) {
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
-        const resp = await fetch(url, {
-            redirect: 'follow',
-            signal: controller.signal,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            }
-        });
-        clearTimeout(timeout);
-        const text = await resp.text();
-        const titleMatch = text.match(/<title[^>]*>([^<]*)<\/title>/i);
-        return {
-            ok: resp.ok,
-            status: resp.status,
-            url,
-            title: titleMatch ? titleMatch[1].trim().slice(0, 100) : null
-        };
-    } catch (err) {
-        return { ok: false, error: err.message, url };
+async function maybeDiscardEmptyPost(collection, docId) {
+    const post = await collection.findOne(
+        { _id: new ObjectId(docId) },
+        { projection: { file_urls: 1, post_id: 1 } }
+    );
+    if (!post || !post.file_urls) return;
+
+    const hasRemaining = post.file_urls.some(f => {
+        if (f.discarded) return false;
+        if (f.type === 'image') return true;
+        if (f.type === 'video' && Array.isArray(f.frames)) {
+            return f.frames.some(fr => !fr.discarded);
+        }
+        return false;
+    });
+
+    if (!hasRemaining) {
+        await collection.updateOne(
+            { _id: new ObjectId(docId) },
+            { $set: { discarded: true, discardedAt: new Date(), discardReason: 'all file_urls removed' } }
+        );
+        log('info', `Auto-discarded empty post ${post.post_id}`);
     }
 }
 
@@ -633,7 +679,7 @@ async function startNgrok(port) {
             log('warn', 'ngrok API fallback failed:', e.message);
         }
 
-        log('warn', 'ngrok started but no URL captured — check your NGROK_AUTHTOKEN');
+        log('warn', 'ngrok started but no URL captured');
         ngrok.kill();
         return null;
     } catch (err) {
@@ -674,14 +720,12 @@ async function main() {
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
         if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
-        // ── UI ──
         if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(REVIEW_UI_HTML);
             return;
         }
 
-        // ── GET /api/queue ──
         if (parsed.pathname === '/api/queue' && req.method === 'GET') {
             try {
                 const q = await buildQueue(collection);
@@ -694,7 +738,6 @@ async function main() {
             return;
         }
 
-        // ── GET /api/item/:docId/:fileIdx/:frameIdx? ──
         const itemMatch = parsed.pathname.match(/^\/api\/item\/([^\/]+)\/(\d+)(?:\/(\d+))?$/);
         if (itemMatch && req.method === 'GET') {
             try {
@@ -746,7 +789,6 @@ async function main() {
             return;
         }
 
-        // ── POST /api/product ──
         if (parsed.pathname === '/api/product' && req.method === 'POST') {
             let body = '';
             req.on('data', d => body += d);
@@ -792,7 +834,6 @@ async function main() {
             return;
         }
 
-        // ── POST /api/commit ──
         if (parsed.pathname === '/api/commit' && req.method === 'POST') {
             let body = '';
             req.on('data', d => body += d);
@@ -823,7 +864,6 @@ async function main() {
             return;
         }
 
-        // ── POST /api/delete ──
         if (parsed.pathname === '/api/delete' && req.method === 'POST') {
             let body = '';
             req.on('data', d => body += d);
@@ -841,6 +881,8 @@ async function main() {
                         { $set: { [`${path}.discarded`]: true } }
                     );
 
+                    await maybeDiscardEmptyPost(collection, docId);
+
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ ok: true }));
 
@@ -849,24 +891,6 @@ async function main() {
                 } catch (e) {
                     res.writeHead(500);
                     res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
-        }
-
-        // ── POST /api/validate-source ──
-        if (parsed.pathname === '/api/validate-source' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
-            req.on('end', async () => {
-                try {
-                    const data = JSON.parse(body);
-                    const result = await validateSourceUrl(data.url);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(result));
-                } catch (e) {
-                    res.writeHead(500);
-                    res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
             });
             return;
