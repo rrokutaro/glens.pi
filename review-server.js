@@ -3,6 +3,8 @@
  *
  * Production human review server for the UGC dropship pipeline.
  * Grouped by post, virtualized rendering, lazy-loaded images, mobile-first.
+ * 
+ * Auto-flattens nested AI sources into independent 1-to-1 products for dropshipping.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456)
@@ -125,13 +127,6 @@ a:active{opacity:.7}
 .img-cell img{width:100%;height:100%;object-fit:cover}
 .img-cell .check{position:absolute;top:6px;right:6px;width:24px;height:24px;background:var(--accent);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:14px;color:#000;font-weight:700}
 .img-cell.on .check{display:flex}
-.src-row{display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg);border-radius:10px;margin-bottom:8px}
-.src-row .info{flex:1;min-width:0}
-.src-row .name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.src-row .url{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.src-row .actions{display:flex;gap:6px;flex-shrink:0}
-.src-row a,.src-row button{padding:8px 12px;font-size:12px;min-height:36px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
-.src-row a{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
 .field-row{display:flex;gap:10px}
@@ -277,7 +272,6 @@ function renderQueue() {
     const pending = items.filter(it => it.status === "pending" || it.status === "partial").length;
     const thumb = items[0] ? items[0].thumb : "";
     
-    // We escape variables evaluated by Node by using \\\${...} so they make it to the browser intact.
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
@@ -352,14 +346,15 @@ function renderItem() {
   
   list.innerHTML = prods.map((p, i) => {
     const color = p.reviewStatus === "completed" ? "var(--success)" : p.reviewStatus === "rejected" ? "var(--danger)" : "var(--warn)";
-    const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.sources && p.sources[0] && p.sources[0].images && p.sources[0].images[0]));
-    
+    const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
+    const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
+
     return \`
       <div class="p-card" onclick="openProduct(\${i})">
         <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy">\` : \`<div class="no-img">No img</div>\`}</div>
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "Untitled")}</div>
-          <div class="p-brand">\${escapeHtml(p.brand || "Unknown")} &middot; \${escapeHtml(formatPrice(p.price))}</div>
+          <div class="p-brand" style="color: var(--accent); font-weight: 500;">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
           <div class="p-status"><span class="dot" style="background:\${color}"></span>\${p.reviewStatus || "pending"}</div>
         </div>
       </div>
@@ -368,24 +363,22 @@ function renderItem() {
 }
 
 function getAllImages(p) {
-  const sourceUrls = new Set();
   const allUrls = new Set();
   
+  // Make the scraped post image/frame available by default 
   if (state.current && state.current.url) {
     allUrls.add(state.current.url);
   }
 
-  (p.sources || []).forEach(s => {
-    (s.images || []).forEach(u => {
-      const url = getImageUrl(u);
-      if (url) { sourceUrls.add(url); allUrls.add(url); }
-    });
+  (p.images || []).forEach(u => {
+    const url = getImageUrl(u);
+    if (url) allUrls.add(url);
   });
   
   (p.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
   (p.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
   
-  return { urls: Array.from(allUrls), sourceUrls };
+  return { urls: Array.from(allUrls) };
 }
 
 function openProduct(idx) {
@@ -401,8 +394,18 @@ function openProduct(idx) {
     </div>
     <div class="card">
       <h3>Basic Info</h3>
-      <div class="field"><label>Title</label><input id="eTitle" value="\${escapeHtml(p.title || "")}"></div>
-      <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
+      <div class="field"><label>Product Title</label><input id="eTitle" value="\${escapeHtml(p.title || "")}"></div>
+      
+      <div class="field-row">
+        <div class="field"><label>Store / Supplier Name</label><input id="eStore" value="\${escapeHtml(p.store || "")}"></div>
+        <div class="field"><label>Brand (Optional)</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
+      </div>
+
+      <div class="field-row" style="align-items: flex-end;">
+        <div class="field" style="flex: 1;"><label>Supplier URL</label><input id="eUrl" value="\${escapeHtml(p.url || "")}"></div>
+        \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="height:44px; display:flex; align-items:center; margin-bottom:14px; border-radius:10px;">Visit</a>\` : ''}
+      </div>
+
       <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(p.category || "")}"></div>
       <div class="field-row">
         <div class="field"><label>Price</label><input id="ePrice" value="\${escapeHtml((p.price && p.price.current) ? p.price.current : "")}"></div>
@@ -455,11 +458,6 @@ function openProduct(idx) {
       <button class="btn-ghost" onclick="addImage()" style="width:100%;margin-top:8px">+ Add Image URL</button>
     </div>
     <div class="card">
-      <h3>Sources</h3>
-      <div id="eSrcList"></div>
-      <button class="btn-ghost" onclick="addSource()" style="width:100%;margin-top:8px">+ Add Source</button>
-    </div>
-    <div class="card">
       <h3>Actions</h3>
       <div style="display:flex;gap:10px">
         <button class="btn-danger" onclick="rejectProduct()" style="flex:1">Reject Product</button>
@@ -469,12 +467,11 @@ function openProduct(idx) {
   \`;
   
   document.getElementById("eBody").innerHTML = html;
-  renderImgGrid(allImages.urls, selectedSet, allImages.sourceUrls);
-  renderSrcList(p);
+  renderImgGrid(allImages.urls, selectedSet);
   showScreen("editor");
 }
 
-function renderImgGrid(urls, selectedSet, sourceUrls) {
+function renderImgGrid(urls, selectedSet) {
   const grid = document.getElementById("eImgGrid");
   if (!urls.length) {
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1">No images available</div>';
@@ -483,9 +480,8 @@ function renderImgGrid(urls, selectedSet, sourceUrls) {
   
   grid.innerHTML = urls.map(url => {
     const isOn = selectedSet.has(url);
-    const isFromSource = sourceUrls.has(url);
     return \`
-      <div class="img-cell \${isOn ? 'on' : ''}" data-source="\${isFromSource}" onclick="this.classList.toggle('on')">
+      <div class="img-cell \${isOn ? 'on' : ''}" onclick="this.classList.toggle('on')">
         <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
         <div class="check">&#10003;</div>
       </div>
@@ -502,69 +498,9 @@ function addImage() {
   
   const div = document.createElement("div");
   div.className = "img-cell on";
-  div.dataset.source = "false";
   div.innerHTML = \`<img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">&#10003;</div>\`;
   div.onclick = function() { this.classList.toggle("on"); };
   grid.appendChild(div);
-}
-
-function renderSrcList(p) {
-  const list = document.getElementById("eSrcList");
-  const all = [];
-  
-  (p.sources || []).forEach((s, i) => { all.push({ store: s.store, url: s.url, price: s.price, availability: s.availability, idx: i, type: "ai", images: s.images }); });
-  (p.customSources || []).forEach((s, i) => { all.push({ store: s.store, url: s.url, price: s.price, availability: s.availability, idx: i, type: "custom", images: s.images }); });
-  
-  if (!all.length) {
-    list.innerHTML = '<div class="empty">No sources</div>';
-    return;
-  }
-  
-  list.innerHTML = all.map(s => {
-    const imagesAttr = s.images && s.images.length ? encodeURIComponent(JSON.stringify(s.images)) : "";
-    return \`
-      <div class="src-row" data-type="\${s.type}" data-idx="\${s.idx}" data-images="\${imagesAttr}">
-        <div class="info">
-          <div class="name">\${escapeHtml(s.store || "Unknown")}\${s.type === "ai" ? ' <span style="opacity:.5">AI</span>' : ' <span style="opacity:.5">Custom</span>'}</div>
-          <div class="url">\${escapeHtml(s.url)}</div>
-        </div>
-        <div class="actions">
-          <a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener">Visit</a>
-          <button class="btn-danger" onclick="removeSource(this)">Remove</button>
-        </div>
-      </div>
-    \`;
-  }).join("");
-}
-
-function removeSource(btn) {
-  btn.closest(".src-row").remove();
-}
-
-function addSource() {
-  const url = prompt("Paste product source URL:");
-  if (!url) return;
-  const store = prompt("Store name (optional):") || "Custom";
-  const list = document.getElementById("eSrcList");
-  const empty = list.querySelector(".empty");
-  if (empty) empty.remove();
-  
-  const div = document.createElement("div");
-  div.className = "src-row";
-  div.dataset.type = "custom";
-  div.dataset.idx = "new";
-  div.dataset.images = "";
-  div.innerHTML = \`
-    <div class="info">
-      <div class="name">\${escapeHtml(store)} <span style="opacity:.5">Custom</span></div>
-      <div class="url">\${escapeHtml(url)}</div>
-    </div>
-    <div class="actions">
-      <a href="\${escapeHtml(url)}" target="_blank" rel="noopener">Visit</a>
-      <button class="btn-danger" onclick="removeSource(this)">Remove</button>
-    </div>
-  \`;
-  list.appendChild(div);
 }
 
 async function saveProduct() {
@@ -572,6 +508,8 @@ async function saveProduct() {
   const p = state.current.response.products[idx];
   
   p.title = document.getElementById("eTitle").value;
+  p.store = document.getElementById("eStore").value;
+  p.url = document.getElementById("eUrl").value;
   p.brand = document.getElementById("eBrand").value;
   p.category = document.getElementById("eCategory").value;
   p.price = { current: document.getElementById("ePrice").value, currency: document.getElementById("eCurrency").value };
@@ -602,27 +540,17 @@ async function saveProduct() {
   p.selectedImages = [];
   p.customImages = [];
   
+  // Since we flattened sources, we treat all newly manually added grid images as custom Images
+  // and everything they select as selectedImages
   cells.forEach(c => {
     const img = c.querySelector("img").src;
     if (c.classList.contains("on")) {
       p.selectedImages.push(img);
-      if (c.dataset.source !== "true") p.customImages.push(img);
     }
-  });
-  
-  const srcRows = document.querySelectorAll("#eSrcList .src-row");
-  p.sources = [];
-  p.customSources = [];
-  
-  srcRows.forEach(row => {
-    const url = row.querySelector(".url").textContent;
-    const name = row.querySelector(".name").childNodes[0].textContent.trim();
-    const imagesAttr = row.getAttribute("data-images");
-    const images = imagesAttr ? JSON.parse(decodeURIComponent(imagesAttr)) : [{ url: url, width: 0, height: 0, alt: "", score: 0, similarity: 0, weighted_score: 0 }];
-    const obj = { store: name, url: url, price: null, availability: null, images: images };
-    
-    if (row.dataset.type === "ai") p.sources.push(obj); 
-    else p.customSources.push(obj);
+    // Very simple heuristic: if it wasn't in the original p.images, it's custom.
+    if (!p.images.includes(img)) {
+       p.customImages.push(img);
+    }
   });
   
   p.reviewStatus = "completed";
@@ -646,7 +574,6 @@ function rejectProduct() {
   p.reviewStatus = "rejected";
   p.selectedImages = [];
   p.customImages = [];
-  p.customSources = [];
   saveProduct();
 }
 
@@ -691,8 +618,79 @@ loadQueue();
 </html>`;
 
 /* -------------------------------------------------------------------------- */
-/* MONGODB HELPERS                                                            */
+/* MONGODB HELPERS & AUTO-MIGRATION (FLATTENING)                              */
 /* -------------------------------------------------------------------------- */
+
+function resolvePrice(basePriceObj, sourcePriceStr) {
+    if (!sourcePriceStr) return basePriceObj;
+    return {
+        current: String(sourcePriceStr),
+        original: basePriceObj?.original || null,
+        currency: basePriceObj?.currency || 'USD'
+    };
+}
+
+/**
+ * Flattens the old AI schema (1 product -> many sources/alternatives)
+ * into a 1-to-1 array (1 product = 1 source/url).
+ */
+function flattenProducts(products) {
+    let modified = false;
+    const flattened = [];
+
+    for (const p of products) {
+        if (p.isFlattened) {
+            flattened.push(p);
+            continue;
+        }
+        modified = true;
+
+        const base = { ...p, isFlattened: true, reviewStatus: p.reviewStatus || 'pending' };
+        delete base.sources;
+        delete base.customSources;
+        delete base.alternatives;
+
+        let variantsAdded = 0;
+
+        const allSources = [
+            ...(Array.isArray(p.sources) ? p.sources : []),
+            ...(Array.isArray(p.customSources) ? p.customSources : [])
+        ];
+
+        allSources.forEach(s => {
+            flattened.push({
+                ...base,
+                store: s.store || '',
+                url: s.url || '',
+                price: resolvePrice(base.price, s.price),
+                availability: s.availability || base.availability,
+                images: s.images || []
+            });
+            variantsAdded++;
+        });
+
+        if (Array.isArray(p.alternatives)) {
+            p.alternatives.forEach(a => {
+                flattened.push({
+                    ...base,
+                    title: a.title || base.title,
+                    brand: a.brand || base.brand,
+                    store: a.store || 'Alternative',
+                    url: a.url || '',
+                    price: a.price ? { current: String(a.price), currency: base.price?.currency || 'USD' } : base.price,
+                    images: []
+                });
+                variantsAdded++;
+            });
+        }
+
+        if (variantsAdded === 0) {
+            flattened.push({ ...base, store: '', url: '', images: [] });
+        }
+    }
+    return { flattened, modified };
+}
+
 function normalizeResponse(item) {
     let resp = item.response;
     if (typeof resp === 'string') {
@@ -706,13 +704,6 @@ function normalizeResponse(item) {
         reviewStatus: p.reviewStatus || 'pending',
         selectedImages: p.selectedImages || [],
         customImages: p.customImages || [],
-        customSources: p.customSources || [],
-        sources: (p.sources || []).map(s => ({
-            ...s,
-            images: s.images || [],
-            price: s.price || null,
-            availability: s.availability || null
-        })),
         images: p.images || [],
         price: p.price || { current: '', original: null, currency: 'USD' },
         sizing: Array.isArray(p.sizing) ? p.sizing : (p.sizes ? String(p.sizes).split(',').map(s => s.trim()).filter(Boolean) : []),
@@ -727,10 +718,13 @@ function normalizeResponse(item) {
 
 function getItemStatus(item) {
     const resp = normalizeResponse(item);
-    const products = resp.products;
-    if (!products.length) return 'pending';
-    const allDone = products.every(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
-    const someDone = products.some(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
+    
+    // Auto-flatten purely in memory for status calculation so the queue reflects the correct state
+    const { flattened } = flattenProducts(resp.products);
+    
+    if (!flattened.length) return 'pending';
+    const allDone = flattened.every(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
+    const someDone = flattened.some(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
     if (allDone) return 'done';
     if (someDone) return 'partial';
     return 'pending';
@@ -1006,6 +1000,23 @@ async function main() {
                 }
 
                 const response = normalizeResponse(item);
+                
+                // BACKWARD COMPATIBILITY: Auto-flatten if necessary and write immediately to DB so indices lock in place.
+                const { flattened, modified } = flattenProducts(response.products);
+                if (modified) {
+                    log('info', `Auto-flattening legacy schema for doc ${docId}`);
+                    response.products = flattened;
+                    
+                    const updatePath = frameIdx !== null 
+                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products` 
+                        : `file_urls.${fileIdx}.response.products`;
+                    
+                    await collection.updateOne(
+                        { _id: new ObjectId(docId) },
+                        { $set: { [updatePath]: flattened } }
+                    );
+                }
+
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
                     _id: post._id.toString(),
@@ -1039,6 +1050,8 @@ async function main() {
                         { _id: new ObjectId(docId) },
                         { $set: {
                             [`${basePath}.title`]: product.title,
+                            [`${basePath}.store`]: product.store,
+                            [`${basePath}.url`]: product.url,
                             [`${basePath}.brand`]: product.brand,
                             [`${basePath}.category`]: product.category,
                             [`${basePath}.description`]: product.description,
@@ -1051,11 +1064,11 @@ async function main() {
                             [`${basePath}.shippingAndReturns`]: product.shippingAndReturns,
                             [`${basePath}.recommendedMarkup`]: product.recommendedMarkup,
                             [`${basePath}.recommendedShippingRate`]: product.recommendedShippingRate,
-                            [`${basePath}.sources`]: product.sources,
-                            [`${basePath}.customSources`]: product.customSources,
+                            [`${basePath}.images`]: product.images,
                             [`${basePath}.selectedImages`]: product.selectedImages,
                             [`${basePath}.customImages`]: product.customImages,
                             [`${basePath}.reviewStatus`]: product.reviewStatus,
+                            [`${basePath}.isFlattened`]: product.isFlattened,
                             [`${basePath}.reviewedAt`]: new Date()
                         }}
                     );
