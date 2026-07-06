@@ -89,7 +89,7 @@ body {
 }
 
 /* Typography Overrides */
-h1, h2, h3, .badge, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
+h1, h2, h3, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -156,19 +156,39 @@ a:active { opacity: 0.7; }
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   padding: 12px 16px;
-  display: flex; align-items: center; gap: 16px;
+  display: flex; align-items: center; gap: 12px;
 }
 .topbar h1 { font-size: 14px; flex: 1; margin: 0; text-align: left; }
 
 .badge {
   font-size: 10px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
+  padding: 0 8px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--text);
   color: var(--bg);
   background: var(--text);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
-.badge.pending { color: var(--text); background: var(--surface-2); }
+.badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 .badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
+
+.theme-toggle {
+  font-size: 10px;
+  padding: 0 8px;
+  height: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: transparent;
+}
 
 /* Lists & Groups */
 .post-group { border-bottom: 1px solid var(--border); margin: 0; background: var(--bg); }
@@ -259,28 +279,15 @@ a:active { opacity: 0.7; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
-/* Square Checkbox */
+/* Order Number Box */
 .img-cell .check { 
   position: absolute; top: 12px; right: 12px; 
-  width: 22px; height: 22px; border: 1px solid var(--text); background: var(--bg);
+  width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: transparent;
   transition: background 0.1s;
 }
-.img-cell.on .check { background: var(--text); border-color: var(--text); }
-
-/* Overlaid Arrow Controls */
-.overlay-ctrls {
-  position: absolute; bottom: 12px; left: 12px; right: 12px;
-  display: none; justify-content: space-between;
-  pointer-events: none;
-}
-.img-cell.on .overlay-ctrls { display: flex; }
-.overlay-ctrls button {
-  pointer-events: auto;
-  width: 32px; height: 32px; min-height: 32px; padding: 0;
-  border-radius: 50%; border: 1px solid var(--border);
-  background: var(--bg); color: var(--text);
-  display: flex; align-items: center; justify-content: center;
-}
+.img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
 /* Form fields */
 .field { margin-bottom: 16px; }
@@ -324,7 +331,7 @@ a:active { opacity: 0.7; }
     <div class="topbar">
       <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
-      <button class="btn-ghost" onclick="toggleTheme()" style="padding:0 8px; border:1px solid var(--border); font-size:11px; margin-left:8px;">THEME</button>
+      <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
     </div>
     <div id="qList"></div>
   </div>
@@ -351,7 +358,7 @@ a:active { opacity: 0.7; }
     <div class="modal-header">
       <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px;">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
-      <button class="btn-primary" onclick="saveProduct()" style="padding:8px 16px; min-height:0; font-size:12px;">SAVE</button>
+      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 16px; min-height:0; font-size:12px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
@@ -650,9 +657,9 @@ function openProduct(idx) {
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select, Paste to upload)</span></h3>
+      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select/order, Paste to upload)</span></h3>
       <div class="carousel" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px; min-height:48px;">+ ADD URL OR PASTE</button>
+      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px;">+ ADD URL OR PASTE</button>
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
@@ -760,48 +767,15 @@ function renderImgGrid(urls) {
   grid.innerHTML = urls.map(url => {
     const selIdx = state.currentSelected.indexOf(url);
     const isOn = selIdx > -1;
+    const num = isOn ? (selIdx + 1) : '';
 
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
         <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-        <div class="check"></div>
-        <div class="overlay-ctrls">
-          <button type="button" onclick="moveImgLeft(this, event)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 18l-6-6 6-6"/></svg>
-          </button>
-          <button type="button" onclick="moveImgRight(this, event)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18l6-6-6-6"/></svg>
-          </button>
-        </div>
+        <div class="check">\${num}</div>
       </div>
     \`;
   }).join("");
-}
-
-function moveImgLeft(btn, event) {
-  event.stopPropagation();
-  const cell = btn.closest('.img-cell');
-  if(cell.previousElementSibling) cell.parentNode.insertBefore(cell, cell.previousElementSibling);
-  syncSelectionOrderFromDOM();
-}
-
-function moveImgRight(btn, event) {
-  event.stopPropagation();
-  const cell = btn.closest('.img-cell');
-  if(cell.nextElementSibling) cell.parentNode.insertBefore(cell.nextElementSibling, cell);
-  syncSelectionOrderFromDOM();
-}
-
-function syncSelectionOrderFromDOM() {
-  const cells = document.querySelectorAll("#eImgGrid .img-cell");
-  const newSelected = [];
-  cells.forEach(c => {
-    if (c.classList.contains("on")) {
-      const url = c.querySelector("img").src;
-      newSelected.push(url);
-    }
-  });
-  state.currentSelected = newSelected;
 }
 
 function addImage() {
@@ -810,7 +784,7 @@ function addImage() {
   
   const p = state.current.response.products[state.editingIdx];
   p.customImages = p.customImages || [];
-  p.customImages.unshift(url);
+  p.customImages.push(url);
   state.currentSelected.push(url);
   
   renderImgGrid(getAllImages(p).urls);
@@ -842,7 +816,7 @@ document.addEventListener('paste', async (e) => {
           if (d.url) {
             const p = state.current.response.products[state.editingIdx];
             p.customImages = p.customImages || [];
-            p.customImages.unshift(d.url);
+            p.customImages.push(d.url);
             state.currentSelected.push(d.url);
             
             renderImgGrid(getAllImages(p).urls);
@@ -886,7 +860,7 @@ async function extractImages(mode) {
       
       if (newUnique.length > 0) {
         p.customImages = p.customImages || [];
-        p.customImages = [...newUnique, ...p.customImages]; // prepend
+        p.customImages = [...p.customImages, ...newUnique];
         renderImgGrid(getAllImages(p).urls);
         toast(\`EXTRACTED \${newUnique.length} NEW IMAGES\`);
       } else {
@@ -901,8 +875,6 @@ async function extractImages(mode) {
 }
 
 async function saveProduct(status = "completed") {
-  syncSelectionOrderFromDOM(); // Ensure any manual DOM moves are captured
-  
   const idx = state.editingIdx;
   const p = state.current.response.products[idx];
   
@@ -935,6 +907,9 @@ async function saveProduct(status = "completed") {
   p.sizingGuide = document.getElementById("eSizingGuide").value;
   p.shippingAndReturns = document.getElementById("eShipping").value;
   
+  // Save custom images state
+  p.customImages = p.customImages || [];
+  
   // Set ordered selection directly from state array
   p.selectedImages = [...state.currentSelected];
   
@@ -957,7 +932,6 @@ function rejectProduct() {
   const idx = state.editingIdx;
   const p = state.current.response.products[idx];
   p.selectedImages = [];
-  p.customImages = [];
   state.currentSelected = [];
   saveProduct("rejected");
 }
