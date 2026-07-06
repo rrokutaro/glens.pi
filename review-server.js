@@ -2,7 +2,7 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Native Apple Aesthetic, lazy loading, Python AI extraction.
+ * Brutalist Minimal Aesthetic (Inter), lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
@@ -43,7 +43,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Native Aesthetic + Dark Mode)                             */
+/* HTML UI                                                                    */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -112,7 +112,7 @@ button {
   transition: opacity 0.1s;
 }
 button:active { opacity: 0.6; }
-button:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); }
+button:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--border); }
 
 .btn-primary { background: var(--text); color: var(--bg); border: 1px solid var(--text); }
 .btn-primary:active { opacity: 0.8; }
@@ -289,6 +289,17 @@ a:active { opacity: 0.7; }
 }
 .img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
+/* Extraction Animation Feedback */
+@keyframes pulse-extract {
+  0% { opacity: 1; }
+  50% { opacity: 0.3; filter: grayscale(100%); }
+  100% { opacity: 1; }
+}
+.extracting {
+  animation: pulse-extract 1.5s infinite ease-in-out;
+  pointer-events: none;
+}
+
 /* Form fields */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; }
@@ -376,7 +387,7 @@ a:active { opacity: 0.7; }
 </div>
 <div class="toast" id="toast"></div>
 <script>
-const state = { queue: [], posts: {}, current: null, editingIdx: null, currentSelected: [], io: null };
+const state = { queue: [], posts: {}, current: null, editingIdx: null, currentSelected: [], currentGridUrls: [], io: null };
 
 // Theme Toggle
 function toggleTheme() {
@@ -652,14 +663,20 @@ function openProduct(idx) {
   const p = state.current.response.products[idx];
   const allImages = getAllImages(p);
   
-  // Initialize selection order array
   state.currentSelected = [...(p.selectedImages || [])];
+  
+  // Reorder for the UI: selected images first in their chosen sequence, then unselected
+  const sortedUrls = [...state.currentSelected];
+  allImages.urls.forEach(u => {
+    if (!sortedUrls.includes(u)) sortedUrls.push(u);
+  });
+  state.currentGridUrls = sortedUrls;
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select/order, Paste to upload)</span></h3>
+      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select/order)</span></h3>
       <div class="carousel" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px;">+ ADD URL OR PASTE</button>
+      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px; min-height:48px; display:flex; align-items:center; justify-content:center;">+ ADD URL</button>
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
@@ -681,8 +698,8 @@ function openProduct(idx) {
           \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+          <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
         </div>
       </div>
 
@@ -742,8 +759,9 @@ function openProduct(idx) {
   \`;
   
   document.getElementById("eBody").innerHTML = html;
-  renderImgGrid(allImages.urls);
+  renderImgGrid(state.currentGridUrls);
   showScreen("editor");
+  document.getElementById("eBody").scrollTop = 0;
 }
 
 function toggleImageSelection(url) {
@@ -753,8 +771,7 @@ function toggleImageSelection(url) {
   } else {
     state.currentSelected.push(url);
   }
-  const p = state.current.response.products[state.editingIdx];
-  renderImgGrid(getAllImages(p).urls);
+  renderImgGrid(state.currentGridUrls);
 }
 
 function renderImgGrid(urls) {
@@ -785,60 +802,24 @@ function addImage() {
   const p = state.current.response.products[state.editingIdx];
   p.customImages = p.customImages || [];
   p.customImages.push(url);
+  
   state.currentSelected.push(url);
-  
-  renderImgGrid(getAllImages(p).urls);
+  state.currentGridUrls.unshift(url);
+  renderImgGrid(state.currentGridUrls);
 }
-
-// Global Paste Listener for Image Uploads
-document.addEventListener('paste', async (e) => {
-  if (!document.getElementById('editor').classList.contains('active')) return;
-  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-  
-  for (let index in items) {
-    const item = items[index];
-    if (item.kind === 'file' && item.type.startsWith('image/')) {
-      const blob = item.getAsFile();
-      toast("UPLOADING PASTE...");
-      
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target.result;
-        try {
-          const r = await fetch('/api/upload', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64, filename: 'paste.jpg' })
-          });
-          const resText = await r.text();
-          let d;
-          try { d = JSON.parse(resText); } catch(err) { throw new Error(resText.slice(0, 100)); }
-
-          if (d.url) {
-            const p = state.current.response.products[state.editingIdx];
-            p.customImages = p.customImages || [];
-            p.customImages.push(d.url);
-            state.currentSelected.push(d.url);
-            
-            renderImgGrid(getAllImages(p).urls);
-            toast("IMAGE UPLOADED");
-          } else {
-            throw new Error(d.error || "Upload failed");
-          }
-        } catch(err) {
-          toast("ERROR: " + err.message);
-        }
-      };
-      reader.readAsDataURL(blob);
-      break; 
-    }
-  }
-});
 
 async function extractImages(mode) {
   const url = document.getElementById("eUrl").value;
   if (!url) return toast("NO URL PROVIDED");
   
-  toast("EXTRACTING... (CHECK GITHUB TERMINAL)");
+  const carousel = document.getElementById("eImgGrid");
+  const btnLazy = document.getElementById("btnExtractLazy");
+  const btnFull = document.getElementById("btnExtractFull");
+
+  if (carousel) carousel.classList.add("extracting");
+  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = mode==='lazy' ? "EXTRACTING..." : "EXTRACT (LAZY)"; }
+  if (btnFull) { btnFull.disabled = true; btnFull.innerText = mode==='full' ? "EXTRACTING..." : "EXTRACT (FULL)"; }
+  
   try {
     const r = await fetch("/api/extract", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -853,15 +834,15 @@ async function extractImages(mode) {
     
     if (d.images && d.images.length > 0) {
       const p = state.current.response.products[state.editingIdx];
-      const allUrls = getAllImages(p).urls;
       
-      // Deduplicate against existing images and limit payload to 20
-      const newUnique = d.images.filter(imgUrl => !allUrls.includes(imgUrl)).slice(0, 20);
+      const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
       
       if (newUnique.length > 0) {
         p.customImages = p.customImages || [];
-        p.customImages = [...p.customImages, ...newUnique];
-        renderImgGrid(getAllImages(p).urls);
+        p.customImages = [...newUnique, ...p.customImages];
+        state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
+        
+        renderImgGrid(state.currentGridUrls);
         toast(\`EXTRACTED \${newUnique.length} NEW IMAGES\`);
       } else {
         toast("NO NEW IMAGES FOUND (ALL DUPES)");
@@ -871,6 +852,10 @@ async function extractImages(mode) {
     }
   } catch(e) {
     toast("ERROR: " + e.message);
+  } finally {
+    if (carousel) carousel.classList.remove("extracting");
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
   }
 }
 
@@ -907,7 +892,7 @@ async function saveProduct(status = "completed") {
   p.sizingGuide = document.getElementById("eSizingGuide").value;
   p.shippingAndReturns = document.getElementById("eShipping").value;
   
-  // Save custom images state
+  // Save custom images array
   p.customImages = p.customImages || [];
   
   // Set ordered selection directly from state array
@@ -931,7 +916,6 @@ async function saveProduct(status = "completed") {
 function rejectProduct() {
   const idx = state.editingIdx;
   const p = state.current.response.products[idx];
-  p.selectedImages = [];
   state.currentSelected = [];
   saveProduct("rejected");
 }
