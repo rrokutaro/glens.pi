@@ -7,8 +7,9 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v1.1 - Polished UX, robust error handling, keyboard support,
- * selected image count + clear, refresh, ObjectId safety, Python script validation.
+ * FINAL PRODUCTION v1.2 - Polished UX, robust error handling, keyboard support,
+ * selected image count + clear, refresh, ObjectId safety, Python script validation,
+ * and strict URL deduplication during schema flattening.
  */
 
 import http from 'http';
@@ -56,7 +57,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v1.1</title>
+<title>DropShip Review • v1.2</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -318,7 +319,7 @@ a:active { opacity: 0.7; }
 .field-row .field { flex: 1; }
 
 /* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
+.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: rgba(var(--bg), 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
@@ -1179,9 +1180,15 @@ function resolvePrice(basePriceObj, sourcePriceStr) {
 function flattenProducts(products) {
     let modified = false;
     const flattened = [];
+    const seenUrls = new Set();
 
     for (const p of products) {
         if (p.isFlattened) {
+            if (p.url && seenUrls.has(p.url)) {
+                modified = true;
+                continue;
+            }
+            if (p.url) seenUrls.add(p.url);
             flattened.push(p);
             continue;
         }
@@ -1200,10 +1207,14 @@ function flattenProducts(products) {
         ];
 
         allSources.forEach(s => {
+            const url = s.url || '';
+            if (url && seenUrls.has(url)) return;
+            if (url) seenUrls.add(url);
+
             flattened.push({
                 ...base,
                 store: s.store || '',
-                url: s.url || '',
+                url: url,
                 price: resolvePrice(base.price, s.price),
                 availability: s.availability || base.availability,
                 images: s.images || []
@@ -1213,12 +1224,16 @@ function flattenProducts(products) {
 
         if (Array.isArray(p.alternatives)) {
             p.alternatives.forEach(a => {
+                const url = a.url || '';
+                if (url && seenUrls.has(url)) return;
+                if (url) seenUrls.add(url);
+
                 flattened.push({
                     ...base,
                     title: a.title || base.title,
                     brand: a.brand || base.brand,
                     store: a.store || 'Alternative',
-                    url: a.url || '',
+                    url: url,
                     price: a.price ? { current: String(a.price), currency: base.price?.currency || 'USD' } : base.price,
                     images: []
                 });
@@ -1227,7 +1242,11 @@ function flattenProducts(products) {
         }
 
         if (variantsAdded === 0) {
-            flattened.push({ ...base, store: '', url: '', images: [] });
+            const url = base.url || '';
+            if (url && seenUrls.has(url)) continue;
+            if (url) seenUrls.add(url);
+
+            flattened.push({ ...base, store: '', url: url, images: [] });
         }
     }
     return { flattened, modified };
@@ -1439,7 +1458,7 @@ async function propagateReviewToSameSources(collection, docId, sourceUrl, update
         for (let pi = 0; pi < f.response.products.length; pi++) {
           const prod = f.response.products[pi];
           if (prod.url === sourceUrl) {
-            // Found a match in another (or same) item — apply review fields
+            // Found a match in another (or same) item â€” apply review fields
             const setObj = {};
             const base = `file_urls.${fi}.response.products.${pi}`;
 
@@ -1630,7 +1649,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v1.1');
+    log('info', '  REVIEW SERVER â€” Production Human Review v1.2');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) {
