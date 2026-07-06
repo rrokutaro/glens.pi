@@ -2,10 +2,7 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Grouped by post, virtualized rendering, lazy-loaded images, mobile-first.
- * 
- * Auto-flattens nested AI sources into independent 1-to-1 products for dropshipping.
- * Features live image extraction (Crawl4AI) and clipboard paste uploads.
+ * Brutalist Monochrome Aesthetic, lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456)
@@ -44,7 +41,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Brutalist Light Mode Aesthetic)                                   */
+/* HTML UI (Brutalist Monochrome Aesthetic)                                   */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -55,21 +52,21 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <title>DropShip Review</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#ffffff;
-  --surface:#f9fafb;
-  --surface-2:#f3f4f6;
-  --border:#e5e7eb;
-  --border-focus:#f97316;
-  --text:#111827;
-  --text-2:#6b7280;
-  --accent:#f97316;
+  --surface:#ffffff;
+  --surface-2:#f4f4f4;
+  --border:#000000;
+  --border-focus:#000000;
+  --text:#000000;
+  --text-2:#666666;
+  --accent:#000000;
 }
 body {
-  font-family:'Inter', sans-serif;
+  font-family:'Space Grotesk', sans-serif;
   background:var(--bg);
   color:var(--text);
   line-height:1.4;
@@ -79,11 +76,11 @@ body {
 }
 
 /* Typography Overrides */
-h1, h2, h3, .badge, button, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
-  font-family:'JetBrains Mono', monospace;
+h1, h2, h3, .badge, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
+  font-family:'Space Mono', monospace;
   text-transform:uppercase;
-  font-weight:normal;
-  letter-spacing:-0.02em;
+  font-weight:700;
+  letter-spacing:-0.03em;
 }
 
 /* Controls */
@@ -96,16 +93,18 @@ button {
   background:var(--bg);
   color:var(--text);
   min-height:48px;
-  transition:background 0.1s, color 0.1s;
+  font-family:'Space Mono', monospace;
+  font-weight:700;
+  text-transform:uppercase;
+  transition:all 0s;
 }
-button:active { background:var(--text); color:var(--bg); border-color:var(--text); }
+button:active { background:var(--text); color:var(--bg); }
 button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
 
-.btn-primary { background:var(--accent); color:#ffffff; border-color:var(--accent); font-weight:700; }
-.btn-primary:active { background:#ea580c; border-color:#ea580c; color:#ffffff; }
-.btn-danger { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; font-weight:700; }
-.btn-danger:active { background:#dc2626; color:#ffffff; border-color:#dc2626; }
-.btn-ghost { border-color:transparent; background: transparent; color:var(--text-2); }
+.btn-primary { background:var(--text); color:var(--bg); }
+.btn-primary:active { background:var(--bg); color:var(--text); }
+.btn-danger { background:var(--bg); color:var(--text); border:1px dashed var(--border); }
+.btn-ghost { border-color:transparent; background: transparent; color:var(--text-2); border: 1px solid transparent;}
 
 input, select, textarea {
   background:var(--bg);
@@ -113,26 +112,27 @@ input, select, textarea {
   color:var(--text);
   padding:14px;
   border-radius:0;
-  font-size:14px;
-  font-family:'Inter', sans-serif;
+  font-size:15px;
+  font-family:'Space Grotesk', sans-serif;
   width:100%;
   -webkit-appearance:none;
 }
 input:focus, select:focus, textarea:focus {
   outline:none;
-  border-color:var(--border-focus);
+  background:var(--surface-2);
+  box-shadow: 4px 4px 0px 0px var(--text);
 }
 textarea { resize:vertical; min-height:100px; }
 select {
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7280'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23000'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;
   background-position:right 14px center;
   padding-right:32px;
 }
 
 img { max-width:100%; display:block; }
-a { color:var(--accent); text-decoration:underline; text-underline-offset:4px; }
-a:active { background:var(--accent); color:#fff; text-decoration:none; }
+a { color:var(--text); text-decoration:underline; text-underline-offset:4px; font-weight:700;}
+a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 
 /* Layout Screens */
 .screen { display:none; min-height:100dvh; padding-bottom:90px; }
@@ -140,142 +140,159 @@ a:active { background:var(--accent); color:#fff; text-decoration:none; }
 
 .topbar {
   position:sticky; top:0; z-index:50;
-  background:rgba(255, 255, 255, 0.95);
-  backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--border);
+  background:var(--bg);
+  border-bottom:2px solid var(--border);
   padding:12px 16px;
   display:flex; align-items:center; gap:16px;
 }
-.topbar h1 { font-size:14px; font-weight:700; flex:1; }
+.topbar h1 { font-size:16px; flex:1; margin:0;}
 
 .badge {
-  font-size:10px;
+  font-size:11px;
   padding:4px 8px;
   border:1px solid var(--border);
-  color:var(--text-2);
-  background:var(--surface);
+  color:var(--bg);
+  background:var(--text);
 }
-.badge.pending { color:var(--accent); border-color:var(--accent); background:#fff7ed; }
-.badge.partial { border-style:dashed; border-color:var(--text-2); }
-.badge.done { background:var(--text); color:var(--bg); border-color:var(--text); }
+.badge.pending { color:var(--text); background:var(--surface-2); border-style:dashed;}
+.badge.partial { background:var(--bg); color:var(--text); border-style:dotted;}
 
 /* Lists & Groups */
-.post-group { border-bottom:1px solid var(--border); margin:0; background:var(--bg); }
+.post-group { border-bottom:2px solid var(--border); margin:0; background:var(--bg); }
 .post-header {
   display:flex; align-items:center; gap:12px;
   padding:16px; cursor:pointer; user-select:none;
 }
-.post-header:active { background:var(--surface); }
+.post-header:active { background:var(--surface-2); }
 .post-thumb {
   width:48px; height:48px;
   background:var(--surface-2); flex-shrink:0; border:1px solid var(--border);
 }
 .post-thumb img { width:100%; height:100%; object-fit:cover; }
 .post-info { flex:1; min-width:0; }
-.post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700; }
-.post-meta { font-size:12px; color:var(--text-2); margin-top:2px; }
+.post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.post-meta { font-size:12px; color:var(--text-2); margin-top:2px; font-family:'Space Mono', monospace; }
 .post-chevron { width:20px; height:20px; color:var(--text); transition:transform 0.2s; }
 .post-group.open .post-chevron { transform:rotate(180deg); }
 
 .post-items { display:none; padding:0 16px 16px; border-top:1px dashed var(--border); }
-.post-group.open .post-items { display:block; margin-top:0; padding-top:16px; background:var(--surface); }
+.post-group.open .post-items { display:block; margin-top:0; padding-top:16px; background:var(--surface-2); }
 
 .item-row {
   display:flex; align-items:center; gap:12px;
   padding:12px 0; border-bottom:1px solid var(--border); cursor:pointer;
 }
 .item-row:last-child { border-bottom:none; padding-bottom:0; }
-.item-thumb { width:40px; height:56px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
+.item-thumb { width:40px; height:56px; background:var(--bg); border:1px solid var(--border); flex-shrink:0; }
 .item-thumb img { width:100%; height:100%; object-fit:cover; }
 .item-info { flex:1; min-width:0; }
-.item-type { font-size:12px; font-weight:700; }
-.item-status { font-size:10px; color:var(--text-2); margin-top:4px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
+.item-status { font-size:10px; color:var(--text-2); margin-top:4px; font-family:'Space Mono', monospace; text-transform:uppercase; }
 
 /* Hero (Review Main Image) */
-.hero { width:100%; border-bottom:1px solid var(--border); background:var(--bg); position:relative; }
-.hero img { width:100%; max-height:65vh; object-fit:cover; background:var(--surface-2); cursor:pointer; transition: object-fit 0.2s; }
+.hero { width:100%; border-bottom:2px solid var(--border); background:var(--surface-2); position:relative; }
+.hero img { width:100%; height:60vh; object-fit:cover; cursor:pointer; transition: object-fit 0s; }
 .hero-meta { padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap; background:var(--bg); border-top:1px solid var(--border); }
 
 /* Section & Cards */
 .section { padding:0; padding-bottom:100px; background:var(--bg); }
-.section h2 { font-size:14px; padding:16px; border-bottom:1px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; background:var(--surface); }
+.section h2 { font-size:16px; padding:16px; border-bottom:2px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; background:var(--bg); }
 
 .p-card {
   padding:16px; display:flex; gap:16px; cursor:pointer;
   border-bottom:1px solid var(--border); background:var(--bg);
 }
-.p-card:active { background:var(--surface); }
+.p-card:active { background:var(--surface-2); }
 .p-img { width:80px; height:106px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
 .p-img img { width:100%; height:100%; object-fit:cover; }
-.p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
+.p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; font-family:'Space Mono', monospace; }
 .p-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
-.p-title { font-size:15px; font-weight:600; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; }
-.p-status { display:flex; align-items:center; gap:8px; font-size:10px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; font-weight:700; }
+.p-title { font-size:16px; font-weight:700; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; font-family:'Space Mono', monospace;}
+.p-status { display:flex; align-items:center; gap:8px; font-size:11px; font-family:'Space Mono', monospace; font-weight:700; text-transform:uppercase; }
 
 /* Modal / Editor */
-.modal { position:fixed; inset:0; z-index:100; background:var(--surface); display:none; flex-direction:column; }
+.modal { position:fixed; inset:0; z-index:100; background:var(--bg); display:none; flex-direction:column; }
 .modal.active { display:flex; }
-.modal-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
-.modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; font-weight:700; }
+.modal-header { padding:12px 16px; border-bottom:2px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
+.modal-header h2 { font-size:16px; flex:1; text-align:center; margin:0; }
 .modal-body { flex:1; overflow-y:auto; padding:0; padding-bottom:100px; }
 
-.card { padding:20px 16px; border-bottom:1px solid var(--border); background:var(--bg); }
-.card h3 { font-size:12px; color:var(--text); margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:8px; display:block; font-weight:700; }
+.card { padding:20px 16px; border-bottom:2px solid var(--border); background:var(--bg); }
+.card h3 { font-size:14px; color:var(--text); margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:8px; display:block; }
 
-/* Carousel Images */
+/* Carousel Images - Hidden Scrollbars */
 .carousel { 
   display: flex; overflow-x: auto; gap: 12px; padding-bottom: 12px; 
-  scroll-snap-type: x mandatory; margin-bottom: 16px;
+  scroll-snap-type: x mandatory; margin-bottom: 8px;
   -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
-.carousel::-webkit-scrollbar { height: 6px; }
-.carousel::-webkit-scrollbar-track { background: var(--surface-2); }
-.carousel::-webkit-scrollbar-thumb { background: var(--border); }
+.carousel::-webkit-scrollbar { display: none; } /* Chrome, Safari, Opera */
+
 .img-cell { 
-  flex: 0 0 65%; aspect-ratio: 4/5; scroll-snap-align: center; 
-  background:var(--surface-2); position:relative; cursor:pointer; 
-  border: 2px solid transparent; 
+  flex: 0 0 65%; scroll-snap-align: center; 
+  background:var(--bg); position:relative; 
+  border: 1px solid var(--border); 
+  display: flex; flex-direction: column;
 }
-.img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.6; transition:opacity 0.2s; }
-.img-cell.on { border-color:var(--accent); }
-.img-cell.on img { opacity:1; }
+.img-cell-top {
+  width: 100%; aspect-ratio: 4/5;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.img-cell-top img { width:100%; height:100%; object-fit:cover; opacity:0.6; transition:opacity 0s; }
+.img-cell.on .img-cell-top img { opacity:1; }
+
+/* Square Checkbox */
 .img-cell .check { 
-  position:absolute; top:8px; right:8px; background:var(--accent); color:#fff; 
-  padding:4px 8px; font-size:10px; font-family:'JetBrains Mono', monospace; 
-  display:none; text-transform:uppercase; line-height:1; font-weight:700;
+  position:absolute; top:8px; right:8px; 
+  width:24px; height:24px; border:2px solid var(--text); background:transparent;
 }
-.img-cell.on .check { display:block; }
+.img-cell.on .check { background:var(--text); }
+
+/* Reorder Buttons */
+.img-cell-ctrls {
+  display: flex; width: 100%;
+}
+.img-cell-ctrls button {
+  flex: 1; border: none; min-height: 40px; font-size: 16px; padding: 0;
+  border-right: 1px solid var(--border);
+}
+.img-cell-ctrls button:last-child { border-right: none; }
+.img-cell-ctrls button.sel-btn { font-size: 11px; flex: 2; }
+.img-cell.on .img-cell-ctrls button.sel-btn { background: var(--text); color: var(--bg); }
 
 /* Form fields */
 .field { margin-bottom:16px; }
-.field label { display:block; font-size:10px; margin-bottom:8px; color:var(--text-2); font-family:'JetBrains Mono', monospace; text-transform:uppercase; letter-spacing:0.05em; font-weight:700; }
+.field label { display:block; font-size:11px; margin-bottom:8px; color:var(--text); }
 .field-row { display:flex; gap:12px; }
 .field-row .field { flex:1; }
 
 /* Sources */
-.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--surface); }
+.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--bg); }
 .src-row .info { flex:1; min-width:0; }
-.src-row .name { font-size:12px; margin-bottom:4px; font-weight:700; }
-.src-row .url { font-size:10px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'JetBrains Mono', monospace; }
+.src-row .name { font-size:13px; margin-bottom:4px; font-family:'Space Mono', monospace;}
+.src-row .url { font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'Space Mono', monospace; }
 .src-row .actions { display:flex; gap:4px; }
 .src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; background:var(--bg); color:var(--text); }
 
 /* Actions Bar */
-.actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:12px; z-index:50; }
+.actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:2px solid var(--border); display:flex; gap:12px; z-index:50; }
 .actions-bar button { flex:1; }
 
 .empty { padding:40px 16px; text-align:center; color:var(--text-2); font-size:12px; }
 
 /* Loading & Utils */
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text-2)}
-.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--bg);border-radius:0;animation:spin .8s linear infinite; background:var(--text);}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'JetBrains Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.2s; border:1px solid var(--text); font-weight:700; white-space:nowrap;}
+.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'Space Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.1s; border:1px solid var(--text); font-weight:700; white-space:nowrap; box-shadow: 4px 4px 0px 0px var(--border);}
 .toast.show { transform:translate(-50%, 0); }
 
-.lazy-img { opacity:0; transition:opacity 0.2s; }
+.lazy-img { opacity:0; transition:opacity 0s; }
 .lazy-img.loaded { opacity:1; }
 .placeholder { background:var(--surface-2); }
 </style>
@@ -283,7 +300,7 @@ a:active { background:var(--accent); color:#fff; text-decoration:none; }
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p class="empty">Loading queue...</p></div>
+    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
   </div>
   <div id="queue" class="screen">
     <div class="topbar"><h1>REVIEW QUEUE</h1><span class="badge" id="qCount">0</span></div>
@@ -291,7 +308,7 @@ a:active { background:var(--accent); color:#fff; text-decoration:none; }
   </div>
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--border);">BACK</button>
+      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--border); color:var(--text);">BACK</button>
       <h1 id="rTitle" style="text-align:center;">ITEM</h1>
       <div style="width:60px"></div>
     </div>
@@ -304,13 +321,13 @@ a:active { background:var(--accent); color:#fff; text-decoration:none; }
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" style="background:var(--bg); border:1px dashed var(--border); color:var(--text);" onclick="deleteItem()">[ DELETE ITEM ]</button>
-      <button class="btn-primary" style="background:var(--text); border:1px solid var(--text); color:var(--bg);" onclick="commitItem()">COMMIT ITEM</button>
+      <button class="btn-danger" onclick="deleteItem()">DELETE ITEM</button>
+      <button class="btn-primary" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--border);">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--border); color:var(--text);">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
       <button class="btn-primary" onclick="saveProduct()" style="padding:10px 16px; min-height:0;">SAVE</button>
     </div>
@@ -379,13 +396,16 @@ function observeImage(img) {
 async function loadQueue() {
   try {
     const r = await fetch("/api/queue");
-    const data = await r.json();
+    const resText = await r.text();
+    let data;
+    try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
+    
     state.posts = data.posts || {};
     state.queue = data.items || [];
   } catch(e) {
     state.posts = {};
     state.queue = [];
-    toast("Failed to load queue");
+    toast("ERR: " + e.message);
   }
   document.getElementById("loading").classList.remove("active");
   showScreen("queue");
@@ -398,7 +418,7 @@ function renderQueue() {
   const postIds = Object.keys(state.posts);
   
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">Nothing to review</div>';
+    list.innerHTML = '<div class="empty">EMPTY QUEUE</div>';
     document.getElementById("qCount").textContent = "0";
     return;
   }
@@ -455,7 +475,7 @@ async function openItem(_id, fileIdx, frameIdx) {
     if (!r.ok) throw new Error("Fetch failed");
     state.current = await r.json();
   } catch(e) {
-    toast("Failed to load item");
+    toast("ERR: " + e.message);
     return;
   }
   renderItem();
@@ -480,7 +500,7 @@ function renderItem() {
   const list = document.getElementById("pList");
   
   if (!prods.length) {
-    list.innerHTML = '<div class="empty">No products identified</div>';
+    list.innerHTML = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
     return;
   }
   
@@ -490,12 +510,7 @@ function renderItem() {
     
     if (p.reviewStatus === "rejected") {
       statusLabel = "REJECTED";
-      statusColor = "var(--danger)";
-    } else if (p.reviewStatus === "completed") {
-      statusLabel = "COMPLETED";
-      statusColor = "var(--success)";
-    } else {
-      statusColor = "var(--accent)";
+      statusColor = "var(--text-2)";
     }
 
     const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
@@ -540,13 +555,13 @@ function openProduct(idx) {
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select, Paste to upload)</span></h3>
+      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-family:'Space Grotesk', sans-serif;">(Paste anywhere)</span></h3>
       <div class="carousel" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px; border-radius:12px;">+ ADD URL OR PASTE HERE</button>
+      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px;">+ ADD URL OR PASTE</button>
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'JetBrains Mono', monospace;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
+      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'Space Mono', monospace;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
     </div>
     <div class="card">
       <h3>BASIC INFO</h3>
@@ -561,11 +576,11 @@ function openProduct(idx) {
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
           <input id="eUrl" value="\${escapeHtml(p.url || "")}" style="flex:1;">
-          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:12px; text-decoration:none; background:var(--surface-2);">VISIT</a>\` : ''}
+          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'Space Mono', monospace; font-size:12px; text-decoration:none; background:var(--surface-2);">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
         </div>
       </div>
 
@@ -618,7 +633,7 @@ function openProduct(idx) {
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
       <div style="display:flex;gap:12px">
-        <button class="btn-danger" onclick="rejectProduct()" style="flex:1">[ REJECT ]</button>
+        <button class="btn-danger" onclick="rejectProduct()" style="flex:1">REJECT</button>
         <button class="btn-primary" onclick="saveProduct()" style="flex:1">SAVE</button>
       </div>
     </div>
@@ -639,12 +654,29 @@ function renderImgGrid(urls, selectedSet) {
   grid.innerHTML = urls.map(url => {
     const isOn = selectedSet.has(url);
     return \`
-      <div class="img-cell \${isOn ? 'on' : ''}" onclick="this.classList.toggle('on')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-        <div class="check">SEL</div>
+      <div class="img-cell \${isOn ? 'on' : ''}">
+        <div class="img-cell-top" onclick="this.parentNode.classList.toggle('on')">
+          <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
+          <div class="check"></div>
+        </div>
+        <div class="img-cell-ctrls">
+          <button type="button" onclick="moveImgLeft(this)">&#8592;</button>
+          <button type="button" class="sel-btn" onclick="this.parentNode.parentNode.classList.toggle('on')">TOGGLE</button>
+          <button type="button" onclick="moveImgRight(this)">&#8594;</button>
+        </div>
       </div>
     \`;
   }).join("");
+}
+
+function moveImgLeft(btn) {
+  const cell = btn.closest('.img-cell');
+  if(cell.previousElementSibling) cell.parentNode.insertBefore(cell, cell.previousElementSibling);
+}
+
+function moveImgRight(btn) {
+  const cell = btn.closest('.img-cell');
+  if(cell.nextElementSibling) cell.parentNode.insertBefore(cell.nextElementSibling, cell);
 }
 
 function addImage() {
@@ -656,8 +688,17 @@ function addImage() {
   
   const div = document.createElement("div");
   div.className = "img-cell on";
-  div.innerHTML = \`<img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')"><div class="check">SEL</div>\`;
-  div.onclick = function() { this.classList.toggle("on"); };
+  div.innerHTML = \`
+    <div class="img-cell-top" onclick="this.parentNode.classList.toggle('on')">
+      <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
+      <div class="check"></div>
+    </div>
+    <div class="img-cell-ctrls">
+      <button type="button" onclick="moveImgLeft(this)">&#8592;</button>
+      <button type="button" class="sel-btn" onclick="this.parentNode.parentNode.classList.toggle('on')">TOGGLE</button>
+      <button type="button" onclick="moveImgRight(this)">&#8594;</button>
+    </div>
+  \`;
   grid.prepend(div);
 }
 
@@ -680,7 +721,10 @@ document.addEventListener('paste', async (e) => {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: base64, filename: 'paste.jpg' })
           });
-          const d = await r.json();
+          const resText = await r.text();
+          let d;
+          try { d = JSON.parse(resText); } catch(err) { throw new Error(resText.slice(0, 100)); }
+
           if (d.url) {
             const p = state.current.response.products[state.editingIdx];
             p.customImages = p.customImages || [];
@@ -708,20 +752,23 @@ async function extractImages(mode) {
   const url = document.getElementById("eUrl").value;
   if (!url) return toast("NO URL PROVIDED");
   
-  toast("EXTRACTING... (MAY TAKE A MINUTE)");
+  toast("EXTRACTING... (CHECK TERMINAL)");
   try {
     const r = await fetch("/api/extract", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, mode })
     });
-    const d = await r.json();
+    
+    const resText = await r.text();
+    let d;
+    try { d = JSON.parse(resText); } catch(err) { throw new Error(resText.slice(0, 100)); }
+
     if (d.error) throw new Error(d.error);
     
     if (d.images && d.images.length > 0) {
       const p = state.current.response.products[state.editingIdx];
       p.customImages = p.customImages || [];
-      // prepend new images
-      p.customImages = [...d.images, ...p.customImages];
+      p.customImages = [...d.images, ...p.customImages]; // prepend
       
       const allImages = getAllImages(p);
       renderImgGrid(allImages.urls, new Set(p.selectedImages));
@@ -946,7 +993,6 @@ function normalizeResponse(item) {
 function getItemStatus(item) {
     const resp = normalizeResponse(item);
     
-    // Auto-flatten purely in memory for status calculation so the queue reflects the correct state
     const { flattened } = flattenProducts(resp.products);
     
     if (!flattened.length) return 'pending';
@@ -1115,7 +1161,10 @@ async function runPythonExtractor(targetUrl, mode) {
         
         fs.writeFileSync(inFile, JSON.stringify([targetUrl]));
 
-        const args = ['ecom-image-extractor.py', '-u', inFile, '-o', outFile];
+        // Ensure we point precisely to the script in the workspace root
+        const scriptPath = path.resolve(process.cwd(), 'ecom-image-extractor.py');
+        const args = [scriptPath, '-u', inFile, '-o', outFile];
+        
         if (mode === 'lazy') {
             args.push('--lazy-extraction');
         } else {
@@ -1123,22 +1172,31 @@ async function runPythonExtractor(targetUrl, mode) {
             args.push('--adaptive-cutoff');
         }
 
+        log('info', `Running extractor (${mode}): python3 ${args.join(' ')}`);
         const proc = spawn('python3', args);
+        
         let stderr = '';
-        proc.stderr.on('data', d => stderr += d.toString());
+        proc.stdout.on('data', d => log('debug', `[PYTHON STDOUT] ${d.toString().trim()}`));
+        proc.stderr.on('data', d => {
+            const out = d.toString();
+            stderr += out;
+            log('warn', `[PYTHON STDERR] ${out.trim()}`);
+        });
 
         proc.on('close', code => {
             if (code !== 0) {
                 try { fs.unlinkSync(inFile); fs.unlinkSync(outFile); } catch(e){}
-                return reject(new Error("Extractor failed: " + stderr));
+                return reject(new Error(`Extractor crashed (code ${code}). Check logs.`));
             }
             try {
-                if (!fs.existsSync(outFile)) throw new Error("No output generated");
+                if (!fs.existsSync(outFile)) throw new Error("No output generated by python script.");
                 const resultData = JSON.parse(fs.readFileSync(outFile, 'utf8'));
                 fs.unlinkSync(inFile); fs.unlinkSync(outFile);
                 
                 const images = resultData[targetUrl] || [];
                 if (images.error) throw new Error(images.error);
+                
+                log('info', `Extraction success: ${images.length} images found.`);
                 resolve(images.map(i => i.url));
             } catch (err) {
                 reject(err);
@@ -1152,6 +1210,8 @@ async function runPythonExtractor(targetUrl, mode) {
 /* -------------------------------------------------------------------------- */
 async function startNgrok(port) {
     try {
+        const { spawn } = await import('child_process');
+        
         const ngrok = spawn('ngrok', ['http', String(port)], { stdio: 'pipe' });
 
         let url = null;
