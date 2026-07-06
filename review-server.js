@@ -318,7 +318,7 @@ a:active { opacity: 0.7; }
 .field-row .field { flex: 1; }
 
 /* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: rgba(var(--bg), 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
+.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
@@ -346,7 +346,7 @@ a:active { opacity: 0.7; }
       <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
       <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
-      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:8px 14px; font-size:11px; min-height:32px;">REFRESH</button>
+      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:0 10px; font-size:10px; min-height:24px; height:24px;">REFRESH</button>
     </div>
     <div id="qList"></div>
   </div>
@@ -371,9 +371,9 @@ a:active { opacity: 0.7; }
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
-      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 16px; font-size:12px;">SAVE</button>
+      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
@@ -391,7 +391,17 @@ a:active { opacity: 0.7; }
 </div>
 <div class="toast" id="toast"></div>
 <script>
-const state = { queue: [], posts: {}, current: null, editingIdx: null, currentSelected: [], currentGridUrls: [], io: null };
+const state = { 
+  queue: [], 
+  posts: {}, 
+  current: null, 
+  editingIdx: null, 
+  currentSelected: [], 
+  currentGridUrls: [], 
+  io: null,
+  justEditedProdIdx: null,           // for scrolling back to the card we were editing
+  formPersistKey: null               // current editor localStorage key
+};
 
 // Theme Toggle
 function toggleTheme() {
@@ -619,7 +629,7 @@ function renderItem() {
     const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
 
     return \`
-      <div class="p-card \${rejectedClass}" onclick="openProduct(\${i})">
+      <div class="p-card \${rejectedClass}" data-prod-idx="\${i}" onclick="openProduct(\${i})">
         <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
@@ -629,6 +639,18 @@ function renderItem() {
       </div>
     \`;
   }).join("");
+
+  // After returning from product editor, scroll the card we were just editing into view
+  if (state.justEditedProdIdx !== null && prods.length > state.justEditedProdIdx) {
+    const targetCard = list.querySelector(\`.p-card[data-prod-idx="\${state.justEditedProdIdx}"]\`);
+    if (targetCard) {
+      // Use requestAnimationFrame so layout is ready
+      requestAnimationFrame(() => {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+    state.justEditedProdIdx = null;
+  }
 }
 
 function openVideo(url) {
@@ -662,6 +684,85 @@ function getAllImages(p) {
   return { urls: Array.from(allUrls) };
 }
 
+// Generate stable key for persisting unsaved editor form state
+function getFormPersistKey() {
+  if (!state.current || state.editingIdx === null) return null;
+  const fid = state.current.frameIdx !== null && state.current.frameIdx !== undefined 
+    ? `f${state.current.frameIdx}` 
+    : `img${state.current.fileIdx}`;
+  return `reviewForm_${state.current._id}_${fid}_${state.editingIdx}`;
+}
+
+function saveFormToLocalStorage() {
+  const key = state.formPersistKey;
+  if (!key) return;
+  try {
+    const data = {
+      title: document.getElementById("eTitle")?.value || "",
+      store: document.getElementById("eStore")?.value || "",
+      url: document.getElementById("eUrl")?.value || "",
+      brand: document.getElementById("eBrand")?.value || "",
+      category: document.getElementById("eCategory")?.value || "",
+      price: document.getElementById("ePrice")?.value || "",
+      currency: document.getElementById("eCurrency")?.value || "",
+      basePrice: document.getElementById("eBasePrice")?.value || "",
+      availability: document.getElementById("eAvail")?.value || "",
+      markupType: document.getElementById("eMarkupType")?.value || "",
+      markupVal: document.getElementById("eMarkupVal")?.value || "",
+      shippingCost: document.getElementById("eShippingCost")?.value || "",
+      shippingCov: document.getElementById("eShippingCov")?.value || "",
+      sizes: document.getElementById("eSizes")?.value || "",
+      desc: document.getElementById("eDesc")?.value || "",
+      sizingGuide: document.getElementById("eSizingGuide")?.value || "",
+      shipping: document.getElementById("eShipping")?.value || "",
+      // Note: selectedImages & currentGridUrls are already in state, persisted via normal flow
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch(e) { /* ignore quota errors */ }
+}
+
+function restoreFormFromLocalStorage() {
+  const key = state.formPersistKey;
+  if (!key) return;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+
+    const setVal = (id, val) => { 
+      const el = document.getElementById(id); 
+      if (el && val != null) el.value = val; 
+    };
+
+    setVal("eTitle", data.title);
+    setVal("eStore", data.store);
+    setVal("eUrl", data.url);
+    setVal("eBrand", data.brand);
+    setVal("eCategory", data.category);
+    setVal("ePrice", data.price);
+    setVal("eCurrency", data.currency);
+    setVal("eBasePrice", data.basePrice);
+    setVal("eAvail", data.availability);
+    setVal("eMarkupType", data.markupType);
+    setVal("eMarkupVal", data.markupVal);
+    setVal("eShippingCost", data.shippingCost);
+    setVal("eShippingCov", data.shippingCov);
+    setVal("eSizes", data.sizes);
+    setVal("eDesc", data.desc);
+    setVal("eSizingGuide", data.sizingGuide);
+    setVal("eShipping", data.shipping);
+
+    // Optional toast so user knows we restored unsaved work
+    if (data.title || data.store) {
+      // silent restore is usually better; only toast if significant
+    }
+  } catch(e) { /* corrupted data, ignore */ }
+}
+
+function clearFormPersist(key) {
+  if (key) localStorage.removeItem(key);
+}
+
 function openProduct(idx) {
   state.editingIdx = idx;
   const p = state.current.response.products[idx];
@@ -675,6 +776,9 @@ function openProduct(idx) {
     if (!sortedUrls.includes(u)) sortedUrls.push(u);
   });
   state.currentGridUrls = sortedUrls;
+
+  // Setup persistence key for this specific product edit session
+  state.formPersistKey = getFormPersistKey();
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
@@ -772,8 +876,19 @@ function openProduct(idx) {
   
   document.getElementById("eBody").innerHTML = html;
   renderImgGrid(state.currentGridUrls);
+  updateSelCount();
   showScreen("editor");
   document.getElementById("eBody").scrollTop = 0;
+
+  // Restore any unsaved work from previous session (crash / accidental back)
+  restoreFormFromLocalStorage();
+
+  // Auto-save form state to localStorage on any change (robust against refresh/crash)
+  const editorBody = document.getElementById("eBody");
+  if (editorBody) {
+    editorBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
+    editorBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
+  }
 }
 
 function updateSelCount() {
@@ -960,6 +1075,11 @@ async function saveProduct(status = "completed") {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx, prodIdx: idx, product: p };
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
+    
+    // Clear persisted draft + remember which card to scroll back to
+    clearFormPersist(state.formPersistKey);
+    state.justEditedProdIdx = idx;
+    
     toast(status === "rejected" ? "REJECTED" : "SAVED");
     renderItem();
     closeEditor();
@@ -975,7 +1095,11 @@ function rejectProduct() {
   saveProduct("rejected");
 }
 
-function closeEditor() { showScreen("review"); }
+function closeEditor() { 
+  clearFormPersist(state.formPersistKey);
+  state.formPersistKey = null;
+  showScreen("review"); 
+}
 
 async function commitItem() {
   const prods = state.current.response && state.current.response.products ? state.current.response.products : [];
@@ -1287,6 +1411,89 @@ async function maybeDiscardEmptyPost(collection, docId) {
         );
         log('info', `Auto-discarded empty post ${post.post_id}`);
     }
+}
+
+/**
+ * When a product is reviewed, propagate the human review decisions (status, selected images,
+ * overrides) to any *other* items/frames in the SAME post that have a product with the exact
+ * same supplier URL. This prevents the reviewer from having to do duplicate work.
+ */
+async function propagateReviewToSameSources(collection, docId, sourceUrl, updatedProduct, currentFileIdx, currentFrameIdx) {
+  if (!sourceUrl) return 0; // nothing to propagate without a URL to match on
+
+  try {
+    const post = await collection.findOne(
+      { _id: new ObjectId(docId) },
+      { projection: { file_urls: 1 } }
+    );
+    if (!post || !Array.isArray(post.file_urls)) return 0;
+
+    let updatedCount = 0;
+
+    for (let fi = 0; fi < post.file_urls.length; fi++) {
+      const f = post.file_urls[fi];
+      if (!f || f.discarded) continue;
+
+      // Check main image item
+      if (f.type === 'image' && f.response && Array.isArray(f.response.products)) {
+        for (let pi = 0; pi < f.response.products.length; pi++) {
+          const prod = f.response.products[pi];
+          if (prod.url === sourceUrl) {
+            // Found a match in another (or same) item — apply review fields
+            const setObj = {};
+            const base = `file_urls.${fi}.response.products.${pi}`;
+
+            // Propagate key human decisions
+            setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
+            setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
+            setObj[`${base}.reviewedAt`] = new Date();
+            setObj[`${base}.price`] = updatedProduct.price;
+            setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
+            setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
+            setObj[`${base}.availability`] = updatedProduct.availability;
+
+            await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
+            updatedCount++;
+          }
+        }
+      }
+
+      // Check frames inside video
+      if (f.type === 'video' && Array.isArray(f.frames)) {
+        for (let fr = 0; fr < f.frames.length; fr++) {
+          const frame = f.frames[fr];
+          if (!frame || frame.discarded || !frame.response || !Array.isArray(frame.response.products)) continue;
+
+          for (let pi = 0; pi < frame.response.products.length; pi++) {
+            const prod = frame.response.products[pi];
+            if (prod.url === sourceUrl) {
+              const setObj = {};
+              const base = `file_urls.${fi}.frames.${fr}.response.products.${pi}`;
+
+              setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
+              setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
+              setObj[`${base}.reviewedAt`] = new Date();
+              setObj[`${base}.price`] = updatedProduct.price;
+              setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
+              setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
+              setObj[`${base}.availability`] = updatedProduct.availability;
+
+              await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
+              updatedCount++;
+            }
+          }
+        }
+      }
+    }
+
+    if (updatedCount > 0) {
+      log('info', `Propagated review to ${updatedCount} duplicate source(s) in same post (url: ${sourceUrl})`);
+    }
+    return updatedCount;
+  } catch (err) {
+    log('warn', 'Propagation failed:', err.message);
+    return 0;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1659,6 +1866,21 @@ async function main() {
                             [`${basePath}.reviewedAt`]: new Date()
                         }}
                     );
+
+                    // === SMART DUPLICATE PROPAGATION ===
+                    // If this product has a supplier URL, apply the same review decisions to any other
+                    // items/frames in this same post that reference the exact same source URL.
+                    // This dramatically reduces duplicate review work across frames of a reel/post.
+                    if (product.url) {
+                      propagateReviewToSameSources(
+                        collection,
+                        docId,
+                        product.url,
+                        product,
+                        fileIdx,
+                        frameIdx
+                      ).catch(e => log('warn', 'Propagation error (non-fatal):', e.message));
+                    }
 
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ ok: true }));
