@@ -46,7 +46,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy
-          pip install -U crawl4ai imagehash httpx beautifulsoup4
+          pip install -U crawl4ai imagehash httpx cloakbrowser beautifulsoup4
           playwright install-deps chromium
 
       - name: Install system dependencies
@@ -56,6 +56,18 @@ jobs:
             ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 \
             libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 \
             libpango-1.0-0 libcairo2 libxdamage1 xvfb
+
+      - name: Install CloakBrowser anti-detection fonts
+        run: |
+          sudo dpkg --configure -a
+          sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat.lock /tmp/segoe.zip
+          sudo pkill -9 apt || true
+          echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              fonts-noto-color-emoji fonts-freefont-ttf ttf-mscorefonts-installer \
+              fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf fontconfig
+          fc-cache -f -v
 
       - name: Create package.json type module
         run: |
