@@ -688,9 +688,9 @@ function getAllImages(p) {
 function getFormPersistKey() {
   if (!state.current || state.editingIdx === null) return null;
   const fid = state.current.frameIdx !== null && state.current.frameIdx !== undefined 
-    ? `f${state.current.frameIdx}` 
-    : `img${state.current.fileIdx}`;
-  return `reviewForm_${state.current._id}_${fid}_${state.editingIdx}`;
+    ? \`f\${state.current.frameIdx}\` 
+    : \`img\${state.current.fileIdx}\`;
+  return \`reviewForm_\${state.current._id}_\${fid}_\${state.editingIdx}\`;
 }
 
 function saveFormToLocalStorage() {
