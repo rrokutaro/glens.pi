@@ -15,6 +15,10 @@ on:
         description: 'MongoDB collection name'
         required: false
         default: 'scraped-posts'
+      hf_token:
+        description: 'HuggingFace Token for Video Streaming'
+        required: false
+        default: ''
       review_port:
         description: 'Port for review server'
         required: false
@@ -105,4 +109,5 @@ jobs:
           ORCH_MONGODB_COLLECTION: ${{ github.event.inputs.mongodb_collection || 'scraped-posts' }}
           REVIEW_PORT: ${{ github.event.inputs.review_port || '3456' }}
           ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || 'info' }}
+          ORCH_HF_TOKEN: ${{ github.event.inputs.hf_token || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
         run: node review-server.js
