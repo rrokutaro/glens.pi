@@ -7,9 +7,8 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v1.2 - Polished UX, robust error handling, keyboard support,
- * selected image count + clear, refresh, ObjectId safety, Python script validation,
- * and strict URL deduplication during schema flattening.
+ * FINAL PRODUCTION v1.1 - Polished UX, robust error handling, keyboard support,
+ * selected image count + clear, refresh, ObjectId safety, Python script validation.
  */
 
 import http from 'http';
@@ -57,7 +56,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v1.2</title>
+<title>DropShip Review • v1.1</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -319,7 +318,7 @@ a:active { opacity: 0.7; }
 .field-row .field { flex: 1; }
 
 /* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: rgba(var(--bg), 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
+.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
@@ -1176,22 +1175,55 @@ function resolvePrice(basePriceObj, sourcePriceStr) {
 /**
  * Flattens the old AI schema (1 product -> many sources/alternatives)
  * into a 1-to-1 array (1 product = 1 source/url).
+ * Strictly deduplicates by URL across the entire product list to prevent redundant review cards.
  */
 function flattenProducts(products) {
     let modified = false;
     const flattened = [];
-    const seenUrls = new Set();
+    
+    // Track URLs globally for this item to merge duplicates seamlessly
+    const seenUrls = new Map();
+
+    // Helper to safely merge image arrays without introducing duplicates
+    const mergeArrays = (existingItem, newItem, field, isObjectArray = false) => {
+        if (!newItem[field] || !Array.isArray(newItem[field]) || newItem[field].length === 0) return;
+        const existingArr = Array.isArray(existingItem[field]) ? existingItem[field] : [];
+        
+        const seen = new Set(existingArr.map(i => isObjectArray ? (typeof i === 'object' && i !== null ? i.url : i) : i));
+        let changed = false;
+
+        newItem[field].forEach(item => {
+            const checkVal = isObjectArray ? (typeof item === 'object' && item !== null ? item.url : item) : item;
+            if (checkVal && !seen.has(checkVal)) {
+                seen.add(checkVal);
+                existingArr.push(item);
+                changed = true;
+            }
+        });
+
+        if (changed || (!existingItem[field] && existingArr.length > 0)) {
+            existingItem[field] = existingArr;
+        }
+    };
 
     for (const p of products) {
         if (p.isFlattened) {
-            if (p.url && seenUrls.has(p.url)) {
-                modified = true;
-                continue;
+            // Deduplicate if already flattened items have overlapping URLs
+            if (p.url) {
+                if (seenUrls.has(p.url)) {
+                    const existing = seenUrls.get(p.url);
+                    mergeArrays(existing, p, 'images', true);
+                    mergeArrays(existing, p, 'customImages', false);
+                    mergeArrays(existing, p, 'selectedImages', false);
+                    modified = true;
+                    continue; // Skip adding duplicate card
+                }
+                seenUrls.set(p.url, p);
             }
-            if (p.url) seenUrls.add(p.url);
             flattened.push(p);
             continue;
         }
+        
         modified = true;
 
         const base = { ...p, isFlattened: true, reviewStatus: p.reviewStatus || 'pending' };
@@ -1199,54 +1231,56 @@ function flattenProducts(products) {
         delete base.customSources;
         delete base.alternatives;
 
-        let variantsAdded = 0;
-
         const allSources = [
             ...(Array.isArray(p.sources) ? p.sources : []),
             ...(Array.isArray(p.customSources) ? p.customSources : [])
         ];
+        
+        // Track total to know if we need to emit a blank fallback
+        const totalOriginalVariants = allSources.length + (Array.isArray(p.alternatives) ? p.alternatives.length : 0);
+
+        const addVariant = (variant) => {
+            if (variant.url) {
+                if (seenUrls.has(variant.url)) {
+                    const existing = seenUrls.get(variant.url);
+                    mergeArrays(existing, variant, 'images', true);
+                    mergeArrays(existing, variant, 'customImages', false);
+                    mergeArrays(existing, variant, 'selectedImages', false);
+                    return; // Skip adding duplicate card
+                }
+                seenUrls.set(variant.url, variant);
+            }
+            flattened.push(variant);
+        };
 
         allSources.forEach(s => {
-            const url = s.url || '';
-            if (url && seenUrls.has(url)) return;
-            if (url) seenUrls.add(url);
-
-            flattened.push({
+            addVariant({
                 ...base,
                 store: s.store || '',
-                url: url,
+                url: s.url || '',
                 price: resolvePrice(base.price, s.price),
                 availability: s.availability || base.availability,
                 images: s.images || []
             });
-            variantsAdded++;
         });
 
         if (Array.isArray(p.alternatives)) {
             p.alternatives.forEach(a => {
-                const url = a.url || '';
-                if (url && seenUrls.has(url)) return;
-                if (url) seenUrls.add(url);
-
-                flattened.push({
+                addVariant({
                     ...base,
                     title: a.title || base.title,
                     brand: a.brand || base.brand,
                     store: a.store || 'Alternative',
-                    url: url,
+                    url: a.url || '',
                     price: a.price ? { current: String(a.price), currency: base.price?.currency || 'USD' } : base.price,
                     images: []
                 });
-                variantsAdded++;
             });
         }
 
-        if (variantsAdded === 0) {
-            const url = base.url || '';
-            if (url && seenUrls.has(url)) continue;
-            if (url) seenUrls.add(url);
-
-            flattened.push({ ...base, store: '', url: url, images: [] });
+        // Only add an empty fallback if there were absolutely no sources/alternatives provided
+        if (totalOriginalVariants === 0) {
+            addVariant({ ...base, store: '', url: '', images: [] });
         }
     }
     return { flattened, modified };
@@ -1458,7 +1492,7 @@ async function propagateReviewToSameSources(collection, docId, sourceUrl, update
         for (let pi = 0; pi < f.response.products.length; pi++) {
           const prod = f.response.products[pi];
           if (prod.url === sourceUrl) {
-            // Found a match in another (or same) item â€” apply review fields
+            // Found a match in another (or same) item — apply review fields
             const setObj = {};
             const base = `file_urls.${fi}.response.products.${pi}`;
 
@@ -1649,7 +1683,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER â€” Production Human Review v1.2');
+    log('info', '  REVIEW SERVER — Production Human Review v1.1');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) {
