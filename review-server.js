@@ -1,8 +1,9 @@
+--- START OF FILE review-server.js ---
 /**
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Monochrome Aesthetic, lazy loading, Python AI extraction.
+ * Brutalist Minimal Aesthetic (Farfetch vibes), lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456)
@@ -41,7 +42,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Brutalist Monochrome Aesthetic)                                   */
+/* HTML UI (Minimalist High-Fashion Aesthetic)                                */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -58,12 +59,10 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 :root{
   --bg:#ffffff;
   --surface:#ffffff;
-  --surface-2:#f4f4f4;
-  --border:#000000;
-  --border-focus:#000000;
+  --surface-2:#fafafa;
+  --border:#e5e5e5;
   --text:#000000;
-  --text-2:#666666;
-  --accent:#000000;
+  --text-2:#757575;
 }
 body {
   font-family:'Space Grotesk', sans-serif;
@@ -75,12 +74,12 @@ body {
   -webkit-font-smoothing:antialiased;
 }
 
-/* Typography Overrides */
+/* Typography */
 h1, h2, h3, .badge, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
   font-family:'Space Mono', monospace;
   text-transform:uppercase;
   font-weight:700;
-  letter-spacing:-0.03em;
+  letter-spacing:0.02em;
 }
 
 /* Controls */
@@ -98,13 +97,13 @@ button {
   text-transform:uppercase;
   transition:all 0s;
 }
-button:active { background:var(--text); color:var(--bg); }
+button:active { background:var(--surface-2); }
 button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
 
-.btn-primary { background:var(--text); color:var(--bg); }
-.btn-primary:active { background:var(--bg); color:var(--text); }
-.btn-danger { background:var(--bg); color:var(--text); border:1px dashed var(--border); }
-.btn-ghost { border-color:transparent; background: transparent; color:var(--text-2); border: 1px solid transparent;}
+.btn-primary { background:var(--text); color:var(--bg); border:1px solid var(--text); }
+.btn-primary:active { background:#333; border-color:#333; color:var(--bg); }
+.btn-danger { background:var(--bg); color:var(--text); border:1px solid var(--border); }
+.btn-ghost { border-color:var(--text); background: transparent; color:var(--text); }
 
 input, select, textarea {
   background:var(--bg);
@@ -112,15 +111,14 @@ input, select, textarea {
   color:var(--text);
   padding:14px;
   border-radius:0;
-  font-size:15px;
+  font-size:14px;
   font-family:'Space Grotesk', sans-serif;
   width:100%;
   -webkit-appearance:none;
 }
 input:focus, select:focus, textarea:focus {
   outline:none;
-  background:var(--surface-2);
-  box-shadow: 4px 4px 0px 0px var(--text);
+  border-color:var(--text);
 }
 textarea { resize:vertical; min-height:100px; }
 select {
@@ -140,28 +138,28 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 
 .topbar {
   position:sticky; top:0; z-index:50;
-  background:var(--bg);
-  border-bottom:2px solid var(--border);
+  background:rgba(255, 255, 255, 0.98);
+  border-bottom:1px solid var(--border);
   padding:12px 16px;
   display:flex; align-items:center; gap:16px;
 }
-.topbar h1 { font-size:16px; flex:1; margin:0;}
+.topbar h1 { font-size:14px; flex:1; margin:0; text-align:center;}
 
 .badge {
-  font-size:11px;
+  font-size:10px;
   padding:4px 8px;
   border:1px solid var(--border);
   color:var(--bg);
   background:var(--text);
 }
-.badge.pending { color:var(--text); background:var(--surface-2); border-style:dashed;}
-.badge.partial { background:var(--bg); color:var(--text); border-style:dotted;}
+.badge.pending { color:var(--text); background:var(--surface-2); }
+.badge.partial { background:var(--bg); color:var(--text); border:1px dashed var(--border);}
 
 /* Lists & Groups */
-.post-group { border-bottom:2px solid var(--border); margin:0; background:var(--bg); }
+.post-group { border-bottom:1px solid var(--border); margin:0; background:var(--bg); }
 .post-header {
   display:flex; align-items:center; gap:12px;
-  padding:16px; cursor:pointer; user-select:none;
+  padding:20px 16px; cursor:pointer; user-select:none;
 }
 .post-header:active { background:var(--surface-2); }
 .post-thumb {
@@ -189,13 +187,13 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .item-status { font-size:10px; color:var(--text-2); margin-top:4px; font-family:'Space Mono', monospace; text-transform:uppercase; }
 
 /* Hero (Review Main Image) */
-.hero { width:100%; border-bottom:2px solid var(--border); background:var(--surface-2); position:relative; }
-.hero img { width:100%; height:60vh; object-fit:cover; cursor:pointer; transition: object-fit 0s; }
+.hero { width:100%; border-bottom:1px solid var(--border); background:var(--surface-2); position:relative; }
+.hero img { width:100%; height:65vh; object-fit:cover; cursor:pointer; transition: object-fit 0s; }
 .hero-meta { padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap; background:var(--bg); border-top:1px solid var(--border); }
 
 /* Section & Cards */
 .section { padding:0; padding-bottom:100px; background:var(--bg); }
-.section h2 { font-size:16px; padding:16px; border-bottom:2px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; background:var(--bg); }
+.section h2 { font-size:14px; padding:20px 16px; border-bottom:1px solid var(--border); margin:0; display:flex; justify-content:space-between; align-items:center; background:var(--bg); }
 
 .p-card {
   padding:16px; display:flex; gap:16px; cursor:pointer;
@@ -206,72 +204,69 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .p-img img { width:100%; height:100%; object-fit:cover; }
 .p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; font-family:'Space Mono', monospace; }
 .p-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
-.p-title { font-size:16px; font-weight:700; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-title { font-size:16px; font-weight:600; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; font-family:'Space Mono', monospace;}
 .p-status { display:flex; align-items:center; gap:8px; font-size:11px; font-family:'Space Mono', monospace; font-weight:700; text-transform:uppercase; }
 
 /* Modal / Editor */
 .modal { position:fixed; inset:0; z-index:100; background:var(--bg); display:none; flex-direction:column; }
 .modal.active { display:flex; }
-.modal-header { padding:12px 16px; border-bottom:2px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
-.modal-header h2 { font-size:16px; flex:1; text-align:center; margin:0; }
+.modal-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--bg); }
+.modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; }
 .modal-body { flex:1; overflow-y:auto; padding:0; padding-bottom:100px; }
 
-.card { padding:20px 16px; border-bottom:2px solid var(--border); background:var(--bg); }
-.card h3 { font-size:14px; color:var(--text); margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:8px; display:block; }
+.card { padding:24px 16px; border-bottom:1px solid var(--border); background:var(--bg); }
+.card h3 { font-size:13px; color:var(--text); margin-bottom:16px; padding-bottom:12px; display:block; border-bottom:1px dashed var(--border);}
 
-/* Carousel Images - Hidden Scrollbars */
+/* 3:4 Carousel Images */
 .carousel { 
-  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 12px; 
-  scroll-snap-type: x mandatory; margin-bottom: 8px;
+  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
+  scroll-snap-type: x mandatory; margin-bottom: 16px;
   -webkit-overflow-scrolling: touch;
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-.carousel::-webkit-scrollbar { display: none; } /* Chrome, Safari, Opera */
+.carousel::-webkit-scrollbar { display: none; }
 
 .img-cell { 
-  flex: 0 0 65%; scroll-snap-align: center; 
-  background:var(--bg); position:relative; 
-  border: 1px solid var(--border); 
-  display: flex; flex-direction: column;
+  flex: 0 0 55%; aspect-ratio: 3/4; scroll-snap-align: center; 
+  position:relative; cursor:pointer; 
+  border: 1px solid var(--border); background: var(--surface-2);
 }
-.img-cell-top {
-  width: 100%; aspect-ratio: 4/5;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  position: relative;
-}
-.img-cell-top img { width:100%; height:100%; object-fit:cover; opacity:0.6; transition:opacity 0s; }
-.img-cell.on .img-cell-top img { opacity:1; }
+.img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.4; transition:opacity 0.2s; }
+.img-cell.on img { opacity:1; }
 
 /* Square Checkbox */
 .img-cell .check { 
-  position:absolute; top:8px; right:8px; 
-  width:24px; height:24px; border:2px solid var(--text); background:transparent;
+  position:absolute; top:12px; right:12px; 
+  width:18px; height:18px; border:1px solid var(--text); background:var(--bg);
+  transition: background 0.1s;
 }
 .img-cell.on .check { background:var(--text); }
 
-/* Reorder Buttons */
-.img-cell-ctrls {
-  display: flex; width: 100%;
+/* Overlaid Arrow Controls */
+.overlay-ctrls {
+  position: absolute; bottom: 12px; left: 12px; right: 12px;
+  display: none; justify-content: space-between;
+  pointer-events: none; /* Let clicks pass through to image toggle */
 }
-.img-cell-ctrls button {
-  flex: 1; border: none; min-height: 40px; font-size: 16px; padding: 0;
-  border-right: 1px solid var(--border);
+.img-cell.on .overlay-ctrls { display: flex; }
+.overlay-ctrls button {
+  pointer-events: auto; /* Re-enable clicks on arrows */
+  width: 32px; height: 32px; min-height: 32px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--border);
+  background: rgba(255,255,255,0.9); color: var(--text);
+  display: flex; align-items: center; justify-content: center;
 }
-.img-cell-ctrls button:last-child { border-right: none; }
-.img-cell-ctrls button.sel-btn { font-size: 11px; flex: 2; }
-.img-cell.on .img-cell-ctrls button.sel-btn { background: var(--text); color: var(--bg); }
 
 /* Form fields */
 .field { margin-bottom:16px; }
-.field label { display:block; font-size:11px; margin-bottom:8px; color:var(--text); }
+.field label { display:block; font-size:11px; margin-bottom:8px; color:var(--text-2); font-family:'Space Mono', monospace;}
 .field-row { display:flex; gap:12px; }
 .field-row .field { flex:1; }
 
 /* Sources */
-.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--bg); }
+.src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--surface-2); }
 .src-row .info { flex:1; min-width:0; }
 .src-row .name { font-size:13px; margin-bottom:4px; font-family:'Space Mono', monospace;}
 .src-row .url { font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'Space Mono', monospace; }
@@ -279,17 +274,17 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; background:var(--bg); color:var(--text); }
 
 /* Actions Bar */
-.actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:2px solid var(--border); display:flex; gap:12px; z-index:50; }
+.actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:12px; z-index:50; }
 .actions-bar button { flex:1; }
 
 .empty { padding:40px 16px; text-align:center; color:var(--text-2); font-size:12px; }
 
 /* Loading & Utils */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
-.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--bg);border-radius:0;animation:spin .8s linear infinite; background:var(--text);}
+.spinner{width:32px;height:32px;border:1px solid var(--border);border-top-color:var(--text);border-radius:0;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'Space Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.1s; border:1px solid var(--text); font-weight:700; white-space:nowrap; box-shadow: 4px 4px 0px 0px var(--border);}
+.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'Space Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.1s; border:1px solid var(--text); font-weight:700; white-space:nowrap; }
 .toast.show { transform:translate(-50%, 0); }
 
 .lazy-img { opacity:0; transition:opacity 0s; }
@@ -308,7 +303,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   </div>
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--border); color:var(--text);">BACK</button>
+      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--text); color:var(--text);">BACK</button>
       <h1 id="rTitle" style="text-align:center;">ITEM</h1>
       <div style="width:60px"></div>
     </div>
@@ -327,7 +322,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--border); color:var(--text);">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--text); color:var(--text);">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
       <button class="btn-primary" onclick="saveProduct()" style="padding:10px 16px; min-height:0;">SAVE</button>
     </div>
@@ -561,7 +556,7 @@ function openProduct(idx) {
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'Space Mono', monospace;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
+      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'Space Grotesk', sans-serif;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
     </div>
     <div class="card">
       <h3>BASIC INFO</h3>
@@ -576,11 +571,11 @@ function openProduct(idx) {
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
           <input id="eUrl" value="\${escapeHtml(p.url || "")}" style="flex:1;">
-          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'Space Mono', monospace; font-size:12px; text-decoration:none; background:var(--surface-2);">VISIT</a>\` : ''}
+          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'Space Mono', monospace; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2);" onclick="extractImages('full')">EXTRACT (FULL)</button>
         </div>
       </div>
 
@@ -654,27 +649,30 @@ function renderImgGrid(urls, selectedSet) {
   grid.innerHTML = urls.map(url => {
     const isOn = selectedSet.has(url);
     return \`
-      <div class="img-cell \${isOn ? 'on' : ''}">
-        <div class="img-cell-top" onclick="this.parentNode.classList.toggle('on')">
-          <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-          <div class="check"></div>
-        </div>
-        <div class="img-cell-ctrls">
-          <button type="button" onclick="moveImgLeft(this)">&#8592;</button>
-          <button type="button" class="sel-btn" onclick="this.parentNode.parentNode.classList.toggle('on')">TOGGLE</button>
-          <button type="button" onclick="moveImgRight(this)">&#8594;</button>
+      <div class="img-cell \${isOn ? 'on' : ''}" onclick="this.classList.toggle('on')">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
+        <div class="check"></div>
+        <div class="overlay-ctrls">
+          <button type="button" onclick="moveImgLeft(this, event)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button type="button" onclick="moveImgRight(this, event)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
         </div>
       </div>
     \`;
   }).join("");
 }
 
-function moveImgLeft(btn) {
+function moveImgLeft(btn, event) {
+  event.stopPropagation();
   const cell = btn.closest('.img-cell');
   if(cell.previousElementSibling) cell.parentNode.insertBefore(cell, cell.previousElementSibling);
 }
 
-function moveImgRight(btn) {
+function moveImgRight(btn, event) {
+  event.stopPropagation();
   const cell = btn.closest('.img-cell');
   if(cell.nextElementSibling) cell.parentNode.insertBefore(cell.nextElementSibling, cell);
 }
@@ -688,15 +686,17 @@ function addImage() {
   
   const div = document.createElement("div");
   div.className = "img-cell on";
+  div.onclick = function() { this.classList.toggle("on"); };
   div.innerHTML = \`
-    <div class="img-cell-top" onclick="this.parentNode.classList.toggle('on')">
-      <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-      <div class="check"></div>
-    </div>
-    <div class="img-cell-ctrls">
-      <button type="button" onclick="moveImgLeft(this)">&#8592;</button>
-      <button type="button" class="sel-btn" onclick="this.parentNode.parentNode.classList.toggle('on')">TOGGLE</button>
-      <button type="button" onclick="moveImgRight(this)">&#8594;</button>
+    <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
+    <div class="check"></div>
+    <div class="overlay-ctrls">
+      <button type="button" onclick="moveImgLeft(this, event)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <button type="button" onclick="moveImgRight(this, event)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
     </div>
   \`;
   grid.prepend(div);
@@ -993,6 +993,7 @@ function normalizeResponse(item) {
 function getItemStatus(item) {
     const resp = normalizeResponse(item);
     
+    // Auto-flatten purely in memory for status calculation so the queue reflects the correct state
     const { flattened } = flattenProducts(resp.products);
     
     if (!flattened.length) return 'pending';
@@ -1176,11 +1177,11 @@ async function runPythonExtractor(targetUrl, mode) {
         const proc = spawn('python3', args);
         
         let stderr = '';
-        proc.stdout.on('data', d => log('debug', `[PYTHON STDOUT] ${d.toString().trim()}`));
+        proc.stdout.on('data', d => log('debug', `[PYTHON] ${d.toString().trim()}`));
         proc.stderr.on('data', d => {
             const out = d.toString();
             stderr += out;
-            log('warn', `[PYTHON STDERR] ${out.trim()}`);
+            log('warn', `[PYTHON ERR] ${out.trim()}`);
         });
 
         proc.on('close', code => {
@@ -1212,6 +1213,7 @@ async function startNgrok(port) {
     try {
         const { spawn } = await import('child_process');
         
+        // Relies on `ngrok config add-authtoken` being correctly executed by the GitHub Actions workflow environment.
         const ngrok = spawn('ngrok', ['http', String(port)], { stdio: 'pipe' });
 
         let url = null;
