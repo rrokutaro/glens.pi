@@ -2,7 +2,7 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Minimal Aesthetic (Farfetch vibes), lazy loading, Python AI extraction.
+ * Brutalist Minimal Aesthetic (Inter), lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456)
@@ -41,7 +41,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Minimalist High-Fashion Aesthetic)                                */
+/* HTML UI (Pristine Minimalist Aesthetic)                                    */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -52,19 +52,19 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <title>DropShip Review</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#ffffff;
   --surface:#ffffff;
-  --surface-2:#fafafa;
+  --surface-2:#f4f4f5;
   --border:#e5e5e5;
   --text:#000000;
-  --text-2:#757575;
+  --text-2:#737373;
 }
 body {
-  font-family:'Space Grotesk', sans-serif;
+  font-family:'Inter', sans-serif;
   background:var(--bg);
   color:var(--text);
   line-height:1.4;
@@ -73,12 +73,11 @@ body {
   -webkit-font-smoothing:antialiased;
 }
 
-/* Typography */
+/* Typography Overrides */
 h1, h2, h3, .badge, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
-  font-family:'Space Mono', monospace;
-  text-transform:uppercase;
   font-weight:700;
-  letter-spacing:0.02em;
+  text-transform:uppercase;
+  letter-spacing:0.03em;
 }
 
 /* Controls */
@@ -91,10 +90,11 @@ button {
   background:var(--bg);
   color:var(--text);
   min-height:48px;
-  font-family:'Space Mono', monospace;
+  font-family:'Inter', sans-serif;
   font-weight:700;
   text-transform:uppercase;
-  transition:all 0s;
+  letter-spacing:0.02em;
+  transition:all 0.1s;
 }
 button:active { background:var(--surface-2); }
 button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
@@ -102,7 +102,8 @@ button:disabled { opacity:0.3; cursor:not-allowed; border-color:var(--border); }
 .btn-primary { background:var(--text); color:var(--bg); border:1px solid var(--text); }
 .btn-primary:active { background:#333; border-color:#333; color:var(--bg); }
 .btn-danger { background:var(--bg); color:var(--text); border:1px solid var(--border); }
-.btn-ghost { border-color:var(--text); background: transparent; color:var(--text); }
+.btn-ghost { border-color:transparent; background: transparent; color:var(--text); padding: 0; min-height: 0; border: none;}
+.btn-ghost:active { opacity: 0.6; background: transparent; }
 
 input, select, textarea {
   background:var(--bg);
@@ -111,7 +112,7 @@ input, select, textarea {
   padding:14px;
   border-radius:0;
   font-size:14px;
-  font-family:'Space Grotesk', sans-serif;
+  font-family:'Inter', sans-serif;
   width:100%;
   -webkit-appearance:none;
 }
@@ -128,7 +129,7 @@ select {
 }
 
 img { max-width:100%; display:block; }
-a { color:var(--text); text-decoration:underline; text-underline-offset:4px; font-weight:700;}
+a { color:var(--text); text-decoration:underline; text-underline-offset:4px; font-weight:600;}
 a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 
 /* Layout Screens */
@@ -142,7 +143,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   padding:12px 16px;
   display:flex; align-items:center; gap:16px;
 }
-.topbar h1 { font-size:14px; flex:1; margin:0; text-align:center;}
+.topbar h1 { font-size:14px; flex:1; margin:0; text-align:left;}
 
 .badge {
   font-size:10px;
@@ -168,7 +169,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .post-thumb img { width:100%; height:100%; object-fit:cover; }
 .post-info { flex:1; min-width:0; }
 .post-id { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.post-meta { font-size:12px; color:var(--text-2); margin-top:2px; font-family:'Space Mono', monospace; }
+.post-meta { font-size:12px; color:var(--text-2); margin-top:2px; font-weight:600; }
 .post-chevron { width:20px; height:20px; color:var(--text); transition:transform 0.2s; }
 .post-group.open .post-chevron { transform:rotate(180deg); }
 
@@ -183,7 +184,7 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .item-thumb { width:40px; height:56px; background:var(--bg); border:1px solid var(--border); flex-shrink:0; }
 .item-thumb img { width:100%; height:100%; object-fit:cover; }
 .item-info { flex:1; min-width:0; }
-.item-status { font-size:10px; color:var(--text-2); margin-top:4px; font-family:'Space Mono', monospace; text-transform:uppercase; }
+.item-status { font-size:10px; color:var(--text-2); margin-top:4px; font-weight:700; text-transform:uppercase; }
 
 /* Hero (Review Main Image) */
 .hero { width:100%; border-bottom:1px solid var(--border); background:var(--surface-2); position:relative; }
@@ -197,15 +198,17 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .p-card {
   padding:16px; display:flex; gap:16px; cursor:pointer;
   border-bottom:1px solid var(--border); background:var(--bg);
+  transition: opacity 0.2s, filter 0.2s;
 }
 .p-card:active { background:var(--surface-2); }
+.p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
 .p-img { width:80px; height:106px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; }
 .p-img img { width:100%; height:100%; object-fit:cover; }
-.p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; font-family:'Space Mono', monospace; }
+.p-img .no-img { width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:10px; font-weight:700; }
 .p-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
 .p-title { font-size:16px; font-weight:600; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.p-brand { font-size:12px; color:var(--text-2); margin-bottom:8px; font-family:'Space Mono', monospace;}
-.p-status { display:flex; align-items:center; gap:8px; font-size:11px; font-family:'Space Mono', monospace; font-weight:700; text-transform:uppercase; }
+.p-brand { font-size:13px; color:var(--text-2); margin-bottom:8px; font-weight:500;}
+.p-status { display:flex; align-items:center; gap:8px; font-size:11px; font-weight:700; text-transform:uppercase; }
 
 /* Modal / Editor */
 .modal { position:fixed; inset:0; z-index:100; background:var(--bg); display:none; flex-direction:column; }
@@ -214,10 +217,14 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .modal-header h2 { font-size:14px; flex:1; text-align:center; margin:0; }
 .modal-body { flex:1; overflow-y:auto; padding:0; padding-bottom:100px; }
 
+/* Video Modal */
+#videoModal { background: #000; z-index: 200; }
+#vPlayer { width: 100%; height: 100%; object-fit: contain; }
+
 .card { padding:24px 16px; border-bottom:1px solid var(--border); background:var(--bg); }
 .card h3 { font-size:13px; color:var(--text); margin-bottom:16px; padding-bottom:12px; display:block; border-bottom:1px dashed var(--border);}
 
-/* 3:4 Carousel Images */
+/* 3:4 Carousel Images - Taller (75%) */
 .carousel { 
   display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
   scroll-snap-type: x mandatory; margin-bottom: 16px;
@@ -228,47 +235,36 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .carousel::-webkit-scrollbar { display: none; }
 
 .img-cell { 
-  flex: 0 0 55%; aspect-ratio: 3/4; scroll-snap-align: center; 
+  flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
   position:relative; cursor:pointer; 
   border: 1px solid var(--border); background: var(--surface-2);
+  transition: border-width 0.1s ease;
 }
 .img-cell img { width:100%; height:100%; object-fit:cover; opacity:0.4; transition:opacity 0.2s; }
+.img-cell.on { border: 2px solid var(--text); }
 .img-cell.on img { opacity:1; }
 
-/* Square Checkbox */
+/* Numbered Circular Badge */
 .img-cell .check { 
   position:absolute; top:12px; right:12px; 
-  width:18px; height:18px; border:1px solid var(--text); background:var(--bg);
-  transition: background 0.1s;
+  width:28px; height:28px; border-radius:50%;
+  background:var(--text); color:var(--bg);
+  font-size:12px; font-weight:700;
+  display:none; align-items:center; justify-content:center;
 }
-.img-cell.on .check { background:var(--text); }
-
-/* Overlaid Arrow Controls */
-.overlay-ctrls {
-  position: absolute; bottom: 12px; left: 12px; right: 12px;
-  display: none; justify-content: space-between;
-  pointer-events: none; /* Let clicks pass through to image toggle */
-}
-.img-cell.on .overlay-ctrls { display: flex; }
-.overlay-ctrls button {
-  pointer-events: auto; /* Re-enable clicks on arrows */
-  width: 32px; height: 32px; min-height: 32px; padding: 0;
-  border-radius: 50%; border: 1px solid var(--border);
-  background: rgba(255,255,255,0.9); color: var(--text);
-  display: flex; align-items: center; justify-content: center;
-}
+.img-cell.on .check { display:flex; }
 
 /* Form fields */
 .field { margin-bottom:16px; }
-.field label { display:block; font-size:11px; margin-bottom:8px; color:var(--text-2); font-family:'Space Mono', monospace;}
+.field label { display:block; font-size:11px; margin-bottom:8px; color:var(--text-2); font-weight:600;}
 .field-row { display:flex; gap:12px; }
 .field-row .field { flex:1; }
 
 /* Sources */
 .src-row { border:1px solid var(--border); padding:12px; margin-bottom:8px; display:flex; align-items:center; gap:12px; background:var(--surface-2); }
 .src-row .info { flex:1; min-width:0; }
-.src-row .name { font-size:13px; margin-bottom:4px; font-family:'Space Mono', monospace;}
-.src-row .url { font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'Space Mono', monospace; }
+.src-row .name { font-size:13px; margin-bottom:4px; font-weight:700;}
+.src-row .url { font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
 .src-row .actions { display:flex; gap:4px; }
 .src-row a, .src-row button { padding:6px 10px; font-size:11px; min-height:0; border:1px solid var(--border); text-decoration:none; background:var(--bg); color:var(--text); }
 
@@ -276,14 +272,14 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
 .actions-bar { position:fixed; bottom:0; left:0; right:0; padding:16px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:12px; z-index:50; }
 .actions-bar button { flex:1; }
 
-.empty { padding:40px 16px; text-align:center; color:var(--text-2); font-size:12px; }
+.empty { padding:40px 16px; text-align:center; color:var(--text-2); font-size:13px; font-weight:600; }
 
 /* Loading & Utils */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
 .spinner{width:32px;height:32px;border:1px solid var(--border);border-top-color:var(--text);border-radius:0;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; font-family:'Space Mono', monospace; text-transform:uppercase; z-index:300; transition:transform 0.1s; border:1px solid var(--text); font-weight:700; white-space:nowrap; }
+.toast { position:fixed; top:16px; left:50%; transform:translate(-50%, -100px); background:var(--text); color:var(--bg); padding:12px 20px; font-size:12px; text-transform:uppercase; z-index:300; transition:transform 0.2s ease; border:1px solid var(--text); font-weight:700; white-space:nowrap; }
 .toast.show { transform:translate(-50%, 0); }
 
 .lazy-img { opacity:0; transition:opacity 0s; }
@@ -302,9 +298,9 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   </div>
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="padding:10px 12px; min-height:0; border:1px solid var(--text); color:var(--text);">BACK</button>
-      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
-      <div style="width:60px"></div>
+      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px;">BACK</button>
+      <h1 id="rTitle">ITEM</h1>
+      <div id="rTopRight" style="width:70px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
@@ -321,16 +317,27 @@ a:active { background:var(--text); color:var(--bg); text-decoration:none; }
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="padding:10px 12px; min-height:0; border:1px solid var(--text); color:var(--text);">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px;">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
-      <button class="btn-primary" onclick="saveProduct()" style="padding:10px 16px; min-height:0;">SAVE</button>
+      <button class="btn-primary" onclick="saveProduct()" style="padding:8px 16px; min-height:0; font-size:12px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
+  
+  <!-- Fullscreen Video Modal -->
+  <div id="videoModal" class="modal" style="background:#000;">
+    <div style="position:absolute; top:16px; right:16px; z-index:210;">
+      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;">X</button>
+    </div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh;">
+      <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none;"></video>
+    </div>
+  </div>
+
 </div>
 <div class="toast" id="toast"></div>
 <script>
-const state = { queue: [], posts: {}, current: null, editingIdx: null, io: null };
+const state = { queue: [], posts: {}, current: null, editingIdx: null, currentSelected: [], io: null };
 
 function showScreen(id) {
   document.querySelectorAll(".screen, .modal").forEach(el => el.classList.remove("active"));
@@ -478,7 +485,21 @@ async function openItem(_id, fileIdx, frameIdx) {
 
 function renderItem() {
   const item = state.current;
-  document.getElementById("rTitle").textContent = item.postId;
+  
+  // Format alias link
+  let igLink = 'https://www.instagram.com/' + item.postId + '/';
+  if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
+    igLink = 'https://www.instagram.com/p/' + item.postId + '/';
+  }
+  document.getElementById("rTitle").innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
+  
+  // Video Play Button
+  if (item.type === 'frame' && item.parentUrl) {
+    document.getElementById('rTopRight').innerHTML = \`<button class="btn-ghost" onclick="openVideo('\${escapeHtml(item.parentUrl)}')" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);">WATCH</button>\`;
+  } else {
+    document.getElementById('rTopRight').innerHTML = '';
+  }
+
   document.getElementById("rImage").src = item.url;
   
   const prods = item.response && item.response.products ? item.response.products : [];
@@ -501,17 +522,19 @@ function renderItem() {
   list.innerHTML = prods.map((p, i) => {
     let statusLabel = p.reviewStatus || "pending";
     let statusColor = "var(--text)";
+    let rejectedClass = "";
     
     if (p.reviewStatus === "rejected") {
       statusLabel = "REJECTED";
       statusColor = "var(--text-2)";
+      rejectedClass = "rejected";
     }
 
     const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
     const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
 
     return \`
-      <div class="p-card" onclick="openProduct(\${i})">
+      <div class="p-card \${rejectedClass}" onclick="openProduct(\${i})">
         <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy">\` : \`<div class="no-img">N/A</div>\`}</div>
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
@@ -521,6 +544,19 @@ function renderItem() {
       </div>
     \`;
   }).join("");
+}
+
+function openVideo(url) {
+  const v = document.getElementById('vPlayer');
+  v.src = url;
+  document.getElementById('videoModal').classList.add('active');
+  v.play().catch(e => console.error(e));
+}
+function closeVideo() {
+  const v = document.getElementById('vPlayer');
+  v.pause();
+  v.src = '';
+  document.getElementById('videoModal').classList.remove('active');
 }
 
 function getAllImages(p) {
@@ -545,17 +581,19 @@ function openProduct(idx) {
   state.editingIdx = idx;
   const p = state.current.response.products[idx];
   const allImages = getAllImages(p);
-  const selectedSet = new Set((p.selectedImages || []).map(String));
+  
+  // Initialize selection order array
+  state.currentSelected = [...(p.selectedImages || [])];
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-family:'Space Grotesk', sans-serif;">(Paste anywhere)</span></h3>
+      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-family:'Inter', sans-serif;">(Tap to select/order, Paste to upload)</span></h3>
       <div class="carousel" id="eImgGrid"></div>
       <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px;">+ ADD URL OR PASTE</button>
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'Space Grotesk', sans-serif;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
+      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; font-family:'Inter', sans-serif;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
     </div>
     <div class="card">
       <h3>BASIC INFO</h3>
@@ -570,11 +608,11 @@ function openProduct(idx) {
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
           <input id="eUrl" value="\${escapeHtml(p.url || "")}" style="flex:1;">
-          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-family:'Space Mono', monospace; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+          <button class="btn-ghost" style="flex:1; font-size:11px; min-height:40px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
         </div>
       </div>
 
@@ -634,11 +672,22 @@ function openProduct(idx) {
   \`;
   
   document.getElementById("eBody").innerHTML = html;
-  renderImgGrid(allImages.urls, selectedSet);
+  renderImgGrid(allImages.urls);
   showScreen("editor");
 }
 
-function renderImgGrid(urls, selectedSet) {
+function toggleImageSelection(url) {
+  const idx = state.currentSelected.indexOf(url);
+  if (idx > -1) {
+    state.currentSelected.splice(idx, 1);
+  } else {
+    state.currentSelected.push(url);
+  }
+  const p = state.current.response.products[state.editingIdx];
+  renderImgGrid(getAllImages(p).urls);
+}
+
+function renderImgGrid(urls) {
   const grid = document.getElementById("eImgGrid");
   if (!urls.length) {
     grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>';
@@ -646,59 +695,29 @@ function renderImgGrid(urls, selectedSet) {
   }
   
   grid.innerHTML = urls.map(url => {
-    const isOn = selectedSet.has(url);
+    const selIdx = state.currentSelected.indexOf(url);
+    const isOn = selIdx > -1;
+    const num = isOn ? (selIdx + 1) : '';
+
     return \`
-      <div class="img-cell \${isOn ? 'on' : ''}" onclick="this.classList.toggle('on')">
+      <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
         <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-        <div class="check"></div>
-        <div class="overlay-ctrls">
-          <button type="button" onclick="moveImgLeft(this, event)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 18l-6-6 6-6"/></svg>
-          </button>
-          <button type="button" onclick="moveImgRight(this, event)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18l6-6-6-6"/></svg>
-          </button>
-        </div>
+        <div class="check">\${num}</div>
       </div>
     \`;
   }).join("");
 }
 
-function moveImgLeft(btn, event) {
-  event.stopPropagation();
-  const cell = btn.closest('.img-cell');
-  if(cell.previousElementSibling) cell.parentNode.insertBefore(cell, cell.previousElementSibling);
-}
-
-function moveImgRight(btn, event) {
-  event.stopPropagation();
-  const cell = btn.closest('.img-cell');
-  if(cell.nextElementSibling) cell.parentNode.insertBefore(cell.nextElementSibling, cell);
-}
-
 function addImage() {
   const url = prompt("IMAGE URL:"); 
   if (!url) return;
-  const grid = document.getElementById("eImgGrid");
-  const empty = grid.querySelector(".empty");
-  if (empty) empty.remove();
   
-  const div = document.createElement("div");
-  div.className = "img-cell on";
-  div.onclick = function() { this.classList.toggle("on"); };
-  div.innerHTML = \`
-    <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
-    <div class="check"></div>
-    <div class="overlay-ctrls">
-      <button type="button" onclick="moveImgLeft(this, event)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
-      <button type="button" onclick="moveImgRight(this, event)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18l6-6-6-6"/></svg>
-      </button>
-    </div>
-  \`;
-  grid.prepend(div);
+  const p = state.current.response.products[state.editingIdx];
+  p.customImages = p.customImages || [];
+  p.customImages.unshift(url);
+  state.currentSelected.push(url);
+  
+  renderImgGrid(getAllImages(p).urls);
 }
 
 // Global Paste Listener for Image Uploads
@@ -727,12 +746,10 @@ document.addEventListener('paste', async (e) => {
           if (d.url) {
             const p = state.current.response.products[state.editingIdx];
             p.customImages = p.customImages || [];
-            p.selectedImages = p.selectedImages || [];
             p.customImages.unshift(d.url);
-            p.selectedImages.push(d.url);
+            state.currentSelected.push(d.url);
             
-            const allImages = getAllImages(p);
-            renderImgGrid(allImages.urls, new Set(p.selectedImages));
+            renderImgGrid(getAllImages(p).urls);
             toast("IMAGE UPLOADED");
           } else {
             throw new Error(d.error || "Upload failed");
@@ -751,7 +768,7 @@ async function extractImages(mode) {
   const url = document.getElementById("eUrl").value;
   if (!url) return toast("NO URL PROVIDED");
   
-  toast("EXTRACTING... (CHECK TERMINAL)");
+  toast("EXTRACTING... (CHECK GITHUB TERMINAL)");
   try {
     const r = await fetch("/api/extract", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -766,14 +783,21 @@ async function extractImages(mode) {
     
     if (d.images && d.images.length > 0) {
       const p = state.current.response.products[state.editingIdx];
-      p.customImages = p.customImages || [];
-      p.customImages = [...d.images, ...p.customImages]; // prepend
+      const allUrls = getAllImages(p).urls;
       
-      const allImages = getAllImages(p);
-      renderImgGrid(allImages.urls, new Set(p.selectedImages));
-      toast(\`EXTRACTED \${d.images.length} IMAGES\`);
+      // Deduplicate against existing images and limit payload to 20
+      const newUnique = d.images.filter(imgUrl => !allUrls.includes(imgUrl)).slice(0, 20);
+      
+      if (newUnique.length > 0) {
+        p.customImages = p.customImages || [];
+        p.customImages = [...newUnique, ...p.customImages]; // prepend
+        renderImgGrid(getAllImages(p).urls);
+        toast(\`EXTRACTED \${newUnique.length} NEW IMAGES\`);
+      } else {
+        toast("NO NEW IMAGES FOUND (ALL DUPES)");
+      }
     } else {
-      toast("NO IMAGES FOUND");
+      toast("NO IMAGES EXTRACTED");
     }
   } catch(e) {
     toast("ERROR: " + e.message);
@@ -813,19 +837,8 @@ async function saveProduct() {
   p.sizingGuide = document.getElementById("eSizingGuide").value;
   p.shippingAndReturns = document.getElementById("eShipping").value;
   
-  const cells = document.querySelectorAll("#eImgGrid .img-cell");
-  p.selectedImages = [];
-  p.customImages = p.customImages || [];
-  
-  cells.forEach(c => {
-    const img = c.querySelector("img").src;
-    if (c.classList.contains("on")) {
-      p.selectedImages.push(img);
-    }
-    if (!p.images.includes(img) && !p.customImages.includes(img)) {
-       p.customImages.push(img);
-    }
-  });
+  // Set ordered selection directly from state array
+  p.selectedImages = [...state.currentSelected];
   
   p.reviewStatus = "completed";
   p.reviewedAt = new Date().toISOString();
@@ -1212,7 +1225,6 @@ async function startNgrok(port) {
     try {
         const { spawn } = await import('child_process');
         
-        // Relies on `ngrok config add-authtoken` being correctly executed by the GitHub Actions workflow environment.
         const ngrok = spawn('ngrok', ['http', String(port)], { stdio: 'pipe' });
 
         let url = null;
@@ -1367,6 +1379,7 @@ async function main() {
                     fileIdx,
                     frameIdx,
                     url: item.url,
+                    parentUrl: item.parentUrl || null,
                     type: item.type,
                     response
                 }));
