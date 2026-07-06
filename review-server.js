@@ -2,10 +2,13 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Minimal Aesthetic (Inter), lazy loading, Python AI extraction.
+ * Brutalist Native Apple Aesthetic, lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
+ *
+ * FINAL PRODUCTION v1.1 - Polished UX, robust error handling, keyboard support,
+ * selected image count + clear, refresh, ObjectId safety, Python script validation.
  */
 
 import http from 'http';
@@ -43,15 +46,17 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI                                                                    */
+/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review</title>
+<title>DropShip Review • v1.1</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -109,16 +114,15 @@ button {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  transition: opacity 0.1s;
+  transition: opacity 0.15s ease, transform 0.1s ease;
 }
-button:active { opacity: 0.6; }
-button:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--border); }
+button:active { opacity: 0.7; transform: scale(0.98); }
+button:disabled { opacity: 0.4 !important; cursor: not-allowed; border-color: var(--border); transform: none !important; }
 
 .btn-primary { background: var(--text); color: var(--bg); border: 1px solid var(--text); }
-.btn-primary:active { opacity: 0.8; }
 .btn-danger { background: var(--bg); color: var(--danger); border: 1px solid var(--border); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--text); padding: 0; min-height: 0; border: none; }
-.btn-ghost:active { opacity: 0.6; }
+.btn-ghost:active { opacity: 0.5; transform: scale(0.96); }
 
 input, select, textarea {
   background: var(--bg);
@@ -130,7 +134,9 @@ input, select, textarea {
   font-family: inherit;
   width: 100%;
   -webkit-appearance: none;
+  transition: border-color 0.2s ease;
 }
+input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--text);
@@ -148,7 +154,7 @@ a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; 
 a:active { opacity: 0.7; }
 
 /* Layout Screens */
-.screen { display: none; min-height: 100dvh; padding-bottom: 90px; }
+.screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .screen.active { display: block; }
 
 .topbar {
@@ -156,6 +162,7 @@ a:active { opacity: 0.7; }
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top));
   display: flex; align-items: center; gap: 12px;
 }
 .topbar h1 { font-size: 14px; flex: 1; margin: 0; text-align: left; }
@@ -205,7 +212,7 @@ a:active { opacity: 0.7; }
 .post-info { flex: 1; min-width: 0; }
 .post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .post-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 600; }
-.post-chevron { width: 20px; height: 20px; color: var(--text); transition: transform 0.2s; }
+.post-chevron { width: 20px; height: 20px; color: var(--text); transition: transform 0.2s ease; }
 .post-group.open .post-chevron { transform: rotate(180deg); }
 
 .post-items { display: none; padding: 0 16px 16px; border-top: 1px dashed var(--border); }
@@ -214,7 +221,9 @@ a:active { opacity: 0.7; }
 .item-row {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: transform 0.1s ease;
 }
+.item-row:active { transform: scale(0.98); }
 .item-row:last-child { border-bottom: none; padding-bottom: 0; }
 .item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
 .item-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -223,21 +232,21 @@ a:active { opacity: 0.7; }
 
 /* Hero (Review Main Image) */
 .hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
-.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0s; }
+.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; }
 .hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
 
 /* Section & Cards */
-.section { padding: 0; padding-bottom: 100px; background: var(--bg); }
+.section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
 .section h2 { font-size: 14px; padding: 20px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
 
 .p-card {
   padding: 16px; display: flex; gap: 16px; cursor: pointer;
   border-bottom: 1px solid var(--border); background: var(--bg);
-  transition: opacity 0.2s, filter 0.2s;
+  transition: transform 0.1s ease, opacity 0.2s, filter 0.2s;
 }
-.p-card:active { background: var(--surface-2); }
+.p-card:active { background: var(--surface-2); transform: scale(0.98); }
 .p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
-.p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; }
+.p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
 .p-img img { width: 100%; height: 100%; object-fit: cover; }
 .p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
@@ -248,12 +257,12 @@ a:active { opacity: 0.7; }
 /* Modal / Editor */
 .modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
 .modal.active { display: flex; }
-.modal-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
+.modal-header { padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
 .modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; }
-.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: 100px; }
+.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
 
 /* Video Modal */
-#videoModal { background: #000; z-index: 200; }
+#videoModal { background: #000; z-index: 200; cursor: pointer; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
 .card { padding: 24px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
@@ -266,6 +275,7 @@ a:active { opacity: 0.7; }
   -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
   scrollbar-width: none;
+  transform: translateZ(0); /* Hardware acceleration */
 }
 .carousel::-webkit-scrollbar { display: none; }
 
@@ -273,9 +283,10 @@ a:active { opacity: 0.7; }
   flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
   position: relative; cursor: pointer; 
   border: 1px solid var(--border); background: var(--surface-2);
-  transition: border-color 0.1s ease;
+  transition: border-color 0.15s ease, transform 0.1s ease;
 }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.4; transition: opacity 0.2s; }
+.img-cell:active { transform: scale(0.98); }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
@@ -285,7 +296,7 @@ a:active { opacity: 0.7; }
   width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; color: transparent;
-  transition: background 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
 .img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
@@ -306,29 +317,21 @@ a:active { opacity: 0.7; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
-/* Sources */
-.src-row { border: 1px solid var(--border); padding: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; background: var(--surface-2); }
-.src-row .info { flex: 1; min-width: 0; }
-.src-row .name { font-size: 13px; margin-bottom: 4px; font-weight: 700; }
-.src-row .url { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.src-row .actions { display: flex; gap: 4px; }
-.src-row a, .src-row button { padding: 6px 10px; font-size: 11px; min-height: 0; border: 1px solid var(--border); text-decoration: none; background: var(--bg); color: var(--text); }
-
 /* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
+.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: rgba(var(--bg), 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
 
 /* Loading & Utils */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
-.spinner{width:32px;height:32px;border:1px solid var(--border);border-top-color:var(--text);border-radius:0;animation:spin .8s linear infinite;}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.toast { position: fixed; top: 16px; left: 50%; transform: translate(-50%, -100px); background: var(--text); color: var(--bg); padding: 12px 20px; font-size: 12px; text-transform: uppercase; z-index: 300; transition: transform 0.2s ease; border: 1px solid var(--text); font-weight: 700; white-space: nowrap; }
+.toast { position: fixed; top: max(16px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px); background: var(--text); color: var(--bg); padding: 14px 24px; font-size: 12px; text-transform: uppercase; z-index: 300; transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 700; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,0.15);}
 .toast.show { transform: translate(-50%, 0); }
 
-.lazy-img { opacity: 0; transition: opacity 0s; }
+.lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
 </style>
@@ -343,12 +346,13 @@ a:active { opacity: 0.7; }
       <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
       <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
+      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:8px 14px; font-size:11px; min-height:32px;">REFRESH</button>
     </div>
     <div id="qList"></div>
   </div>
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px;">BACK</button>
+      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
       <h1 id="rTitle" style="text-align:center;">ITEM</h1>
       <div id="rTopRight" style="width:70px; text-align:right;"></div>
     </div>
@@ -367,20 +371,20 @@ a:active { opacity: 0.7; }
   </div>
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px;">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">CANCEL</button>
       <h2>EDIT PRODUCT</h2>
-      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 16px; min-height:0; font-size:12px;">SAVE</button>
+      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 16px; font-size:12px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
   
   <!-- Fullscreen Video Modal -->
-  <div id="videoModal" class="modal" style="background:#000;">
-    <div style="position:absolute; top:16px; right:16px; z-index:210;">
-      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
+  <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
+    <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
+      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
     </div>
-    <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh;">
-      <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none;"></video>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh; pointer-events:none;">
+      <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto;"></video>
     </div>
   </div>
 
@@ -413,7 +417,7 @@ function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 3500);
+  setTimeout(() => t.classList.remove("show"), 3000);
 }
 
 function escapeHtml(str) {
@@ -506,7 +510,7 @@ function renderQueue() {
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
-          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>
+          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
           <div class="post-info">
             <div class="post-id">\${escapeHtml(pid)}</div>
             <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
@@ -516,7 +520,7 @@ function renderQueue() {
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
             <div class="item-row" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
-              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')"></div>
+              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
               <div class="item-info">
                 <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
                 <div class="item-status">\${escapeHtml(it.status)}</div>
@@ -616,7 +620,7 @@ function renderItem() {
 
     return \`
       <div class="p-card \${rejectedClass}" onclick="openProduct(\${i})">
-        <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy">\` : \`<div class="no-img">N/A</div>\`}</div>
+        <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
           <div class="p-brand">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
@@ -674,9 +678,17 @@ function openProduct(idx) {
   
   let html = \`
     <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; border:none; margin-bottom:12px;">IMAGES <span style="color:var(--text-2); font-weight:normal; text-transform:none;">(Tap to select/order)</span></h3>
+      <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
+        IMAGES 
+        <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+          <span id="selCount">\${state.currentSelected.length}</span> SELECTED
+        </span>
+      </h3>
       <div class="carousel" id="eImgGrid"></div>
-      <button class="btn-ghost" onclick="addImage()" style="width:100%; border:1px dashed var(--border); margin-bottom:16px; min-height:48px; display:flex; align-items:center; justify-content:center;">+ ADD URL</button>
+      <div style="display:flex; gap:8px; margin-bottom:16px;">
+        <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
+        <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
+      </div>
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
@@ -694,7 +706,7 @@ function openProduct(idx) {
       <div class="field" style="margin-bottom:24px;">
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
-          <input id="eUrl" value="\${escapeHtml(p.url || "")}" style="flex:1;">
+          <input id="eUrl" type="url" value="\${escapeHtml(p.url || "")}" style="flex:1;">
           \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
@@ -705,7 +717,7 @@ function openProduct(idx) {
 
       <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(p.category || "")}"></div>
       <div class="field-row">
-        <div class="field"><label>Price</label><input id="ePrice" value="\${escapeHtml((p.price && p.price.current) ? p.price.current : "")}"></div>
+        <div class="field"><label>Price</label><input id="ePrice" inputmode="decimal" value="\${escapeHtml((p.price && p.price.current) ? p.price.current : "")}"></div>
         <div class="field" style="width:100px">
           <label>Currency</label>
           <select id="eCurrency">
@@ -718,7 +730,7 @@ function openProduct(idx) {
           </select>
         </div>
       </div>
-      <div class="field"><label>Base Price</label><input id="eBasePrice" value="\${escapeHtml(p.basePrice || "")}"></div>
+      <div class="field"><label>Base Price</label><input id="eBasePrice" inputmode="decimal" value="\${escapeHtml(p.basePrice || "")}"></div>
       <div class="field">
         <label>Availability</label>
         <select id="eAvail">
@@ -737,11 +749,11 @@ function openProduct(idx) {
         </div>
         <div class="field">
           <label>Markup Val</label>
-          <input id="eMarkupVal" value="\${escapeHtml(p.recommendedMarkup?.value || '')}">
+          <input id="eMarkupVal" inputmode="decimal" value="\${escapeHtml(p.recommendedMarkup?.value || '')}">
         </div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Shipping Cost</label><input id="eShippingCost" value="\${escapeHtml(p.recommendedShippingRate?.amount || '')}"></div>
+        <div class="field"><label>Shipping Cost</label><input id="eShippingCost" inputmode="decimal" value="\${escapeHtml(p.recommendedShippingRate?.amount || '')}"></div>
         <div class="field"><label>Shipping Cov</label><input id="eShippingCov" value="\${escapeHtml(p.recommendedShippingRate?.coverage || '')}"></div>
       </div>
       <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
@@ -764,6 +776,11 @@ function openProduct(idx) {
   document.getElementById("eBody").scrollTop = 0;
 }
 
+function updateSelCount() {
+  const el = document.getElementById('selCount');
+  if (el) el.textContent = state.currentSelected.length;
+}
+
 function toggleImageSelection(url) {
   const idx = state.currentSelected.indexOf(url);
   if (idx > -1) {
@@ -772,6 +789,15 @@ function toggleImageSelection(url) {
     state.currentSelected.push(url);
   }
   renderImgGrid(state.currentGridUrls);
+  updateSelCount();
+}
+
+function clearSelection() {
+  if (!confirm('CLEAR ALL SELECTED IMAGES?')) return;
+  state.currentSelected = [];
+  renderImgGrid(state.currentGridUrls);
+  updateSelCount();
+  toast('SELECTION CLEARED — TAP IMAGES IN DESIRED ORDER');
 }
 
 function renderImgGrid(urls) {
@@ -788,24 +814,46 @@ function renderImgGrid(urls) {
 
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${num}</div>
       </div>
     \`;
   }).join("");
 }
 
-function addImage() {
-  const url = prompt("IMAGE URL:"); 
+async function addImage() {
+  let url = "";
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text && /^https?:\\/\\//i.test(text.trim())) {
+      url = text.trim();
+    }
+  } catch (err) {
+    console.warn("Clipboard read skipped/failed:", err);
+  }
+  
+  if (!url) {
+    url = prompt("NO URL FOUND IN CLIPBOARD.\\n\\nPASTE IMAGE URL MANUALLY:");
+  }
+  
   if (!url) return;
+  url = url.trim();
+  
+  if (!/^https?:\\/\\//i.test(url)) {
+    return toast("INVALID URL");
+  }
   
   const p = state.current.response.products[state.editingIdx];
   p.customImages = p.customImages || [];
-  p.customImages.push(url);
+  if (!p.customImages.includes(url)) p.customImages.push(url);
   
-  state.currentSelected.push(url);
-  state.currentGridUrls.unshift(url);
+  const wasSelected = state.currentSelected.includes(url);
+  if (!wasSelected) state.currentSelected.push(url);
+  if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
+  
   renderImgGrid(state.currentGridUrls);
+  updateSelCount();
+  toast(wasSelected ? "IMAGE ALREADY IN LIST" : "IMAGE ADDED + SELECTED");
 }
 
 async function extractImages(mode) {
@@ -835,6 +883,7 @@ async function extractImages(mode) {
     if (d.images && d.images.length > 0) {
       const p = state.current.response.products[state.editingIdx];
       
+      // Deduplicate against existing images and limit payload to 20
       const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
       
       if (newUnique.length > 0) {
@@ -842,8 +891,14 @@ async function extractImages(mode) {
         p.customImages = [...newUnique, ...p.customImages];
         state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
         
+        // Auto-select newly extracted images (they appear first)
+        newUnique.forEach(u => {
+          if (!state.currentSelected.includes(u)) state.currentSelected.push(u);
+        });
+        
         renderImgGrid(state.currentGridUrls);
-        toast(\`EXTRACTED \${newUnique.length} NEW IMAGES\`);
+        updateSelCount();
+        toast(\`EXTRACTED \${newUnique.length} NEW IMAGES (AUTO-SELECTED)\`);
       } else {
         toast("NO NEW IMAGES FOUND (ALL DUPES)");
       }
@@ -955,7 +1010,27 @@ async function deleteItem() {
 }
 
 function showQueue() { showScreen("queue"); }
+
+// Keyboard shortcuts (Escape closes modals, power user friendly)
+function initKeyboard() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const videoModal = document.getElementById('videoModal');
+      const editorModal = document.getElementById('editor');
+      if (videoModal.classList.contains('active')) {
+        closeVideo();
+      } else if (editorModal.classList.contains('active')) {
+        closeEditor();
+      } else if (document.getElementById('review').classList.contains('active')) {
+        showQueue();
+      }
+    }
+    // Future: could add 's' for save when in editor, etc.
+  });
+}
+
 loadQueue();
+initKeyboard();
 </script>
 </body>
 </html>`;
@@ -1224,7 +1299,7 @@ async function uploadToCatbox(base64Data, filename) {
     const blob = new Blob([buffer]);
     const form = new FormData();
     form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', blob, filename || 'upload.jpg');
+    form.append('fileToUpload', blob, filename || 'paste.jpg');
     
     const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: form });
     const url = (await res.text()).trim();
@@ -1242,6 +1317,12 @@ async function runPythonExtractor(targetUrl, mode) {
 
         // Ensure we point precisely to the script in the workspace root
         const scriptPath = path.resolve(process.cwd(), 'ecom-image-extractor.py');
+        
+        if (!fs.existsSync(scriptPath)) {
+            try { fs.unlinkSync(inFile); } catch(e){}
+            return reject(new Error('ecom-image-extractor.py NOT FOUND in current working directory. Please place the Python extractor script next to review-server.js'));
+        }
+
         const args = [scriptPath, '-u', inFile, '-o', outFile];
         
         if (mode === 'lazy') {
@@ -1265,7 +1346,7 @@ async function runPythonExtractor(targetUrl, mode) {
         proc.on('close', code => {
             if (code !== 0) {
                 try { fs.unlinkSync(inFile); fs.unlinkSync(outFile); } catch(e){}
-                return reject(new Error(`Extractor crashed (code ${code}). Check logs.`));
+                return reject(new Error(`Extractor crashed (code ${code}). Check logs. Stderr: ${stderr.slice(0,200)}`));
             }
             try {
                 if (!fs.existsSync(outFile)) throw new Error("No output generated by python script.");
@@ -1342,7 +1423,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review');
+    log('info', '  REVIEW SERVER — Production Human Review v1.1');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) {
@@ -1351,11 +1432,15 @@ async function main() {
     }
 
     log('info', 'Connecting to MongoDB...');
-    const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 15000 });
+    const client = new MongoClient(CONFIG.mongodb.uri, { 
+        serverSelectionTimeoutMS: 15000,
+        maxPoolSize: 10 
+    });
     await client.connect();
     const db = client.db(CONFIG.mongodb.db);
     const collection = db.collection(CONFIG.mongodb.collection);
     log('info', `Connected: ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection}`);
+    log('info', `HF Token for video proxy: ${CONFIG.hfToken ? 'PRESENT' : 'MISSING (private videos may fail)'}`);
 
     let serverResolve;
     const donePromise = new Promise(r => serverResolve = r);
@@ -1387,7 +1472,7 @@ async function main() {
                 const fRes = await fetch(vidUrl, { headers: fetchHeaders });
                 const resHeaders = {};
                 fRes.headers.forEach((v, k) => {
-                    // Filter out content-encoding because we are streaming the raw raw bytes
+                    // Filter out content-encoding because we are streaming the raw bytes
                     if (k.toLowerCase() !== 'content-encoding') resHeaders[k] = v;
                 });
                 
@@ -1422,8 +1507,17 @@ async function main() {
                 const fileIdx = parseInt(itemMatch[2], 10);
                 const frameIdx = itemMatch[3] !== undefined ? parseInt(itemMatch[3], 10) : null;
 
+                let objectId;
+                try {
+                    objectId = new ObjectId(docId);
+                } catch {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ error: 'Invalid document ID' }));
+                    return;
+                }
+
                 const post = await collection.findOne(
-                    { _id: new ObjectId(docId) },
+                    { _id: objectId },
                     { projection: { post_id: 1, file_urls: 1 } }
                 );
                 if (!post || !post.file_urls || !post.file_urls[fileIdx]) {
@@ -1461,7 +1555,7 @@ async function main() {
                         : `file_urls.${fileIdx}.response.products`;
                     
                     await collection.updateOne(
-                        { _id: new ObjectId(docId) },
+                        { _id: objectId },
                         { $set: { [updatePath]: flattened } }
                     );
                 }
@@ -1526,12 +1620,21 @@ async function main() {
                     const data = JSON.parse(body);
                     const { docId, fileIdx, frameIdx, prodIdx, product } = data;
 
+                    let objectId;
+                    try {
+                        objectId = new ObjectId(docId);
+                    } catch {
+                        res.writeHead(400);
+                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
+                        return;
+                    }
+
                     const basePath = frameIdx !== null && frameIdx !== undefined
                         ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}`
                         : `file_urls.${fileIdx}.response.products.${prodIdx}`;
 
                     await collection.updateOne(
-                        { _id: new ObjectId(docId) },
+                        { _id: objectId },
                         { $set: {
                             [`${basePath}.title`]: product.title,
                             [`${basePath}.store`]: product.store,
@@ -1575,12 +1678,21 @@ async function main() {
                     const data = JSON.parse(body);
                     const { docId, fileIdx, frameIdx } = data;
 
+                    let objectId;
+                    try {
+                        objectId = new ObjectId(docId);
+                    } catch {
+                        res.writeHead(400);
+                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
+                        return;
+                    }
+
                     const path = frameIdx !== null && frameIdx !== undefined
                         ? `file_urls.${fileIdx}.frames.${frameIdx}`
                         : `file_urls.${fileIdx}`;
 
                     await collection.updateOne(
-                        { _id: new ObjectId(docId) },
+                        { _id: objectId },
                         { $set: { [`${path}.humanReviewed`]: true, [`${path}.humanReviewedAt`]: new Date() } }
                     );
 
@@ -1605,12 +1717,21 @@ async function main() {
                     const data = JSON.parse(body);
                     const { docId, fileIdx, frameIdx } = data;
 
+                    let objectId;
+                    try {
+                        objectId = new ObjectId(docId);
+                    } catch {
+                        res.writeHead(400);
+                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
+                        return;
+                    }
+
                     const path = frameIdx !== null && frameIdx !== undefined
                         ? `file_urls.${fileIdx}.frames.${frameIdx}`
                         : `file_urls.${fileIdx}`;
 
                     await collection.updateOne(
-                        { _id: new ObjectId(docId) },
+                        { _id: objectId },
                         { $set: { [`${path}.discarded`]: true } }
                     );
 
