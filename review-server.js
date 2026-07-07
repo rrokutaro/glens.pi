@@ -1343,6 +1343,7 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
                         discarded: { $ne: true }
                     }
@@ -1353,6 +1354,7 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
                         discarded: { $ne: true }
                     }
@@ -1420,6 +1422,7 @@ async function checkDone(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
                         discarded: { $ne: true }
                     }
@@ -1430,6 +1433,7 @@ async function checkDone(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
                         discarded: { $ne: true }
                     }
@@ -1437,6 +1441,7 @@ async function checkDone(collection) {
             }
         ]
     });
+
     log('info', `Queue: ${remaining} item(s) remaining`);
     return remaining;
 }
