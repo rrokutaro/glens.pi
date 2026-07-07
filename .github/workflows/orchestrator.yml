@@ -91,6 +91,22 @@ on:
         description: 'Save every review collage JPEG (+ ref map) to the output artifacts for debugging (true/false)'
         required: false
         default: 'false'
+      audit_enabled:
+        description: 'Enable the JSON Audit & Repair stage (true/false)'
+        required: false
+        default: 'true'
+      audit_limit:
+        description: 'Max number of reviewed responses to audit per run'
+        required: false
+        default: '40'
+      audit_model:
+        description: 'Gemini model to use for the audit/repair pass (leave empty to use gemini_model)'
+        required: false
+        default: ''
+      audit_save_changes:
+        description: 'Persist the per-item changes array from the auditor into MongoDB as auditChanges (true/false)'
+        required: false
+        default: 'false'
 
   repository_dispatch:
     types:
@@ -246,6 +262,10 @@ jobs:
           ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || github.event.client_payload.gemini_model || 'gemini-3.5-flash-lite' }}
           ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || github.event.client_payload.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
           ORCH_REVIEW_SAVE_COLLAGES: ${{ github.event.inputs.review_save_collages || github.event.client_payload.review_save_collages || 'false' }}
+          ORCH_AUDIT_ENABLED: ${{ github.event.inputs.audit_enabled || github.event.client_payload.audit_enabled || 'true' }}
+          ORCH_AUDIT_LIMIT: ${{ github.event.inputs.audit_limit || github.event.client_payload.audit_limit || '40' }}
+          ORCH_AUDIT_MODEL: ${{ github.event.inputs.audit_model || github.event.client_payload.audit_model || '' }}
+          ORCH_AUDIT_SAVE_CHANGES: ${{ github.event.inputs.audit_save_changes || github.event.client_payload.audit_save_changes || 'false' }}
           ORCH_RUN_ID: ${{ github.run_id }}
         run: node orchestrator.js
 
