@@ -89,6 +89,20 @@ const CONFIG = {
         scriptPath:       process.env.ORCH_PRODUCT_IMG_SCRIPT || path.join(SCRIPT_DIR, 'ecom-image-extractor.py'),
         timeoutMs:        parseInt(process.env.ORCH_PRODUCT_IMG_TIMEOUT_MS || '300000', 10),
     },
+    audit: {
+        enabled:     process.env.ORCH_AUDIT_ENABLED !== 'false', // on by default
+        // How many individual file_urls / frame items to audit per run.
+        limit:       parseInt(process.env.ORCH_AUDIT_LIMIT || '40', 10),
+        // Gemini model to use for the audit/repair pass.
+        // Defaults to the same model used for review; override with
+        // ORCH_AUDIT_MODEL to use a more capable model for repair reasoning.
+        model:       process.env.ORCH_AUDIT_MODEL || process.env.ORCH_GEMINI_MODEL || 'gemini-3.5-flash-lite',
+        // Target input token budget per batch (mirrors the spec's 60K figure).
+        targetBatchTokens: parseInt(process.env.ORCH_AUDIT_BATCH_TOKENS || '60000', 10),
+        // Whether to persist the per-item `changes` array from the LLM into
+        // MongoDB as `auditChanges`.  Off by default (adds bulk to docs).
+        saveChanges: process.env.ORCH_AUDIT_SAVE_CHANGES === 'true',
+    },
     timeouts: {
         navigation:     45_000,
         downloaderIdle: 15_000,
@@ -1322,6 +1336,439 @@ async function runReviewStage(db, collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  JSON AUDIT & REPAIR STAGE (STEP 6.5 — between Review and Image Extraction)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Rough token estimator (no native tiktoken in orchestrator — use char/4 ratio
+ * with a 1.1× safety buffer, same as the spec's fallback path).
+ */
+function estimateTokens(text) {
+    if (!text || typeof text !== 'string') return 0;
+    return Math.ceil((text.length / 4) * 1.1);
+}
+
+/**
+ * Split a flat array of audit items into batches whose combined raw text stays
+ * under TARGET_BATCH_TOKENS.  Each batch is a sub-array of items.
+ */
+function chunkAuditBatches(items, targetTokens) {
+    const batches = [];
+    let current = [];
+    let currentTokens = 0;
+
+    for (const item of items) {
+        const itemTokens = estimateTokens(item.raw);
+        if (current.length > 0 && currentTokens + itemTokens > targetTokens) {
+            batches.push(current);
+            current = [item];
+            currentTokens = itemTokens;
+        } else {
+            current.push(item);
+            currentTokens += itemTokens;
+        }
+    }
+    if (current.length > 0) batches.push(current);
+    return batches;
+}
+
+const AUDIT_PROMPT = `You are a JSON repair and data-quality enforcement engine. Your sole job is to receive an array of raw product-analysis responses, fix any structural or logical defects, and return a strictly formatted result array.
+
+INPUT FORMAT:
+You will receive a JSON object with a single key "items". Each item has:
+- seq: integer (your reference ID — echo it back exactly)
+- raw: string containing either valid JSON, malformed JSON, or plain text
+
+OUTPUT FORMAT:
+Return ONLY a JSON object with key "results". Each result has:
+- seq: integer (must match the input seq exactly)
+- status: one of "fixed", "unchanged", "empty", "unfixable"
+- products: array of product objects, or null if unfixable
+- changes: array of short human-readable strings describing what was modified
+
+Schema:
+{"results":[{"seq":0,"status":"fixed|unchanged|empty|unfixable","products":[...],"changes":[]}]}
+
+RULES — apply in this exact order:
+
+1. PARSING
+   - If "raw" is valid JSON and contains a "products" array → proceed to validation.
+   - If "raw" is malformed JSON but you can confidently reconstruct the intended structure → status: "fixed".
+   - If "raw" is unparseable garbage, contains no product data, or is just conversational text → status: "unfixable", products: null.
+   - If parseable but "products" array is empty after validation → status: "empty", products: [].
+
+2. PER-PRODUCT VALIDATION (mutate every product in place)
+   Required fields:
+   - title: non-empty string. If missing/empty → "Unknown Product".
+   - brand: non-empty string. If missing/empty → "Unknown".
+   - description: string. If missing/empty → "".
+   - category: must be one of: clothing, footwear, accessory, jewelry, bag, watch, eyewear, hat, belt, cosmetics, skincare, tech_accessory, lifestyle, other. If invalid → "other".
+   - price.current: string containing a numeric value. If missing/invalid → "0.00".
+   - price.original: string or null. If same as current → null. If missing → null.
+   - price.currency: 3-letter ISO code (USD, EUR, GBP, etc.). If missing/invalid → "USD".
+   - availability: one of "In stock", "Out of stock", "Pre-order", "Limited", "Unknown". If invalid → "Unknown".
+   - sizing: array of strings. If a plain string → wrap in array. If missing/invalid → [].
+   - sources: array of source objects. If missing → []. If not an array → [].
+   - dropshipViability.score: integer 1–10. Clamp to range if outside.
+   - dropshipViability.reasoning: non-empty string. If missing → "".
+   - dropshipViability.risks: array of strings. If missing/invalid → [].
+   - alternatives: array of alternative objects. If missing → []. If not an array → [].
+   - sizingGuide: string. If missing → "".
+   - basePrice: string. If missing → use price.current.
+   - recommendedMarkup.type: "percentage" or "fixed". If invalid → "percentage".
+   - recommendedMarkup.value: string. If missing/invalid → "30".
+   - recommendedMarkup.currency: string or null. If type is "percentage" → null.
+   - recommendedShippingRate.amount: string. If missing → "0".
+   - recommendedShippingRate.currency: string. If missing → "USD".
+   - recommendedShippingRate.coverage: string. If missing → "Worldwide".
+   - shippingAndReturns: string. If missing → "".
+
+3. SOURCE URL CLEANUP (sources array)
+   Remove any source where url:
+   - Is a bare domain (no path, or path is exactly "/" or "/home" or "/index.html")
+   - Contains any of these path segments: /collections/, /category/, /categories/, /shop/, /store/, /search, /find, /query, /blog/, /article/, /news/, /about/, /contact/
+   - Has query params indicating search: ?q=, ?search=, ?query=, ?find=
+   - Path is generic without a product slug (e.g., "/products" with no identifier after it)
+
+   After removal, deduplicate sources by exact URL string:
+   - Normalize before comparing: lowercase the full URL, strip trailing slash, strip common tracking query params (utm_source, utm_medium, utm_campaign, fbclid, gclid).
+   - Keep the FIRST occurrence in the original order. Discard later duplicates.
+
+4. ALTERNATIVE URL CLEANUP (alternatives array)
+   Apply the SAME invalid-URL removal rules as sources.
+   Then deduplicate alternatives by exact normalized URL (same normalization as above).
+   Then remove any alternative whose normalized URL exactly matches any source's normalized URL in the SAME product.
+
+5. POST-CLEANUP PRODUCT STATE
+   - If a product's sources array becomes empty after cleanup → set sources: [].
+   - If a product's alternatives array becomes empty → set alternatives: [].
+   - Do NOT remove the product from the array just because it has no sources.
+
+6. OUTPUT CONSTRAINTS
+   - Return ONLY the JSON object. No markdown code blocks, no explanations, no conversational text.
+   - Do not hallucinate product data. If you cannot reconstruct a product with confidence, omit it.
+   - The "changes" array should be concise: e.g., "Fixed malformed JSON", "Removed 2 invalid source URLs", "Deduplicated 1 alternative", "Clamped dropshipViability.score from 15 to 10".`;
+
+/**
+ * Fetch all reviewed images/frames that have a response but have not yet been
+ * audited.  Walks posts in natural file_urls order (same pattern as
+ * fetchUnreviewedFiles) and collects up to `limit` items.
+ */
+async function fetchUnauditedFiles(collection, limit) {
+    const candidatePosts = await collection
+        .find({
+            discarded: { $ne: true },
+            $or: [
+                {
+                    file_urls: {
+                        $elemMatch: {
+                            type: 'image',
+                            reviewed: true,
+                            response: { $exists: true, $ne: null },
+                            auditedAt: { $exists: false },
+                        }
+                    }
+                },
+                {
+                    'file_urls.frames': {
+                        $elemMatch: {
+                            type: 'image',
+                            reviewed: true,
+                            response: { $exists: true, $ne: null },
+                            auditedAt: { $exists: false },
+                        }
+                    }
+                }
+            ]
+        })
+        .project({ post_id: 1, file_urls: 1 })
+        .limit(limit * 3 + 10)
+        .toArray();
+
+    const items = [];
+
+    outer:
+    for (const post of candidatePosts) {
+        if (!Array.isArray(post.file_urls)) continue;
+
+        for (let i = 0; i < post.file_urls.length; i++) {
+            if (items.length >= limit) break outer;
+
+            const file = post.file_urls[i];
+            if (!file) continue;
+
+            if (file.type === 'image' && file.reviewed && file.response != null && !file.auditedAt) {
+                const raw = typeof file.response === 'object'
+                    ? JSON.stringify(file.response)
+                    : String(file.response);
+                items.push({
+                    seq: items.length,
+                    postId: post.post_id,
+                    postObjectId: post._id,
+                    path: `file_urls.${i}`,
+                    raw,
+                });
+            } else if (file.type === 'video' && Array.isArray(file.frames)) {
+                for (let j = 0; j < file.frames.length; j++) {
+                    if (items.length >= limit) break outer;
+
+                    const frame = file.frames[j];
+                    if (!frame || !frame.reviewed || frame.response == null || frame.auditedAt) continue;
+
+                    const raw = typeof frame.response === 'object'
+                        ? JSON.stringify(frame.response)
+                        : String(frame.response);
+                    items.push({
+                        seq: items.length,
+                        postId: post.post_id,
+                        postObjectId: post._id,
+                        path: `file_urls.${i}.frames.${j}`,
+                        raw,
+                    });
+                }
+            }
+        }
+    }
+
+    return items;
+}
+
+/**
+ * Call Gemini with the audit prompt for a single batch of items.
+ * Returns the parsed `results` array from the LLM response, or throws.
+ */
+async function auditBatchWithGemini(db, batchItems) {
+    const payload = JSON.stringify({ items: batchItems.map(({ seq, raw }) => ({ seq, raw })) });
+    let lastErr = null;
+
+    for (let attempt = 0; attempt < CONFIG.review.maxRetries; attempt++) {
+        const keyInfo = await getBestGeminiApiKey(db);
+        if (!keyInfo || !keyInfo.apiKey) {
+            throw new Error('No Gemini API key available (none configured or all rate-limited)');
+        }
+
+        const { keyHash, apiKey } = keyInfo;
+        try {
+            const resp = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.audit.model}:generateContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: AUDIT_PROMPT },
+                                { text: payload },
+                            ],
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            responseMimeType: 'application/json',
+                        },
+                    }),
+                }
+            );
+
+            if (resp.status === 429) {
+                log('warn', `Audit: Gemini 429 rate-limited on key ${keyHash ?? '(fallback)'} — rotating`);
+                await markGeminiKeyRateLimited(db, keyHash);
+                lastErr = new Error('Gemini 429 rate limited');
+                continue;
+            }
+
+            if (!resp.ok) {
+                const body = await resp.text().catch(() => '');
+                await releaseGeminiApiKey(db, keyHash);
+                throw new Error(`Gemini API error (${resp.status}): ${body.slice(0, 300)}`);
+            }
+
+            const data = await resp.json();
+            await releaseGeminiApiKey(db, keyHash);
+
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error('Audit: Gemini response missing text content');
+
+            const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+            const parsed = JSON.parse(cleaned);
+            if (!parsed || !Array.isArray(parsed.results)) {
+                throw new Error('Audit: Gemini response missing "results" array');
+            }
+            return parsed.results;
+
+        } catch (err) {
+            if (err.message?.includes('429')) continue;
+            lastErr = err;
+            log('warn', `Audit: attempt ${attempt + 1}/${CONFIG.review.maxRetries} failed: ${err.message.slice(0, 200)}`);
+        }
+    }
+
+    throw lastErr || new Error('Audit batch failed after retries');
+}
+
+async function runAuditStage(db, collection) {
+    log('info', '── Audit Stage: Fetching un-audited reviewed responses ──');
+
+    await ensureGeminiQuotaDocs(db);
+
+    if (!CONFIG.review.apiKeys.length) {
+        log('warn', 'No Gemini API keys configured (ORCH_GEMINI_API_KEYS) — skipping audit stage.');
+        return { audited: 0, fixed: 0, unchanged: 0, empty: 0, unfixable: 0, discarded: 0, failed: 0 };
+    }
+
+    const allItems = await fetchUnauditedFiles(collection, CONFIG.audit.limit);
+    log('info', `Found ${allItems.length} un-audited item(s) (limit=${CONFIG.audit.limit}).`);
+
+    const results = { audited: 0, fixed: 0, unchanged: 0, empty: 0, unfixable: 0, discarded: 0, failed: 0 };
+    if (allItems.length === 0) return results;
+
+    // Chunk into token-budget batches
+    const batches = chunkAuditBatches(allItems, CONFIG.audit.targetBatchTokens);
+    log('info', `Audit: ${allItems.length} item(s) split into ${batches.length} batch(es).`);
+
+    // seq → item lookup (seq is 0-based index assigned during fetch)
+    const itemBySeq = new Map(allItems.map(item => [item.seq, item]));
+
+    // Collect all LLM results so we can do per-post discard checks afterwards
+    const llmResultBySeq = new Map();
+
+    for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        log('info', `Audit: batch ${b + 1}/${batches.length} — ${batch.length} item(s)`);
+
+        let llmResults;
+        try {
+            llmResults = await auditBatchWithGemini(db, batch);
+        } catch (err) {
+            log('error', `Audit: Gemini call failed for batch ${b + 1}: ${err.message.slice(0, 200)}`);
+            results.failed += batch.length;
+            continue;
+        }
+
+        // Build a seq→result map from this batch's response
+        const batchResultBySeq = new Map();
+        for (const r of llmResults) {
+            if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
+        }
+
+        // Apply Mongo writes for every item in this batch
+        for (const batchItem of batch) {
+            const llmResult = batchResultBySeq.get(batchItem.seq);
+            if (!llmResult) {
+                log('warn', `Audit: no result returned for seq=${batchItem.seq} (${batchItem.postId} ${batchItem.path}) — skipping`);
+                results.failed++;
+                continue;
+            }
+
+            llmResultBySeq.set(batchItem.seq, llmResult);
+
+            const { status, products, changes } = llmResult;
+            const { path, postObjectId, postId } = batchItem;
+
+            const now = new Date();
+            let $set;
+
+            if (status === 'fixed' || status === 'unchanged') {
+                // Always wrap in { products: [...] } shape so downstream (Step 7) works
+                const productsArray = Array.isArray(products) ? products : [];
+                $set = {
+                    [`${path}.response`]:     { products: productsArray },
+                    [`${path}.auditedAt`]:    now,
+                    [`${path}.auditStatus`]:  'audited',
+                };
+                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                    $set[`${path}.auditChanges`] = changes;
+                }
+                results[status === 'fixed' ? 'fixed' : 'unchanged']++;
+            } else if (status === 'empty') {
+                $set = {
+                    [`${path}.response`]:    { products: [] },
+                    [`${path}.auditedAt`]:   now,
+                    [`${path}.auditStatus`]: 'audited',
+                };
+                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                    $set[`${path}.auditChanges`] = changes;
+                }
+                results.empty++;
+            } else {
+                // unfixable
+                $set = {
+                    [`${path}.response`]:    { products: [] },
+                    [`${path}.auditedAt`]:   now,
+                    [`${path}.auditStatus`]: 'unfixable',
+                };
+                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                    $set[`${path}.auditChanges`] = changes;
+                }
+                results.unfixable++;
+            }
+
+            try {
+                await collection.updateOne({ _id: postObjectId }, { $set });
+                results.audited++;
+                log('debug', `Audit: ${postId} ${path} → ${status}${changes?.length ? ' [' + changes.join('; ') + ']' : ''}`);
+            } catch (err) {
+                log('error', `Audit: failed to write audit result for ${postId} ${path}: ${err.message}`);
+                results.failed++;
+            }
+        }
+    }
+
+    // ── Per-post discard check ───────────────────────────────────────────────
+    // After all writes, re-fetch each affected post and check if every
+    // file_url entry and frame now has response.products.length === 0
+    // (or auditStatus === 'unfixable').  If so, mark the post discarded.
+    const affectedPostIds = [...new Set(allItems.map(i => String(i.postObjectId)))];
+
+    for (const postObjIdStr of affectedPostIds) {
+        try {
+            const postDoc = await collection.findOne(
+                { _id: allItems.find(i => String(i.postObjectId) === postObjIdStr).postObjectId },
+                { projection: { post_id: 1, file_urls: 1, discarded: 1 } }
+            );
+            if (!postDoc || postDoc.discarded) continue;
+            if (!Array.isArray(postDoc.file_urls) || postDoc.file_urls.length === 0) continue;
+
+            let allEmpty = true;
+            for (const file of postDoc.file_urls) {
+                if (!file) continue;
+
+                if (file.type === 'image') {
+                    // If it has an audited response with products, not empty
+                    const productsEmpty = !file.response ||
+                        !Array.isArray(file.response.products) ||
+                        file.response.products.length === 0;
+                    const isUnfixable = file.auditStatus === 'unfixable';
+                    if (!(productsEmpty || isUnfixable)) { allEmpty = false; break; }
+                } else if (file.type === 'video' && Array.isArray(file.frames)) {
+                    for (const frame of file.frames) {
+                        if (!frame) continue;
+                        const productsEmpty = !frame.response ||
+                            !Array.isArray(frame.response.products) ||
+                            frame.response.products.length === 0;
+                        const isUnfixable = frame.auditStatus === 'unfixable';
+                        if (!(productsEmpty || isUnfixable)) { allEmpty = false; break; }
+                    }
+                    if (!allEmpty) break;
+                }
+            }
+
+            if (allEmpty) {
+                await collection.updateOne(
+                    { _id: postDoc._id },
+                    { $set: { discarded: true, discardedReason: 'audit: all products empty or unfixable' } }
+                );
+                results.discarded++;
+                log('info', `Audit: discarded post ${postDoc.post_id} — all products empty/unfixable`);
+            }
+        } catch (err) {
+            log('warn', `Audit: post-discard check failed for ${postObjIdStr}: ${err.message}`);
+        }
+    }
+
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  PRODUCT SOURCE IMAGE EXTRACTION STAGE (STEP 7)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1395,6 +1842,7 @@ async function fetchPostsWithProductResponses(collection, limit) {
             {
                 file_urls: {
                     $elemMatch: {
+                        auditStatus: 'audited',   // only audited responses
                         'response.products': {
                             $elemMatch: {
                                 sources: {
@@ -1408,6 +1856,7 @@ async function fetchPostsWithProductResponses(collection, limit) {
             {
                 'file_urls.frames': {
                     $elemMatch: {
+                        auditStatus: 'audited',   // only audited responses
                         'response.products': {
                             $elemMatch: {
                                 sources: {
@@ -2568,6 +3017,19 @@ async function main() {
         log('info', 'Review stage disabled (ORCH_REVIEW_ENABLED=false) — skipping.');
     }
 
+    // ── Step 6.5 — JSON Audit & Repair ────────────────────────────────────────
+    let auditResults = { audited: 0, fixed: 0, unchanged: 0, empty: 0, unfixable: 0, discarded: 0, failed: 0 };
+    if (CONFIG.audit.enabled) {
+        log('info', '── Step 6.5: JSON Audit & Repair (Gemini) ──');
+        try {
+            auditResults = await runAuditStage(db, collection);
+        } catch (err) {
+            log('error', `Audit stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'Audit stage disabled (ORCH_AUDIT_ENABLED=false) — skipping.');
+    }
+
     // ── Step 7 — Product Source Image Extraction ───────────────────────────────
     let productImageResults = { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
     if (CONFIG.productImageExtraction.enabled) {
@@ -2593,6 +3055,7 @@ async function main() {
     if (CONFIG.recording.enabled) log('info', `  Recording: ${RECORDINGS_DIR}`);
     if (CONFIG.review.enabled) log('info', `  Review:   ${reviewResults.reviewed} reviewed | ${reviewResults.kept} kept | ${reviewResults.rejected} rejected | ${reviewResults.collages} collage(s) | ${reviewResults.failed} failed`);
     if (CONFIG.review.enabled && CONFIG.review.saveCollages) log('info', `  Collages: ${COLLAGES_DIR}`);
+    if (CONFIG.audit.enabled) log('info', `  Audit:    ${auditResults.audited} audited | ${auditResults.fixed} fixed | ${auditResults.unchanged} unchanged | ${auditResults.empty} empty | ${auditResults.unfixable} unfixable | ${auditResults.discarded} post(s) discarded | ${auditResults.failed} failed`);
     if (CONFIG.productImageExtraction.enabled) log('info', `  Product Images: ${productImageResults.processed} processed | ${productImageResults.succeeded} succeeded | ${productImageResults.failed} failed | ${productImageResults.updatedPosts} post(s) updated`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
@@ -2608,6 +3071,7 @@ async function main() {
             recording: CONFIG.recording.enabled,
             review: CONFIG.review.enabled ? reviewResults : null,
             collagesSaved: CONFIG.review.enabled && CONFIG.review.saveCollages,
+            audit: CONFIG.audit.enabled ? auditResults : null,
             productImageExtraction: CONFIG.productImageExtraction.enabled ? productImageResults : null,
         }, null, 2)
     );
