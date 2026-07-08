@@ -1851,6 +1851,7 @@ async function runTextExtractorScript(urls, cfg) {
     fs.writeFileSync(urlsPath, JSON.stringify(urls));
 
     const args = [
+        '-u', // Force Python to print logs instantly (unbuffered)
         cfg.scriptPath,
         '-u', urlsPath,
         '-o', outPath,
@@ -1869,7 +1870,13 @@ async function runTextExtractorScript(urls, cfg) {
             reject(new Error(`Text extraction timed out after ${cfg.timeoutMs}ms`));
         }, cfg.timeoutMs);
 
-        proc.stderr.on('data', d => { stderr += d; });
+        // Stream logs directly to the console in real-time
+        proc.stdout.on('data', d => process.stdout.write(`[TEXT-EXTRACTOR] ${d}`));
+        proc.stderr.on('data', d => { 
+            stderr += d; 
+            process.stderr.write(`[TEXT-EXTRACTOR] ${d}`); 
+        });
+
         proc.on('close', code => {
             clearTimeout(timer);
             if (killed) return;
@@ -1965,10 +1972,23 @@ async function runDataEnrichmentStage(db, collection) {
     log('info', `Running text extraction on ${uniqueUrls.length} unique URL(s) from ${allPending.length} source(s)...`);
 
     let pythonResults = {};
-    try {
-        pythonResults = await runTextExtractorScript(uniqueUrls, CONFIG.textExtraction);
-    } catch (err) {
-        log('error', `Text extraction script failed entirely: ${err.message}`);
+    // Chunk URLs into batches of 30 to prevent the Python script from timing out
+    const urlBatches = chunkArray(uniqueUrls, 30);
+    
+    for (let b = 0; b < urlBatches.length; b++) {
+        log('info', `Text extraction batch ${b + 1}/${urlBatches.length} (${urlBatches[b].length} URLs)...`);
+        try {
+            const batchResults = await runTextExtractorScript(urlBatches[b], CONFIG.textExtraction);
+            Object.assign(pythonResults, batchResults);
+        } catch (err) {
+            log('error', `Text extraction batch ${b + 1} failed: ${err.message}`);
+            // If a batch fails (e.g. timeout), we gracefully catch it. 
+            // Missing URLs will be flagged as failed further down the loop.
+        }
+    }
+
+    if (Object.keys(pythonResults).length === 0) {
+        log('error', 'All text extraction batches failed. Skipping LLM structuring.');
         return { processed: allPending.length, succeeded: 0, failed: allPending.length, updatedPosts: 0 };
     }
 
