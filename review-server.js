@@ -634,6 +634,7 @@ function renderItem() {
         <div class="p-info">
           <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
           <div class="p-brand">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
+          \${(p.textExtraction?.status === 'completed' || p.dropship_advisory) ? \`<div style="font-size:9px; font-weight:700; color:var(--success); margin-top:1px; letter-spacing:0.5px;">ENRICHED</div>\` : ''}
           <div class="p-status" style="color:\${statusColor}">\u25A0 \${statusLabel}</div>
         </div>
       </div>
@@ -715,6 +716,13 @@ function saveFormToLocalStorage() {
       desc: document.getElementById("eDesc")?.value || "",
       sizingGuide: document.getElementById("eSizingGuide")?.value || "",
       shipping: document.getElementById("eShipping")?.value || "",
+      features: document.getElementById("eFeatures")?.value || "",
+      advisory: document.getElementById("eAdvisory")?.value || "",
+      variants: document.getElementById("eVariants")?.value || "",
+      sizeGuide: document.getElementById("eSizeGuide")?.value || "",
+      reviews: document.getElementById("eReviews")?.value || "",
+      rating: document.getElementById("eRating")?.value || "",
+      reviewCount: document.getElementById("eReviewCount")?.value || "",
       // Note: selectedImages & currentGridUrls are already in state, persisted via normal flow
     };
     localStorage.setItem(key, JSON.stringify(data));
@@ -751,6 +759,13 @@ function restoreFormFromLocalStorage() {
     setVal("eDesc", data.desc);
     setVal("eSizingGuide", data.sizingGuide);
     setVal("eShipping", data.shipping);
+    setVal("eFeatures", data.features);
+    setVal("eAdvisory", data.advisory);
+    setVal("eVariants", data.variants);
+    setVal("eSizeGuide", data.sizeGuide);
+    setVal("eReviews", data.reviews);
+    setVal("eRating", data.rating);
+    setVal("eReviewCount", data.reviewCount);
 
     // Optional toast so user knows we restored unsaved work
     if (data.title || data.store) {
@@ -862,8 +877,20 @@ function openProduct(idx) {
       </div>
       <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
       <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(p.description || "")}</textarea></div>
+      <div class="field"><label>Features (one per line)</label><textarea id="eFeatures" placeholder="Durable\nWater resistant\n...">\${escapeHtml((p.features || []).join('\n'))}</textarea></div>
+      <div class="field"><label>Dropship Advisory</label><textarea id="eAdvisory">\${escapeHtml(p.dropship_advisory || "")}</textarea></div>
       <div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\${escapeHtml(p.sizingGuide || "")}</textarea></div>
       <div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\${escapeHtml(p.shippingAndReturns || "")}</textarea></div>
+    </div>
+    <div class="card">
+      <h3>ADVANCED ENRICHED DATA</h3>
+      <div class="field"><label>Variants (JSON array)</label><textarea id="eVariants" style="min-height:110px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.variants || [], null, 2))}</textarea></div>
+      <div class="field"><label>Size Guide (JSON)</label><textarea id="eSizeGuide" style="min-height:80px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.size_guide || null, null, 2))}</textarea></div>
+      <div class="field"><label>Reviews (JSON array)</label><textarea id="eReviews" style="min-height:80px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.reviews || [], null, 2))}</textarea></div>
+      <div class="field-row">
+        <div class="field"><label>Rating</label><input id="eRating" type="number" step="0.1" value="\${escapeHtml(p.rating != null ? String(p.rating) : '')}"></div>
+        <div class="field"><label>Review Count</label><input id="eReviewCount" type="number" value="\${escapeHtml(p.review_count != null ? String(p.review_count) : '')}"></div>
+      </div>
     </div>
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
@@ -1062,6 +1089,21 @@ async function saveProduct(status = "completed") {
   p.sizingGuide = document.getElementById("eSizingGuide").value;
   p.shippingAndReturns = document.getElementById("eShipping").value;
   
+  // NEW: enriched fields from orchestrator schema
+  const featEl = document.getElementById("eFeatures");
+  p.features = featEl ? featEl.value.split('\n').map(s => s.trim()).filter(Boolean) : (p.features || []);
+  p.dropship_advisory = document.getElementById("eAdvisory")?.value || "";
+  const varEl = document.getElementById("eVariants");
+  if (varEl) { try { p.variants = varEl.value.trim() ? JSON.parse(varEl.value) : (p.variants || []); } catch(e){} }
+  const sgEl = document.getElementById("eSizeGuide");
+  if (sgEl) { try { p.size_guide = sgEl.value.trim() ? JSON.parse(sgEl.value) : (p.size_guide || null); } catch(e){} }
+  const revEl = document.getElementById("eReviews");
+  if (revEl) { try { p.reviews = revEl.value.trim() ? JSON.parse(revEl.value) : (p.reviews || []); } catch(e){} }
+  const ratEl = document.getElementById("eRating");
+  if (ratEl && ratEl.value) p.rating = parseFloat(ratEl.value);
+  const rcEl = document.getElementById("eReviewCount");
+  if (rcEl && rcEl.value) p.review_count = parseInt(rcEl.value, 10);
+  
   // Save custom images array
   p.customImages = p.customImages || [];
   
@@ -1254,13 +1296,35 @@ function flattenProducts(products) {
         };
 
         allSources.forEach(s => {
+            // Merge enriched fields from source (new orchestrator schema) 
+            const enrichedFromS = {
+                features: Array.isArray(s.features) && s.features.length ? s.features : (base.features || []),
+                dropship_advisory: s.dropship_advisory || base.dropship_advisory || '',
+                description: s.description || base.description || '',
+                shippingAndReturns: s.shippingAndReturns || base.shippingAndReturns || '',
+                variants: Array.isArray(s.variants) && s.variants.length ? s.variants : (base.variants || []),
+                size_guide: s.size_guide || base.size_guide || null,
+                reviews: Array.isArray(s.reviews) && s.reviews.length ? s.reviews : (base.reviews || []),
+                rating: (typeof s.rating === 'number' ? s.rating : (typeof base.rating === 'number' ? base.rating : null)),
+                review_count: (typeof s.review_count === 'number' ? s.review_count : (typeof base.review_count === 'number' ? base.review_count : null)),
+            };
+            let finalPrice = base.price;
+            if (s.price && typeof s.price === 'object' && s.price.current !== undefined) {
+                finalPrice = s.price;
+            } else if (s.price) {
+                finalPrice = resolvePrice(base.price, s.price);
+            }
             addVariant({
                 ...base,
-                store: s.store || '',
+                ...enrichedFromS,
+                store: s.store || base.store || '',
                 url: s.url || '',
-                price: resolvePrice(base.price, s.price),
-                availability: s.availability || base.availability,
-                images: s.images || []
+                price: finalPrice,
+                availability: s.availability || base.availability || '',
+                images: (Array.isArray(s.images) && s.images.length ? s.images : (base.images || [])),
+                title: s.title || base.title,
+                brand: s.brand || base.brand,
+                category: s.category || base.category,
             });
         });
 
@@ -1314,6 +1378,15 @@ function normalizeResponse(item) {
         recommendedMarkup: p.recommendedMarkup || null,
         recommendedShippingRate: p.recommendedShippingRate || null,
         dropshipViability: p.dropshipViability || null,
+        // NEW enriched schema support (orchestrator text extraction)
+        features: Array.isArray(p.features) ? p.features : [],
+        dropship_advisory: p.dropship_advisory || '',
+        variants: Array.isArray(p.variants) ? p.variants : [],
+        size_guide: p.size_guide || null,
+        reviews: Array.isArray(p.reviews) ? p.reviews : [],
+        rating: (typeof p.rating === 'number' ? p.rating : null),
+        review_count: (typeof p.review_count === 'number' ? p.review_count : null),
+        textExtraction: p.textExtraction || null,
     }));
 
     if (rawText) resp.rawText = rawText;
@@ -1921,7 +1994,15 @@ async function main() {
                             [`${basePath}.customImages`]: product.customImages,
                             [`${basePath}.reviewStatus`]: product.reviewStatus,
                             [`${basePath}.isFlattened`]: product.isFlattened,
-                            [`${basePath}.reviewedAt`]: new Date()
+                            [`${basePath}.reviewedAt`]: new Date(),
+                            // NEW enriched fields
+                            [`${basePath}.features`]: product.features,
+                            [`${basePath}.dropship_advisory`]: product.dropship_advisory,
+                            [`${basePath}.variants`]: product.variants,
+                            [`${basePath}.size_guide`]: product.size_guide,
+                            [`${basePath}.reviews`]: product.reviews,
+                            [`${basePath}.rating`]: product.rating,
+                            [`${basePath}.review_count`]: product.review_count
                         }}
                     );
 
