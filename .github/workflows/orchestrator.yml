@@ -129,7 +129,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy
+          pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy lxml curl_cffi
           pip install -U crawl4ai imagehash httpx cloakbrowser
           playwright install-deps chromium
 
