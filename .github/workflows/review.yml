@@ -27,6 +27,14 @@ on:
         description: 'Log verbosity: debug | info | warn | error'
         required: false
         default: 'info'
+      gemini_api_keys:
+        description: 'Comma-separated Gemini API keys for manual Data Sync (or use secrets.ORCHESTRATOR_GEMINI_API_KEYS)'
+        required: false
+        default: ''
+      gemini_model:
+        description: 'Gemini model for text extraction sync'
+        required: false
+        default: 'gemini-3.5-flash-lite'
 
 jobs:
   review:
@@ -50,7 +58,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install "scenedetect[opencv]" ultralytics opencv-python-headless pillow numpy scipy
-          pip install -U crawl4ai imagehash httpx cloakbrowser beautifulsoup4
+          pip install -U crawl4ai imagehash httpx cloakbrowser beautifulsoup4 lxml curl_cffi
           playwright install-deps chromium
 
       - name: Install system dependencies
@@ -102,6 +110,13 @@ jobs:
           MONGO: ${{ github.event.inputs.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI }}
         run: echo "::add-mask::$MONGO"
 
+      - name: Mask Gemini keys
+        env:
+          KEYS: ${{ github.event.inputs.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS }}
+        run: |
+          IFS=',' read -ra KARR <<< "$KEYS"
+          for k in "${KARR[@]}"; do echo "::add-mask::$k"; done
+
       - name: Run Review Server
         env:
           ORCH_MONGODB_URI: ${{ github.event.inputs.mongodb_uri || secrets.ORCHESTRATOR_MONGODB_URI || '' }}
@@ -110,4 +125,6 @@ jobs:
           REVIEW_PORT: ${{ github.event.inputs.review_port || '3456' }}
           ORCH_LOG_LEVEL: ${{ github.event.inputs.log_level || 'info' }}
           ORCH_HF_TOKEN: ${{ github.event.inputs.hf_token || secrets.ORCHESTRATOR_HF_TOKEN || '' }}
+          ORCH_GEMINI_API_KEYS: ${{ github.event.inputs.gemini_api_keys || secrets.ORCHESTRATOR_GEMINI_API_KEYS || '' }}
+          ORCH_GEMINI_MODEL: ${{ github.event.inputs.gemini_model || 'gemini-3.5-flash-lite' }}
         run: node review-server.js
