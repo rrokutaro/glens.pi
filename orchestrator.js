@@ -11,7 +11,7 @@
  *  6. AI Review (Gemini) — collages of unreviewed images/frames
  *  6.5 JSON Audit & Repair (Gemini)
  *  7. Data Enrichment (Text Extraction + LLM Structuring) — runs ecom-text-extractor.py
- *     and Gemini LLM on sources to fetch actual product data, stores in HF & MongoDB.
+ *     and Gemini LLM on sources to fetch actual product data, replaces sources in MongoDB.
  *  8. Product Source Image Extraction — Fallback logic if Step 7 misses images.
  */
 
@@ -74,6 +74,7 @@ const CONFIG = {
     },
     textExtraction: {
         enabled:          process.env.ORCH_TEXT_EXTRACT_ENABLED !== 'false',
+        sourceLimit:      parseInt(process.env.ORCH_TEXT_EXTRACT_SOURCE_LIMIT || '50', 10),
         batchSize:        parseInt(process.env.ORCH_TEXT_EXTRACT_BATCH_SIZE || '50', 10),
         llmBatchSize:     parseInt(process.env.ORCH_TEXT_LLM_BATCH_SIZE || '2', 10),
         scriptPath:       path.join(SCRIPT_DIR, 'ecom-text-extractor.py'),
@@ -1093,6 +1094,9 @@ async function extractDataBatchWithGemini(db, batch) {
                         generationConfig: {
                             temperature: 0.1,
                             responseMimeType: 'application/json',
+                            thinkingConfig: {
+                                thinkingLevel: "HIGH" // (or use the exact key required by your Gemini API version, e.g., reasoning_effort: "high")
+                            }
                         },
                     }),
                 }
@@ -1804,6 +1808,60 @@ async function runAuditStage(db, collection) {
 //  STEP 7 — DATA ENRICHMENT (TEXT EXTRACTION & LLM STRUCTURING)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function parseGlensPrice(priceStr) {
+    if (!priceStr) return null;
+    const match = String(priceStr).match(/[\d,.]+/);
+    return match ? parseFloat(match[0].replace(/,/g, '')) : null;
+}
+
+function createFallbackSource(oldSource, errorMsg) {
+    return {
+        source_id: oldSource.source_id || "",
+        url: oldSource.url,
+        canonical_url: null,
+        success: false,
+        status_code: 400,
+        extracted_at: new Date().toISOString(),
+        name: "Unknown Product",
+        brand: oldSource.store || oldSource.vendor || oldSource.brand || null,
+        primary_category: null,
+        product_type: null,
+        color: null,
+        material: null,
+        description: null,
+        features: [],
+        price: parseGlensPrice(oldSource.price),
+        compare_at_price: null,
+        is_on_sale: false,
+        currency: "USD", // Assumed fallback
+        availability: oldSource.availability || "Unknown",
+        sku: null,
+        handle: null,
+        product_id: null,
+        vendor: oldSource.store || oldSource.vendor || oldSource.brand || null,
+        images: Array.isArray(oldSource.images) ? oldSource.images : [], // Preserve any existing fallback images
+        rating: null,
+        review_count: null,
+        reviews: [],
+        variants: [],
+        size_guide: null,
+        shipping_info: null,
+        return_policy: null,
+        coupon_codes: [],
+        product_tags: [],
+        breadcrumb: [],
+        base_price_for_markup: parseGlensPrice(oldSource.price),
+        recommended_markup_percentage: null,
+        calculated_markup_amount: null,
+        suggested_resell_price: null,
+        dropship_advisory: "Data extraction failed: " + errorMsg,
+        textExtraction: {
+            status: 'failed',
+            error: errorMsg
+        }
+    };
+}
+
 function gatherPendingTextSources(post) {
     const pending = [];
     if (!Array.isArray(post.file_urls)) return pending;
@@ -1825,7 +1883,8 @@ function gatherPendingTextSources(post) {
                         productIndex: p,
                         sourceIndex: s,
                         url: source.url,
-                        source_id: `src_${post._id}_${i}_${frameIndex}_${p}_${s}`
+                        source_id: `src_${post._id}_${i}_${frameIndex}_${p}_${s}`,
+                        oldSource: source // Retained so we can map fallback fields
                     });
                 }
             }
@@ -1962,6 +2021,12 @@ async function runDataEnrichmentStage(db, collection) {
     let allPending = [];
     for (const post of posts) {
         allPending.push(...gatherPendingTextSources(post));
+        // Hard limit on how many sources we process per run to avoid pipeline timeouts
+        if (allPending.length >= CONFIG.textExtraction.sourceLimit) {
+            log('info', `Source limit reached (${CONFIG.textExtraction.sourceLimit}). Halting further source discovery for this run.`);
+            allPending = allPending.slice(0, CONFIG.textExtraction.sourceLimit);
+            break;
+        }
     }
 
     if (allPending.length === 0) {
@@ -1989,10 +2054,9 @@ async function runDataEnrichmentStage(db, collection) {
 
     if (Object.keys(pythonResults).length === 0) {
         log('error', 'All text extraction batches failed. Skipping LLM structuring.');
-        return { processed: allPending.length, succeeded: 0, failed: allPending.length, updatedPosts: 0 };
+        // We will process them anyway down below to ensure they get fallback schemas and are marked as failed.
     }
 
-    const lfsFiles = [];
     const bulkOps = [];
     const llmBatchQueue = []; 
     let succeeded = 0;
@@ -2010,34 +2074,23 @@ async function runDataEnrichmentStage(db, collection) {
             bulkOps.push({
                 updateOne: {
                     filter: { _id: item.docId },
-                    update: { $set: { [`${dbPath}.textExtraction`]: { status: 'failed', error: rawData?.error || 'Unknown error' } } }
+                    update: { $set: { [dbPath]: createFallbackSource(item.oldSource, rawData?.error || 'Unknown error') } }
                 }
             });
             failed++;
             continue;
         }
 
-        try {
-            const rawBuf = Buffer.from(JSON.stringify(rawData, null, 2));
-            const rawFilename = `raw_${createHash('md5').update(item.url).digest('hex')}_${Date.now()}.json`;
-            const rawRepoPath = `scraped-posts/raw_sources/${rawFilename}`;
-            const rawBlob = await hfUploadBlob(rawBuf, rawRepoPath);
-            lfsFiles.push({ path: rawBlob.path, oid: rawBlob.oid, size: rawBlob.size });
-
-            llmBatchQueue.push({
+        llmBatchQueue.push({
+            source_id: item.source_id,
+            dbPath,
+            docId: item.docId,
+            oldSource: item.oldSource,
+            payload: {
                 source_id: item.source_id,
-                dbPath,
-                docId: item.docId,
-                rawBlob,
-                payload: {
-                    source_id: item.source_id,
-                    raw_data: rawData
-                }
-            });
-        } catch (err) {
-            log('error', `Failed to upload raw JSON for ${item.url}: ${err.message}`);
-            failed++;
-        }
+                raw_data: rawData
+            }
+        });
     }
 
     const llmChunks = chunkArray(llmBatchQueue, CONFIG.textExtraction.llmBatchSize);
@@ -2054,7 +2107,7 @@ async function runDataEnrichmentStage(db, collection) {
                 bulkOps.push({
                     updateOne: {
                         filter: { _id: item.docId },
-                        update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'failed', error: 'LLM structuring failed' } } }
+                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'LLM structuring failed') } }
                     }
                 });
                 failed++;
@@ -2066,85 +2119,49 @@ async function runDataEnrichmentStage(db, collection) {
             const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
             if (!cleanJson) {
                 log('warn', `Gemini missed source_id ${item.source_id}`);
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini missed source_id') } }
+                    }
+                });
                 failed++;
                 continue;
             }
 
             try {
-                const cleanBuf = Buffer.from(JSON.stringify(cleanJson, null, 2));
-                const cleanFilename = `clean_${createHash('md5').update(cleanJson.url || item.source_id).digest('hex')}_${Date.now()}.json`;
-                const cleanRepoPath = `scraped-posts/clean_sources/${cleanFilename}`;
-                const cleanBlob = await hfUploadBlob(cleanBuf, cleanRepoPath);
-                lfsFiles.push({ path: cleanBlob.path, oid: cleanBlob.oid, size: cleanBlob.size });
+                // Carry over the original URL just to be perfectly safe
+                cleanJson.url = cleanJson.url || item.oldSource.url;
 
-                const $set = {};
-                
-                const availabilityMap = { 'InStock': 'In stock', 'OutOfStock': 'Out of stock', 'PreOrder': 'Pre-order' };
-                const mappedAvailability = availabilityMap[cleanJson.availability] || 'Unknown';
-
-                const mappedPrice = {
-                    current: cleanJson.price != null ? String(cleanJson.price) : "",
-                    original: cleanJson.compare_at_price != null ? String(cleanJson.compare_at_price) : null,
-                    currency: cleanJson.currency || "USD"
-                };
-
-                $set[`${item.dbPath}.title`] = cleanJson.name || "Unknown Product";
-                $set[`${item.dbPath}.brand`] = cleanJson.brand || cleanJson.vendor || "Unknown";
-                $set[`${item.dbPath}.category`] = cleanJson.primary_category || cleanJson.product_type || "Unknown";
-                $set[`${item.dbPath}.features`] = cleanJson.features || [];
-                $set[`${item.dbPath}.dropship_advisory`] = cleanJson.dropship_advisory || "";
-                $set[`${item.dbPath}.description`] = cleanJson.description || "";
-                $set[`${item.dbPath}.shippingAndReturns`] = [cleanJson.shipping_info, cleanJson.return_policy].filter(Boolean).join("\n\n");
-                
-                const sizes = [...new Set((cleanJson.variants || []).map(v => v.size).filter(Boolean))];
-                if (sizes.length > 0) {
-                    $set[`${item.dbPath}.sizes`] = sizes;
-                    $set[`${item.dbPath}.sizing`] = sizes;
-                }
-                
-                $set[`${item.dbPath}.price`] = mappedPrice;
-                $set[`${item.dbPath}.availability`] = mappedAvailability;
-
-                if (Array.isArray(cleanJson.images) && cleanJson.images.length > 0) {
-                    $set[`${item.dbPath}.images`] = cleanJson.images;
+                // Carry over old images if the LLM/crawler failed to find any 
+                if (!Array.isArray(cleanJson.images) || cleanJson.images.length === 0) {
+                    cleanJson.images = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
                 }
 
-                $set[`${item.dbPath}.textExtraction`] = {
-                    status: 'completed',
-                    raw_url: item.rawBlob.url,
-                    clean_url: cleanBlob.url
+                cleanJson.textExtraction = {
+                    status: 'completed'
                 };
 
+                // Replace the entire source object in the array with our clean, unified schema
                 bulkOps.push({
                     updateOne: {
                         filter: { _id: item.docId },
-                        update: { $set }
+                        update: { $set: { [item.dbPath]: cleanJson } }
                     }
                 });
                 succeeded++;
             } catch (err) {
                 log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
+                    }
+                });
                 failed++;
             }
         }
         await sleep(2000); 
-    }
-
-    if (lfsFiles.length > 0) {
-        try {
-            // Fix: Deduplicate LFS paths to avoid "400 Bad Request: duplicate file path" from HuggingFace
-            const uniqueLfs = [];
-            const seenPaths = new Set();
-            for (const f of lfsFiles) {
-                if (!seenPaths.has(f.path)) {
-                    seenPaths.add(f.path);
-                    uniqueLfs.push(f);
-                }
-            }
-            await hfCommitFiles(uniqueLfs, `orchestrator: sync enriched text data [run ${CONFIG.runId}]`);
-        } catch (err) {
-            log('error', `HF Commit failed for text extraction: ${err.message}`);
-        }
     }
 
     let updatedPosts = 0;
@@ -2192,7 +2209,8 @@ function gatherPendingImageSources(post) {
                         productIndex: p,
                         sourceIndex: s,
                         url: source.url,
-                        store: source.store || '',
+                        // Pull from the new schema vendor/brand if store is missing
+                        store: source.store || source.vendor || source.brand || '',
                     });
                 }
             }
