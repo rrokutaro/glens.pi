@@ -9,9 +9,10 @@
  *  4. Upload assets to HuggingFace under scraped-posts/assets/
  *  5. Mark posts as downloaded:true + file_urls in MongoDB
  *  6. AI Review (Gemini) — collages of unreviewed images/frames
- *  7. Product Source Image Extraction — for every GLENS product source,
- *     fetch product-page images via ecom-image-extractor.py and save to
- *     response.products[].sources[].images
+ *  6.5 JSON Audit & Repair (Gemini)
+ *  7. Data Enrichment (Text Extraction + LLM Structuring) — runs ecom-text-extractor.py
+ *     and Gemini LLM on sources to fetch actual product data, stores in HF & MongoDB.
+ *  8. Product Source Image Extraction — Fallback logic if Step 7 misses images.
  */
 
 import { launch } from 'cloakbrowser/puppeteer';
@@ -47,35 +48,37 @@ const CONFIG = {
         concurrency: parseInt(process.env.ORCH_DOWNLOADER_CONCURRENCY || '3',  10),
     },
     review: {
-        enabled:          process.env.ORCH_REVIEW_ENABLED !== 'false', // on by default
-        // How many individual file_urls entries (images only) to pull from
-        // MongoDB and run through the Gemini reviewer in this run.
+        enabled:          process.env.ORCH_REVIEW_ENABLED !== 'false', 
         fetchLimit:       parseInt(process.env.ORCH_REVIEW_FETCH_LIMIT     || '60',  10),
-        // Collage constraints (mirrors the Infinite Collage Maker tool).
         maxRowsPerCollage: parseInt(process.env.ORCH_REVIEW_MAX_ROWS       || '4',   10),
         maxColsPerRow:     parseInt(process.env.ORCH_REVIEW_MAX_COLS       || '5',   10),
         targetRowHeight:   parseInt(process.env.ORCH_REVIEW_ROW_HEIGHT     || '480', 10),
         collageMaxWidth:   parseInt(process.env.ORCH_REVIEW_COLLAGE_WIDTH  || '2200',10),
         jpegQuality:       parseInt(process.env.ORCH_REVIEW_JPEG_QUALITY   || '82',  10),
-        // Each cell is forced to a fixed aspect ratio (width/height) so the
-        // collage grid is uniform and the LLM sees consistently-sized frames.
-        // Default 3:4 (portrait) = 0.75.  Set to 0 to use each image's
-        // natural ratio (old behaviour).
         cellAspectRatio:  parseFloat(process.env.ORCH_REVIEW_CELL_ASPECT_RATIO || '0.75'),
-        // White gutter (px) between cells and rows.  Set to 0 to disable.
         collageGutter:    parseInt(process.env.ORCH_REVIEW_COLLAGE_GUTTER  || '8',   10),
-        // Gemini model + keys (comma-separated list of API keys to rotate across).
         model:            process.env.ORCH_GEMINI_MODEL    || 'gemini-3.5-flash-lite',
         apiKeys:          (process.env.ORCH_GEMINI_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean),
         quotaCollection:  process.env.ORCH_GEMINI_QUOTA_COLLECTION || 'gemini_quotas',
         rateLimitCooldownMs: parseInt(process.env.ORCH_GEMINI_RATE_LIMIT_COOLDOWN_MS || String(10 * 60 * 1000), 10),
         lockStaleMs:      parseInt(process.env.ORCH_GEMINI_LOCK_STALE_MS || String(5 * 60 * 1000), 10),
         maxRetries:       parseInt(process.env.ORCH_GEMINI_MAX_RETRIES || '3', 10),
-        // Debug aid: save every collage JPEG sent to Gemini into the output
-        // artifacts dir so you can visually verify layout/ref alignment
-        // against the review_reason Gemini gave back. Off by default since
-        // it adds files to the run artifact; flip on to debug bad reviews.
         saveCollages:     process.env.ORCH_REVIEW_SAVE_COLLAGES === 'true',
+    },
+    audit: {
+        enabled:     process.env.ORCH_AUDIT_ENABLED !== 'false', 
+        limit:       parseInt(process.env.ORCH_AUDIT_LIMIT || '40', 10),
+        model:       process.env.ORCH_AUDIT_MODEL || process.env.ORCH_GEMINI_MODEL || 'gemini-3.5-flash-lite',
+        targetBatchTokens: parseInt(process.env.ORCH_AUDIT_BATCH_TOKENS || '60000', 10),
+        saveChanges: process.env.ORCH_AUDIT_SAVE_CHANGES === 'true',
+    },
+    textExtraction: {
+        enabled:          process.env.ORCH_TEXT_EXTRACT_ENABLED !== 'false',
+        batchSize:        parseInt(process.env.ORCH_TEXT_EXTRACT_BATCH_SIZE || '50', 10),
+        llmBatchSize:     parseInt(process.env.ORCH_TEXT_LLM_BATCH_SIZE || '2', 10),
+        scriptPath:       path.join(SCRIPT_DIR, 'ecom-text-extractor.py'),
+        pythonPath:       process.env.ORCH_PYTHON_PATH || 'python3',
+        timeoutMs:        parseInt(process.env.ORCH_TEXT_EXTRACT_TIMEOUT_MS || '300000', 10),
     },
     productImageExtraction: {
         enabled:          process.env.ORCH_PRODUCT_IMG_ENABLED !== 'false',
@@ -89,27 +92,13 @@ const CONFIG = {
         scriptPath:       process.env.ORCH_PRODUCT_IMG_SCRIPT || path.join(SCRIPT_DIR, 'ecom-image-extractor.py'),
         timeoutMs:        parseInt(process.env.ORCH_PRODUCT_IMG_TIMEOUT_MS || '300000', 10),
     },
-    audit: {
-        enabled:     process.env.ORCH_AUDIT_ENABLED !== 'false', // on by default
-        // How many individual file_urls / frame items to audit per run.
-        limit:       parseInt(process.env.ORCH_AUDIT_LIMIT || '40', 10),
-        // Gemini model to use for the audit/repair pass.
-        // Defaults to the same model used for review; override with
-        // ORCH_AUDIT_MODEL to use a more capable model for repair reasoning.
-        model:       process.env.ORCH_AUDIT_MODEL || process.env.ORCH_GEMINI_MODEL || 'gemini-3.5-flash-lite',
-        // Target input token budget per batch (mirrors the spec's 60K figure).
-        targetBatchTokens: parseInt(process.env.ORCH_AUDIT_BATCH_TOKENS || '60000', 10),
-        // Whether to persist the per-item `changes` array from the LLM into
-        // MongoDB as `auditChanges`.  Off by default (adds bulk to docs).
-        saveChanges: process.env.ORCH_AUDIT_SAVE_CHANGES === 'true',
-    },
     timeouts: {
         navigation:     45_000,
         downloaderIdle: 15_000,
         idleReset:      10_000,
     },
     recording: {
-        enabled:      process.env.ORCH_RECORDING !== 'false',   // on by default
+        enabled:      process.env.ORCH_RECORDING !== 'false',
         fps:          parseInt(process.env.ORCH_RECORDING_FPS     || '12',   10),
         quality:      parseInt(process.env.ORCH_RECORDING_QUALITY || '60',   10),
         resolution:   process.env.ORCH_RECORDING_RES              || '1280x800',
@@ -137,6 +126,14 @@ function log(level, ...args) {
     if (level === 'error') console.error(prefix, ...args);
     else if (level === 'warn') console.warn(prefix, ...args);
     else console.log(prefix, ...args);
+}
+
+function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -278,7 +275,7 @@ if __name__ == "__main__":
 `;
 
 
-// ─── Gemini reviewer prompt ──────────────────────────────────────────────────
+// ─── Gemini prompts ──────────────────────────────────────────────────────────
 const GEMINI_REVIEW_PROMPT = `You are an expert visual content curator for Instagram e-commerce. Your task is to analyze a collage image containing multiple frames/screenshots from Instagram posts and identify which individual frames should be sent to Google Lens for product identification.
 
 ## 1. SCOPE & ELIGIBILITY
@@ -344,6 +341,36 @@ Return a single JSON array. Each object represents one frame to be kept.
 - If **no frames** meet the eligibility criteria, return an empty array: \`[]\`
 - Do not include rejected frames in the output.
 - Do not wrap the JSON in markdown code blocks. Return raw JSON only.`;
+
+
+const DATA_EXTRACTION_PROMPT = `You are a product data extraction expert. I will provide you with a messy JSON payload containing data from one or multiple e-commerce product pages. Each input object will have a "source_id". Your task is to extract all relevant product information and output a clean, structured JSON array where each element strictly follows the schema template provided below.
+
+SYSTEM RULES AND OUTPUT FORMAT
+1. OUTPUT JSON ONLY. Output nothing but raw, valid JSON. Do not wrap the JSON in markdown formatting. Do not include any conversational text before or after the JSON.
+2. ALWAYS RETURN AN ARRAY. Your output must always be a JSON array. If the input is a single product, return an array containing one object.
+3. NULL VERSUS EMPTY ARRAYS. For string or number fields that cannot be found, use null. For missing array fields ("images", "variants", "reviews", "product_tags", "coupon_codes", "breadcrumb", "features"), use an empty array [] NEVER use null for an array.
+4. STRIP HTML. Remove all HTML tags from descriptions, reviews, and text fields. Return clean, readable plain text.
+
+EXTRACTION RULES
+1. DEEP EXTRACTION. Extract data from all available sources: schema_org, open_graph, meta_tags, dom_text, shopify_product, microdata, tables, lists, etc.
+2. IGNORE RELATED PRODUCTS. Focus ONLY on the main product(s) the page is actually selling. Strictly ignore products found in "You might also like", "Related Products", or "Recently Viewed" sections to prevent data pollution.
+3. 404 AND FAILED PAGES. If "success" is false or "status_code" is 400 or above, set all product details ("name", "price", "brand", etc.) to null or []. Provide a "dropship_advisory" explaining the page failed to load.
+4. VARIANTS. Include all available options inside the "variants" array. Ensure you capture the specific "size", "color", and variant "image_url" if available. If a product has variants but no specific size, use "One Size" for the "size" field.
+5. SIZE GUIDE. Only extract a size guide into the "size_guide" object if a sizing table explicitly exists on the page. Do not hallucinate or generate a fallback size guide. If none exists, set "size_guide" to null.
+6. POLICIES AND FEATURES. Summarize relevant text for "shipping_info" and "return_policy". Extract bulleted highlights or technical details into the "features" array.
+7. IMAGES. Deduplicate images. Include ALL distinct, high-resolution main product images found across all JSON nodes in the "images" array.
+8. MISSING CURRENCY. If "currency" is missing, attempt to infer it from the domain extension (.co.uk = GBP, .com.au = AUD) or default to USD.
+
+DROPSHIPPING AND MARKUP LOGIC You must reason and determine the optimal markup based on the product data. Do NOT use a fixed default percentage.
+- "base_price_for_markup": Use "compare_at_price" if it exists and is greater than "price". Otherwise, use "price".
+- "recommended_markup_percentage": Determine based on brand reputation (luxury equals higher, fast fashion equals lower), price point, category, sale status, and review scores.
+- "calculated_markup_amount": "base_price_for_markup" multiplied by ("recommended_markup_percentage" divided by 100).
+- "suggested_resell_price": "base_price_for_markup" plus "calculated_markup_amount".
+- MATH CONSTRAINT: Round all calculated monetary values to EXACTLY 2 decimal places. All values are in the product native "currency".
+- FAILURE CONSTRAINT: If "price" is null, set "base_price_for_markup", "recommended_markup_percentage", "calculated_markup_amount", and "suggested_resell_price" to null.
+- "dropship_advisory": Write 1 to 2 sentences explaining your markup reasoning and overall suitability for dropshipping based on stock, margins, and brand.
+
+OUTPUT SCHEMA TEMPLATE [ { "source_id": "string (MUST EXACTLY MATCH INPUT)", "url": "string", "canonical_url": "string or null", "success": boolean, "status_code": number, "extracted_at": "ISO 8601 timestamp", "name": "string or null", "brand": "string or null", "primary_category": "string or null", "product_type": "string or null", "color": "string or null", "material": "string or null", "description": "string or null", "features": ["string"], "price": number or null, "compare_at_price": number or null, "is_on_sale": boolean, "currency": "string (3-letter ISO code) or null", "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "handle": "string or null", "product_id": number or null, "vendor": "string or null", "created_at": "ISO timestamp or null", "updated_at": "ISO timestamp or null", "images": ["string"], "rating": number or null, "review_count": number or null, "reviews": [ { "author": "string or null", "rating": number, "text": "string", "date": "ISO timestamp or null", "helpful_count": number or null } ], "variants": [ { "size": "string or null", "color": "string or null", "price": number or null, "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "inventory_quantity": number or null, "weight": "string or null", "barcode": "string or null", "image_url": "string or null", "url": "string or null" } ], "size_guide": { "headers": ["string"], "rows": [["string"]] } or null, "shipping_info": "string or null", "return_policy": "string or null", "coupon_codes": ["string"], "product_tags": ["string"], "breadcrumb": ["string"], "base_price_for_markup": number or null, "recommended_markup_percentage": number or null, "calculated_markup_amount": number or null, "suggested_resell_price": number or null, "dropship_advisory": "string or null" } ]`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SCREEN RECORDER
@@ -502,7 +529,7 @@ async function compileRecordings() {
 
     const clips = fs.readdirSync(RECORDINGS_DIR)
         .filter(f => f.endsWith('.mp4') && !f.startsWith('session_'))
-        .sort(); // clip_0001_... clip_0002_... already sort correctly
+        .sort(); 
 
     if (clips.length === 0) { log('info', 'No recording clips to compile.'); return; }
 
@@ -593,10 +620,6 @@ async function hfFetch(filePath) {
     return resp;
 }
 
-/**
- * Upload a single file's bytes to the HF LFS blob store WITHOUT committing it
- * to the repo tree.
- */
 async function hfUploadBlob(fileBuffer, repoFilePath) {
     const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
 
@@ -654,9 +677,6 @@ async function hfUploadBlob(fileBuffer, repoFilePath) {
     };
 }
 
-/**
- * Commit a batch of already-uploaded LFS blobs to the repo tree in a SINGLE git commit.
- */
 async function hfCommitFiles(lfsFiles, summary) {
     if (!lfsFiles.length) return;
 
@@ -978,7 +998,7 @@ async function renderCollage(rows, containerWidth, quality, cellAspectRatio, gut
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GEMINI REVIEWER CALL
+//  GEMINI API CALLS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function reviewCollageWithGemini(db, collageBuffer) {
@@ -1046,26 +1066,76 @@ async function reviewCollageWithGemini(db, collageBuffer) {
     throw lastErr || new Error('Gemini review failed after retries');
 }
 
+async function extractDataBatchWithGemini(db, batch) {
+    const payload = JSON.stringify(batch);
+    let lastErr = null;
+
+    for (let attempt = 0; attempt < CONFIG.review.maxRetries; attempt++) {
+        const keyInfo = await getBestGeminiApiKey(db);
+        if (!keyInfo || !keyInfo.apiKey) {
+            throw new Error('No Gemini API key available for data extraction');
+        }
+
+        const { keyHash, apiKey } = keyInfo;
+        try {
+            const resp = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.audit.model}:generateContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: DATA_EXTRACTION_PROMPT },
+                                { text: payload },
+                            ],
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            responseMimeType: 'application/json',
+                        },
+                    }),
+                }
+            );
+
+            if (resp.status === 429) {
+                log('warn', `Gemini: 429 rate-limited on key ${keyHash ?? '(fallback)'} — rotating`);
+                await markGeminiKeyRateLimited(db, keyHash);
+                lastErr = new Error('Gemini 429 rate limited');
+                continue;
+            }
+
+            if (!resp.ok) {
+                const body = await resp.text().catch(() => '');
+                await releaseGeminiApiKey(db, keyHash);
+                throw new Error(`Gemini API error (${resp.status}): ${body.slice(0, 300)}`);
+            }
+
+            const data = await resp.json();
+            await releaseGeminiApiKey(db, keyHash);
+
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error('Data Extraction: Gemini response missing text content');
+
+            const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+            const parsed = JSON.parse(cleaned);
+            if (!Array.isArray(parsed)) throw new Error('Data Extraction: Gemini response was not a JSON array');
+            return parsed;
+        } catch (err) {
+            if (err.message?.includes('429')) continue;
+            lastErr = err;
+            log('warn', `Data Extraction: attempt ${attempt + 1}/${CONFIG.review.maxRetries} failed: ${err.message.slice(0, 200)}`);
+        }
+    }
+
+    throw lastErr || new Error('Data extraction batch failed after retries');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  REVIEW STAGE — fetch unreviewed images & video frames, send to Gemini
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Fetch top-level images and video frames up to `limit`.
- *
- * Walks each candidate post's `file_urls` array in its natural, stored
- * order (images and videos interleaved exactly as they appear), so a
- * video sitting between two images gets picked up in its actual position
- * instead of every unreviewed image in the whole collection being
- * fetched first and only the leftover budget (if any) going to video
- * frames. That earlier two-phase approach let a large image backlog
- * starve out video frames indefinitely — this fixes that while keeping
- * the exact same output shape consumers rely on.
- */
 async function fetchUnreviewedFiles(collection, limit) {
-    // Over-fetch candidate posts (same heuristic glens.js's claimFiles
-    // uses) so we have enough posts on hand to walk through and reach
-    // `limit` items without needing a second round-trip.
     const candidatePosts = await collection
         .find({
             discarded: { $ne: true },
@@ -1182,7 +1252,7 @@ async function runReviewStage(db, collection) {
     log('info', `Built ${collages.length} collage(s) from ${downloaded.length} item(s) (max ${CONFIG.review.maxRowsPerCollage} rows × ${CONFIG.review.maxColsPerRow} cols each, cell ratio ${CONFIG.review.cellAspectRatio > 0 ? CONFIG.review.cellAspectRatio.toFixed(2) : 'natural'}, gutter ${CONFIG.review.collageGutter}px).`);
 
     const allProcessed = []; 
-    const keptKeys = new Set(); // format: `${postObjectId}:${fileIndex}:${frameIndex}`
+    const keptKeys = new Set(); 
 
     for (let i = 0; i < collages.length; i++) {
         const { rows, items } = collages[i];
@@ -1266,7 +1336,6 @@ async function runReviewStage(db, collection) {
         log('info', `Review: collage ${i + 1} — ${kept.length}/${items.length} item(s) kept`);
     }
 
-    // ── Remove every processed-but-not-kept entry, in one pass ──
     const rejected = allProcessed.filter(item => !keptKeys.has(`${item.postObjectId}:${item.fileIndex}:${item.frameIndex}`));
     log('info', `Review: ${rejected.length} rejected item(s) to remove across affected posts.`);
 
@@ -1311,7 +1380,6 @@ async function runReviewStage(db, collection) {
         }
     }
 
-    // ── Remove empty videos and flag entirely empty posts as discarded ──
     try {
         const pullEmptyVideos = await collection.updateMany(
             { file_urls: { $elemMatch: { type: 'video', frames: { $size: 0 } } } },
@@ -1336,22 +1404,14 @@ async function runReviewStage(db, collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  JSON AUDIT & REPAIR STAGE (STEP 6.5 — between Review and Image Extraction)
+//  JSON AUDIT & REPAIR STAGE (STEP 6.5)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Rough token estimator (no native tiktoken in orchestrator — use char/4 ratio
- * with a 1.1× safety buffer, same as the spec's fallback path).
- */
 function estimateTokens(text) {
     if (!text || typeof text !== 'string') return 0;
     return Math.ceil((text.length / 4) * 1.1);
 }
 
-/**
- * Split a flat array of audit items into batches whose combined raw text stays
- * under TARGET_BATCH_TOKENS.  Each batch is a sub-array of items.
- */
 function chunkAuditBatches(items, targetTokens) {
     const batches = [];
     let current = [];
@@ -1449,11 +1509,6 @@ RULES — apply in this exact order:
    - Do not hallucinate product data. If you cannot reconstruct a product with confidence, omit it.
    - The "changes" array should be concise: e.g., "Fixed malformed JSON", "Removed 2 invalid source URLs", "Deduplicated 1 alternative", "Clamped dropshipViability.score from 15 to 10".`;
 
-/**
- * Fetch all reviewed images/frames that have a response but have not yet been
- * audited.  Walks posts in natural file_urls order (same pattern as
- * fetchUnreviewedFiles) and collects up to `limit` items.
- */
 async function fetchUnauditedFiles(collection, limit) {
     const candidatePosts = await collection
         .find({
@@ -1533,10 +1588,6 @@ async function fetchUnauditedFiles(collection, limit) {
     return items;
 }
 
-/**
- * Call Gemini with the audit prompt for a single batch of items.
- * Returns the parsed `results` array from the LLM response, or throws.
- */
 async function auditBatchWithGemini(db, batchItems) {
     const payload = JSON.stringify({ items: batchItems.map(({ seq, raw }) => ({ seq, raw })) });
     let lastErr = null;
@@ -1621,15 +1672,8 @@ async function runAuditStage(db, collection) {
     const results = { audited: 0, fixed: 0, unchanged: 0, empty: 0, unfixable: 0, discarded: 0, failed: 0 };
     if (allItems.length === 0) return results;
 
-    // Chunk into token-budget batches
     const batches = chunkAuditBatches(allItems, CONFIG.audit.targetBatchTokens);
     log('info', `Audit: ${allItems.length} item(s) split into ${batches.length} batch(es).`);
-
-    // seq → item lookup (seq is 0-based index assigned during fetch)
-    const itemBySeq = new Map(allItems.map(item => [item.seq, item]));
-
-    // Collect all LLM results so we can do per-post discard checks afterwards
-    const llmResultBySeq = new Map();
 
     for (let b = 0; b < batches.length; b++) {
         const batch = batches[b];
@@ -1644,13 +1688,11 @@ async function runAuditStage(db, collection) {
             continue;
         }
 
-        // Build a seq→result map from this batch's response
         const batchResultBySeq = new Map();
         for (const r of llmResults) {
             if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
         }
 
-        // Apply Mongo writes for every item in this batch
         for (const batchItem of batch) {
             const llmResult = batchResultBySeq.get(batchItem.seq);
             if (!llmResult) {
@@ -1659,8 +1701,6 @@ async function runAuditStage(db, collection) {
                 continue;
             }
 
-            llmResultBySeq.set(batchItem.seq, llmResult);
-
             const { status, products, changes } = llmResult;
             const { path, postObjectId, postId } = batchItem;
 
@@ -1668,7 +1708,6 @@ async function runAuditStage(db, collection) {
             let $set;
 
             if (status === 'fixed' || status === 'unchanged') {
-                // Always wrap in { products: [...] } shape so downstream (Step 7) works
                 const productsArray = Array.isArray(products) ? products : [];
                 $set = {
                     [`${path}.response`]:     { products: productsArray },
@@ -1690,7 +1729,6 @@ async function runAuditStage(db, collection) {
                 }
                 results.empty++;
             } else {
-                // unfixable
                 $set = {
                     [`${path}.response`]:    { products: [] },
                     [`${path}.auditedAt`]:   now,
@@ -1705,7 +1743,6 @@ async function runAuditStage(db, collection) {
             try {
                 await collection.updateOne({ _id: postObjectId }, { $set });
                 results.audited++;
-                log('debug', `Audit: ${postId} ${path} → ${status}${changes?.length ? ' [' + changes.join('; ') + ']' : ''}`);
             } catch (err) {
                 log('error', `Audit: failed to write audit result for ${postId} ${path}: ${err.message}`);
                 results.failed++;
@@ -1713,10 +1750,6 @@ async function runAuditStage(db, collection) {
         }
     }
 
-    // ── Per-post discard check ───────────────────────────────────────────────
-    // After all writes, re-fetch each affected post and check if every
-    // file_url entry and frame now has response.products.length === 0
-    // (or auditStatus === 'unfixable').  If so, mark the post discarded.
     const affectedPostIds = [...new Set(allItems.map(i => String(i.postObjectId)))];
 
     for (const postObjIdStr of affectedPostIds) {
@@ -1733,7 +1766,6 @@ async function runAuditStage(db, collection) {
                 if (!file) continue;
 
                 if (file.type === 'image') {
-                    // If it has an audited response with products, not empty
                     const productsEmpty = !file.response ||
                         !Array.isArray(file.response.products) ||
                         file.response.products.length === 0;
@@ -1769,84 +1801,128 @@ async function runAuditStage(db, collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  PRODUCT SOURCE IMAGE EXTRACTION STAGE (STEP 7)
+//  STEP 7 — DATA ENRICHMENT (TEXT EXTRACTION & LLM STRUCTURING)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Gather every source URL inside response.products that does not yet have
- * an `images` array.  Returns flat list with enough path info to map back.
- */
-function gatherPendingSources(post) {
+function gatherPendingTextSources(post) {
     const pending = [];
     if (!Array.isArray(post.file_urls)) return pending;
 
-    for (let i = 0; i < post.file_urls.length; i++) {
-        const file = post.file_urls[i];
-        if (!file) continue;
-
-        // Top-level file response
-        if (file.response && Array.isArray(file.response.products)) {
-            for (let p = 0; p < file.response.products.length; p++) {
-                const product = file.response.products[p];
-                if (!product || !Array.isArray(product.sources)) continue;
-                for (let s = 0; s < product.sources.length; s++) {
-                    const source = product.sources[s];
-                    if (source && source.url && !Array.isArray(source.images)) {
-                        pending.push({
-                            docId: post._id,
-                            fileUrlIndex: i,
-                            frameIndex: -1,
-                            productIndex: p,
-                            sourceIndex: s,
-                            url: source.url,
-                            store: source.store || '',
-                        });
-                    }
+    const processProducts = (file, i, frameIndex = -1) => {
+        if (!file || file.auditStatus !== 'audited' || !file.response || !Array.isArray(file.response.products)) return;
+        
+        for (let p = 0; p < file.response.products.length; p++) {
+            const product = file.response.products[p];
+            if (!product || !Array.isArray(product.sources)) continue;
+            
+            for (let s = 0; s < product.sources.length; s++) {
+                const source = product.sources[s];
+                if (source && source.url && (!source.textExtraction || source.textExtraction.status !== 'completed' && source.textExtraction.status !== 'failed')) {
+                    pending.push({
+                        docId: post._id,
+                        fileUrlIndex: i,
+                        frameIndex,
+                        productIndex: p,
+                        sourceIndex: s,
+                        url: source.url,
+                        source_id: `src_${post._id}_${i}_${frameIndex}_${p}_${s}`
+                    });
                 }
             }
         }
+    };
 
-        // Frame responses
-        if (file.frames && Array.isArray(file.frames)) {
+    for (let i = 0; i < post.file_urls.length; i++) {
+        const file = post.file_urls[i];
+        processProducts(file, i);
+        if (file && Array.isArray(file.frames)) {
             for (let j = 0; j < file.frames.length; j++) {
-                const frame = file.frames[j];
-                if (!frame || !frame.response || !Array.isArray(frame.response.products)) continue;
-                for (let p = 0; p < frame.response.products.length; p++) {
-                    const product = frame.response.products[p];
-                    if (!product || !Array.isArray(product.sources)) continue;
-                    for (let s = 0; s < product.sources.length; s++) {
-                        const source = product.sources[s];
-                        if (source && source.url && !Array.isArray(source.images)) {
-                            pending.push({
-                                docId: post._id,
-                                fileUrlIndex: i,
-                                frameIndex: j,
-                                productIndex: p,
-                                sourceIndex: s,
-                                url: source.url,
-                                store: source.store || '',
-                            });
-                        }
-                    }
-                }
+                processProducts(file.frames[j], i, j);
             }
         }
     }
     return pending;
 }
 
-async function fetchPostsWithProductResponses(collection, limit) {
-    return collection.find({
+async function runTextExtractorScript(urls, cfg) {
+    const ts = Date.now();
+    const urlsPath = path.join(CONFIG.tmpDir, `text_in_${ts}.json`);
+    const outPath  = path.join(CONFIG.tmpDir, `text_out_${ts}.json`);
+    fs.writeFileSync(urlsPath, JSON.stringify(urls));
+
+    const args = [
+        cfg.scriptPath,
+        '-u', urlsPath,
+        '-o', outPath,
+        '--lazy-extraction'
+    ];
+
+    const scriptDir = path.dirname(cfg.scriptPath);
+    return new Promise((resolve, reject) => {
+        const proc = spawn(cfg.pythonPath, args, { stdio: 'pipe', cwd: scriptDir });
+        let stderr = '';
+        let killed = false;
+
+        const timer = setTimeout(() => {
+            killed = true;
+            proc.kill('SIGKILL');
+            reject(new Error(`Text extraction timed out after ${cfg.timeoutMs}ms`));
+        }, cfg.timeoutMs);
+
+        proc.stderr.on('data', d => { stderr += d; });
+        proc.on('close', code => {
+            clearTimeout(timer);
+            if (killed) return;
+            try { fs.unlinkSync(urlsPath); } catch (_) {}
+
+            if (code !== 0) {
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                return reject(new Error(`Text Extractor exited ${code}: ${stderr.slice(0, 300)}`));
+            }
+
+            try {
+                const raw = fs.readFileSync(outPath, 'utf8');
+                const parsed = JSON.parse(raw);
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                resolve(parsed);
+            } catch (e) {
+                try { fs.unlinkSync(outPath); } catch (_) {}
+                reject(new Error(`Failed to parse text extractor output: ${e.message}`));
+            }
+        });
+        proc.on('error', err => {
+            clearTimeout(timer);
+            try { fs.unlinkSync(urlsPath); } catch (_) {}
+            reject(err);
+        });
+    });
+}
+
+async function runDataEnrichmentStage(db, collection) {
+    log('info', '── Step 7: Data Enrichment (Text Extraction + LLM) ──');
+
+    if (!fs.existsSync(CONFIG.textExtraction.scriptPath)) {
+        log('warn', `Text Extractor script not found at ${CONFIG.textExtraction.scriptPath} — skipping.`);
+        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    }
+
+    const posts = await collection.find({
         discarded: { $ne: true },
         $or: [
             {
                 file_urls: {
                     $elemMatch: {
-                        auditStatus: 'audited',   // only audited responses
+                        auditStatus: 'audited',
                         'response.products': {
                             $elemMatch: {
                                 sources: {
-                                    $elemMatch: { url: { $exists: true }, images: { $exists: false } }
+                                    $elemMatch: {
+                                        url: { $exists: true },
+                                        $or: [
+                                            { textExtraction: { $exists: false } },
+                                            { 'textExtraction.status': { $nin: ['completed', 'failed'] } }
+                                        ]
+                                    }
                                 }
                             }
                         }
@@ -1856,11 +1932,305 @@ async function fetchPostsWithProductResponses(collection, limit) {
             {
                 'file_urls.frames': {
                     $elemMatch: {
-                        auditStatus: 'audited',   // only audited responses
+                        auditStatus: 'audited',
                         'response.products': {
                             $elemMatch: {
                                 sources: {
-                                    $elemMatch: { url: { $exists: true }, images: { $exists: false } }
+                                    $elemMatch: {
+                                        url: { $exists: true },
+                                        $or: [
+                                            { textExtraction: { $exists: false } },
+                                            { 'textExtraction.status': { $nin: ['completed', 'failed'] } }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+    }).limit(CONFIG.textExtraction.batchSize).toArray();
+
+    let allPending = [];
+    for (const post of posts) {
+        allPending.push(...gatherPendingTextSources(post));
+    }
+
+    if (allPending.length === 0) {
+        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    }
+
+    const uniqueUrls = [...new Set(allPending.map(item => item.url))];
+    log('info', `Running text extraction on ${uniqueUrls.length} unique URL(s) from ${allPending.length} source(s)...`);
+
+    let pythonResults = {};
+    try {
+        pythonResults = await runTextExtractorScript(uniqueUrls, CONFIG.textExtraction);
+    } catch (err) {
+        log('error', `Text extraction script failed entirely: ${err.message}`);
+        return { processed: allPending.length, succeeded: 0, failed: allPending.length, updatedPosts: 0 };
+    }
+
+    const lfsFiles = [];
+    const bulkOps = [];
+    const llmBatchQueue = []; 
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const item of allPending) {
+        const dbPath = item.frameIndex === -1
+            ? `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`
+            : `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`;
+
+        const rawData = pythonResults[item.url];
+        
+        if (!rawData || !rawData.success) {
+            log('warn', `Text extraction failed for ${item.url}: ${rawData?.error || 'No data returned'}`);
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: item.docId },
+                    update: { $set: { [`${dbPath}.textExtraction`]: { status: 'failed', error: rawData?.error || 'Unknown error' } } }
+                }
+            });
+            failed++;
+            continue;
+        }
+
+        try {
+            const rawBuf = Buffer.from(JSON.stringify(rawData, null, 2));
+            const rawFilename = `raw_${createHash('md5').update(item.url).digest('hex')}_${Date.now()}.json`;
+            const rawRepoPath = `scraped-posts/raw_sources/${rawFilename}`;
+            const rawBlob = await hfUploadBlob(rawBuf, rawRepoPath);
+            lfsFiles.push({ path: rawBlob.path, oid: rawBlob.oid, size: rawBlob.size });
+
+            llmBatchQueue.push({
+                source_id: item.source_id,
+                dbPath,
+                docId: item.docId,
+                rawBlob,
+                payload: {
+                    source_id: item.source_id,
+                    raw_data: rawData
+                }
+            });
+        } catch (err) {
+            log('error', `Failed to upload raw JSON for ${item.url}: ${err.message}`);
+            failed++;
+        }
+    }
+
+    const llmChunks = chunkArray(llmBatchQueue, CONFIG.textExtraction.llmBatchSize);
+    for (let c = 0; c < llmChunks.length; c++) {
+        const chunk = llmChunks[c];
+        log('info', `Gemini LLM Structuring: batch ${c + 1}/${llmChunks.length} (${chunk.length} items)...`);
+
+        let cleanResults = [];
+        try {
+            cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
+        } catch (err) {
+            log('error', `Gemini batch failed: ${err.message}`);
+            for (const item of chunk) {
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'failed', error: 'LLM structuring failed' } } }
+                    }
+                });
+                failed++;
+            }
+            continue;
+        }
+
+        for (const item of chunk) {
+            const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
+            if (!cleanJson) {
+                log('warn', `Gemini missed source_id ${item.source_id}`);
+                failed++;
+                continue;
+            }
+
+            try {
+                const cleanBuf = Buffer.from(JSON.stringify(cleanJson, null, 2));
+                const cleanFilename = `clean_${createHash('md5').update(cleanJson.url || item.source_id).digest('hex')}_${Date.now()}.json`;
+                const cleanRepoPath = `scraped-posts/clean_sources/${cleanFilename}`;
+                const cleanBlob = await hfUploadBlob(cleanBuf, cleanRepoPath);
+                lfsFiles.push({ path: cleanBlob.path, oid: cleanBlob.oid, size: cleanBlob.size });
+
+                const $set = {};
+                
+                const availabilityMap = { 'InStock': 'In stock', 'OutOfStock': 'Out of stock', 'PreOrder': 'Pre-order' };
+                const mappedAvailability = availabilityMap[cleanJson.availability] || 'Unknown';
+
+                const mappedPrice = {
+                    current: cleanJson.price != null ? String(cleanJson.price) : "",
+                    original: cleanJson.compare_at_price != null ? String(cleanJson.compare_at_price) : null,
+                    currency: cleanJson.currency || "USD"
+                };
+
+                $set[`${item.dbPath}.title`] = cleanJson.name || "Unknown Product";
+                $set[`${item.dbPath}.brand`] = cleanJson.brand || cleanJson.vendor || "Unknown";
+                $set[`${item.dbPath}.category`] = cleanJson.primary_category || cleanJson.product_type || "Unknown";
+                $set[`${item.dbPath}.features`] = cleanJson.features || [];
+                $set[`${item.dbPath}.dropship_advisory`] = cleanJson.dropship_advisory || "";
+                $set[`${item.dbPath}.description`] = cleanJson.description || "";
+                $set[`${item.dbPath}.shippingAndReturns`] = [cleanJson.shipping_info, cleanJson.return_policy].filter(Boolean).join("\n\n");
+                
+                const sizes = [...new Set((cleanJson.variants || []).map(v => v.size).filter(Boolean))];
+                if (sizes.length > 0) {
+                    $set[`${item.dbPath}.sizes`] = sizes;
+                    $set[`${item.dbPath}.sizing`] = sizes;
+                }
+                
+                $set[`${item.dbPath}.price`] = mappedPrice;
+                $set[`${item.dbPath}.availability`] = mappedAvailability;
+
+                if (Array.isArray(cleanJson.images) && cleanJson.images.length > 0) {
+                    $set[`${item.dbPath}.images`] = cleanJson.images;
+                }
+
+                $set[`${item.dbPath}.textExtraction`] = {
+                    status: 'completed',
+                    raw_url: item.rawBlob.url,
+                    clean_url: cleanBlob.url
+                };
+
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set }
+                    }
+                });
+                succeeded++;
+            } catch (err) {
+                log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
+                failed++;
+            }
+        }
+        await sleep(2000); 
+    }
+
+    if (lfsFiles.length > 0) {
+        try {
+            // Fix: Deduplicate LFS paths to avoid "400 Bad Request: duplicate file path" from HuggingFace
+            const uniqueLfs = [];
+            const seenPaths = new Set();
+            for (const f of lfsFiles) {
+                if (!seenPaths.has(f.path)) {
+                    seenPaths.add(f.path);
+                    uniqueLfs.push(f);
+                }
+            }
+            await hfCommitFiles(uniqueLfs, `orchestrator: sync enriched text data [run ${CONFIG.runId}]`);
+        } catch (err) {
+            log('error', `HF Commit failed for text extraction: ${err.message}`);
+        }
+    }
+
+    let updatedPosts = 0;
+    if (bulkOps.length > 0) {
+        try {
+            const uniqueDocs = new Set(bulkOps.map(op => String(op.updateOne.filter._id)));
+            await collection.bulkWrite(bulkOps, { ordered: false });
+            updatedPosts = uniqueDocs.size;
+            log('info', `Saved enriched text data to ${updatedPosts} post(s)`);
+        } catch (err) {
+            log('error', `Failed to write enriched text data to MongoDB: ${err.message}`);
+        }
+    }
+
+    return { processed: allPending.length, succeeded, failed, updatedPosts };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  STEP 8 — PRODUCT SOURCE IMAGE EXTRACTION (FALLBACK)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function gatherPendingImageSources(post) {
+    const pending = [];
+    if (!Array.isArray(post.file_urls)) return pending;
+
+    const processProducts = (file, i, frameIndex = -1) => {
+        if (!file || file.auditStatus !== 'audited' || !file.response || !Array.isArray(file.response.products)) return;
+        
+        for (let p = 0; p < file.response.products.length; p++) {
+            const product = file.response.products[p];
+            if (!product || !Array.isArray(product.sources)) continue;
+            
+            for (let s = 0; s < product.sources.length; s++) {
+                const source = product.sources[s];
+                
+                const hasImages = Array.isArray(source.images) && source.images.length > 0;
+                const textExtractionCompleted = source.textExtraction?.status === 'completed';
+                
+                if (source && source.url && !hasImages && textExtractionCompleted) {
+                    pending.push({
+                        docId: post._id,
+                        fileUrlIndex: i,
+                        frameIndex,
+                        productIndex: p,
+                        sourceIndex: s,
+                        url: source.url,
+                        store: source.store || '',
+                    });
+                }
+            }
+        }
+    };
+
+    for (let i = 0; i < post.file_urls.length; i++) {
+        const file = post.file_urls[i];
+        processProducts(file, i);
+        if (file && Array.isArray(file.frames)) {
+            for (let j = 0; j < file.frames.length; j++) {
+                processProducts(file.frames[j], i, j);
+            }
+        }
+    }
+    return pending;
+}
+
+async function fetchPostsWithPendingImages(collection, limit) {
+    return collection.find({
+        discarded: { $ne: true },
+        $or: [
+            {
+                file_urls: {
+                    $elemMatch: {
+                        auditStatus: 'audited',
+                        'response.products': {
+                            $elemMatch: {
+                                sources: {
+                                    $elemMatch: {
+                                        url: { $exists: true },
+                                        $or: [
+                                            { images: { $exists: false } },
+                                            { images: { $size: 0 } }
+                                        ],
+                                        'textExtraction.status': 'completed'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                'file_urls.frames': {
+                    $elemMatch: {
+                        auditStatus: 'audited',
+                        'response.products': {
+                            $elemMatch: {
+                                sources: {
+                                    $elemMatch: {
+                                        url: { $exists: true },
+                                        $or: [
+                                            { images: { $exists: false } },
+                                            { images: { $size: 0 } }
+                                        ],
+                                        'textExtraction.status': 'completed'
+                                    }
                                 }
                             }
                         }
@@ -1871,7 +2241,7 @@ async function fetchPostsWithProductResponses(collection, limit) {
     }).limit(limit).toArray();
 }
 
-async function runExtractorScript(urls, cfg) {
+async function runImageExtractorScript(urls, cfg) {
     const ts = Date.now();
     const urlsPath = path.join(CONFIG.tmpDir, `extract_urls_${ts}.json`);
     const outPath  = path.join(CONFIG.tmpDir, `extract_out_${ts}.json`);
@@ -1932,36 +2302,27 @@ async function runExtractorScript(urls, cfg) {
 }
 
 async function runProductImageExtractionStage(db, collection) {
-    log('info', '── Step 7: Product Source Image Extraction ──');
+    log('info', '── Step 8: Product Source Image Extraction (Fallback) ──');
 
     if (!fs.existsSync(CONFIG.productImageExtraction.scriptPath)) {
-        log('warn', `Extractor script not found at ${CONFIG.productImageExtraction.scriptPath} — skipping.`);
+        log('warn', `Image Extractor script not found at ${CONFIG.productImageExtraction.scriptPath} — skipping.`);
         return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
     }
 
-    // Quick sanity check that python is available
-    try {
-        execSync(`${CONFIG.productImageExtraction.pythonPath} --version`, { stdio: 'ignore' });
-    } catch {
-        log('warn', `${CONFIG.productImageExtraction.pythonPath} not available — skipping product image extraction.`);
-        return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
-    }
-
-    const posts = await fetchPostsWithProductResponses(collection, CONFIG.productImageExtraction.batchSize);
-    log('info', `Found ${posts.length} post(s) with product responses.`);
+    const posts = await fetchPostsWithPendingImages(collection, CONFIG.productImageExtraction.batchSize);
+    log('info', `Found ${posts.length} post(s) with fallback image needs.`);
 
     let allPending = [];
     for (const post of posts) {
-        allPending.push(...gatherPendingSources(post));
+        allPending.push(...gatherPendingImageSources(post));
     }
 
-    log('info', `Discovered ${allPending.length} pending source(s) needing image extraction.`);
+    log('info', `Discovered ${allPending.length} pending source(s) needing fallback image extraction.`);
 
     if (allPending.length === 0) {
         return { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
     }
 
-    // Deduplicate URLs for extraction batches, but keep all path references for mapping back
     const seenUrls = new Set();
     const uniquePending = [];
     for (const item of allPending) {
@@ -1972,10 +2333,7 @@ async function runProductImageExtractionStage(db, collection) {
     }
 
     const batchSize = CONFIG.productImageExtraction.batchSize;
-    const batches = [];
-    for (let i = 0; i < uniquePending.length; i += batchSize) {
-        batches.push(uniquePending.slice(i, i + batchSize));
-    }
+    const batches = chunkArray(uniquePending, batchSize);
 
     const urlToImages = new Map();
     let succeeded = 0;
@@ -1987,7 +2345,7 @@ async function runProductImageExtractionStage(db, collection) {
         log('info', `Extracting batch ${b + 1}/${batches.length} (${urls.length} URL(s))…`);
 
         try {
-            const results = await runExtractorScript(urls, CONFIG.productImageExtraction);
+            const results = await runImageExtractorScript(urls, CONFIG.productImageExtraction);
             for (const [url, data] of Object.entries(results)) {
                 if (Array.isArray(data)) {
                     urlToImages.set(url, data);
@@ -2004,11 +2362,6 @@ async function runProductImageExtractionStage(db, collection) {
         } catch (err) {
             log('error', `Batch ${b + 1} extraction failed: ${err.message}`);
             for (const url of urls) {
-                // Intentionally do NOT set urlToImages here. A batch-level failure
-                // (timeout/crash/kill) means we never got a real answer for these
-                // URLs, so we leave them unresolved rather than writing an empty
-                // array — an empty array means "checked, found nothing" and would
-                // otherwise permanently block retry on the next run.
                 failed++;
             }
         }
@@ -2018,21 +2371,17 @@ async function runProductImageExtractionStage(db, collection) {
         }
     }
 
-    // Map results back to MongoDB
     let updatedPosts = 0;
     const bulkOps = [];
 
     for (const post of posts) {
-        const pending = gatherPendingSources(post);
+        const pending = gatherPendingImageSources(post);
         if (pending.length === 0) continue;
 
         const $set = {};
         let hasUpdates = false;
 
         for (const item of pending) {
-            // No result for this URL (batch timed out/crashed before it could be
-            // processed) — skip it entirely so it's left pending and retried on
-            // the next run, instead of writing an [] that would look "done".
             if (!urlToImages.has(item.url)) continue;
 
             const images = urlToImages.get(item.url);
@@ -2060,7 +2409,7 @@ async function runProductImageExtractionStage(db, collection) {
         try {
             await collection.bulkWrite(bulkOps, { ordered: false });
             updatedPosts = bulkOps.length;
-            log('info', `Updated ${updatedPosts} post(s) with extracted source images.`);
+            log('info', `Updated ${updatedPosts} post(s) with extracted fallback source images.`);
         } catch (err) {
             log('error', `Failed to write source images back to MongoDB: ${err.message}`);
         }
@@ -2111,7 +2460,7 @@ async function syncDataJsonToMongo(collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  DOWNLOADER CLASS — extensible, one subclass per site
+//  DOWNLOADER CLASS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class InstagramDownloader {
@@ -2385,13 +2734,11 @@ class PicnobDownloader extends InstagramDownloader {
     constructor() { super('Picnob'); }
 
     async extractLinks(page, postId) {
-        // Avoid reels, posts only
         if (postId?.includes("reel")) {
             log('warn', `Picnob doesnt support reels, skipping [${postId}]`);
             return [];
         }
         
-        // Normalize postId in case it arrives as "p/CODE", "reel/CODE", or a bare shortcode.
         const shortcode = postId.replace(/^\/+|\/+$/g, '').split('/').pop();
 
         log('info', `[Picnob] Processing ${shortcode}`);
@@ -2439,20 +2786,14 @@ class PicnobDownloader extends InstagramDownloader {
                         items.push({ directUrl: href, uri: href });
                     };
 
-                    // Preferred: explicit "Download" buttons (force-download via &dl=1,
-                    // one per carousel slide for image posts).
                     document.querySelectorAll('.down a.downbtn[href]').forEach(a => push(a.href));
-
-                    // Video posts / reels.
                     document.querySelectorAll('video source[src]').forEach(s => push(s.src));
                     document.querySelectorAll('video[src]').forEach(v => push(v.src));
 
-                    // Fallback: the full-res link each slide's image is wrapped in.
                     if (items.length === 0) {
                         document.querySelectorAll('.entry-body a[href]').forEach(a => push(a.href));
                     }
 
-                    // Last resort: any raw CDN media link left on the page.
                     if (items.length === 0) {
                         document.querySelectorAll('a[href*="cdninstagram.com"]').forEach(a => push(a.href));
                     }
@@ -2487,7 +2828,6 @@ class PicukiSiteDownloader extends InstagramDownloader {
     constructor() { super('PicukiSite'); }
 
     async extractLinks(page, postId) {
-        // Avoid reels, posts only
         if (postId?.includes("reel")) {
             log('warn', `Picuki has issues with reels, skipping [${postId}]`);
             return [];
@@ -2497,7 +2837,6 @@ class PicukiSiteDownloader extends InstagramDownloader {
 
         log('info', `[PicukiSite] Processing ${postId}`);
 
-        // Block popups to avoid new tabs for ads
         await page.evaluateOnNewDocument(() => {
             window.open = function() { return null; };
         });
@@ -2507,11 +2846,9 @@ class PicukiSiteDownloader extends InstagramDownloader {
             timeout: CONFIG.timeouts.navigation,
         });
 
-        // Robust input selector: relies on form inputs and placeholders instead of CSS classes
         const inputSel = 'form input[type="text"], input[placeholder*="username"], input[placeholder*="link"]';
         await page.waitForSelector(inputSel, { timeout: 15_000 });
 
-        // Safely focus and set value via JS to prevent triggering invisible ad overlays
         await page.evaluate((sel) => {
             const el = document.querySelector(sel);
             if (el) {
@@ -2530,12 +2867,10 @@ class PicukiSiteDownloader extends InstagramDownloader {
             }
         }, inputSel);
 
-        // Press Enter to submit the form without clicking any buttons
         await page.keyboard.press('Enter');
 
         log('debug', `[PicukiSite] Submitted: ${igUrl}`);
 
-        // Robust result waiting: checking for any anchor tag with a 'download' attribute or containing the proxy URL pattern
         await page.waitForFunction(() => {
             const anchors = Array.from(document.querySelectorAll('a'));
             return anchors.some(a => 
@@ -2550,15 +2885,12 @@ class PicukiSiteDownloader extends InstagramDownloader {
         const results = await page.evaluate(() => {
             const items = [];
             const seen = new Set();
-
-            // Select all anchor tags on the page and filter them robustly
             const allAnchors = document.querySelectorAll('a');
             
             for (const a of allAnchors) {
                 const href = a.href;
                 if (!href) continue;
 
-                // Condition to identify a valid download link independent of CSS classes
                 const isDownloadLink = a.hasAttribute('download') || 
                                        href.includes('uri=') || 
                                        href.includes('media.picuki.site/get');
@@ -2573,11 +2905,10 @@ class PicukiSiteDownloader extends InstagramDownloader {
                         const urlObj = new URL(href);
                         const uriParam = urlObj.searchParams.get('uri');
                         if (uriParam) {
-                            directUrl = decodeURIComponent(uriParam); // Extract the direct CDN URL from the query string
+                            directUrl = decodeURIComponent(uriParam); 
                         }
                     } catch (_) {}
 
-                    // Provide the proxyUrl as 'uri' and the CDN URL as 'directUrl'
                     items.push({ directUrl, uri: proxyUrl });
                 }
             }
@@ -2606,7 +2937,6 @@ class SaveClipDownloader extends InstagramDownloader {
 
         log('info', `[SaveClip] Processing ${postId}`);
 
-        // Block popups to avoid new tabs for ads
         await page.evaluateOnNewDocument(() => {
             window.open = function() { return null; };
         });
@@ -2616,11 +2946,9 @@ class SaveClipDownloader extends InstagramDownloader {
             timeout: CONFIG.timeouts.navigation,
         });
 
-        // Robust input selector: targeting the search form input
         const inputSel = 'form#search-form input[name="q"], #s_input, input[placeholder*="Instagram"]';
         await page.waitForSelector(inputSel, { timeout: 15_000 });
 
-        // Safely focus and set value via JS to prevent triggering invisible ad overlays
         await page.evaluate((sel) => {
             const el = document.querySelector(sel);
             if (el) {
@@ -2639,7 +2967,6 @@ class SaveClipDownloader extends InstagramDownloader {
             }
         }, inputSel);
 
-        // Click the submit button inside the form robustly
         const btnSel = 'form#search-form button, #search-form button.btn-default';
         const btnExists = await page.$(btnSel);
         if (btnExists) {
@@ -2650,7 +2977,6 @@ class SaveClipDownloader extends InstagramDownloader {
 
         log('debug', `[SaveClip] Submitted: ${igUrl}`);
 
-        // Wait for results to be rendered
         await page.waitForFunction(() => {
             return document.querySelector('#search-result .download-items') !== null || 
                    document.querySelector('#search-result ul.download-box') !== null;
@@ -2663,7 +2989,6 @@ class SaveClipDownloader extends InstagramDownloader {
             const seen = new Set();
 
             document.querySelectorAll('#search-result .download-items').forEach(item => {
-                // Try dropdown first (Photos usually have resolution select)
                 const select = item.querySelector('.photo-option select, select.minimal');
                 if (select && select.options.length > 0) {
                     const href = select.options[0].value;
@@ -2671,16 +2996,13 @@ class SaveClipDownloader extends InstagramDownloader {
                         seen.add(href);
                         items.push({ directUrl: href, uri: href });
                     }
-                    return; // proceed to next item
+                    return; 
                 }
 
-                // Otherwise, look for download buttons (Video/Reel)
-                // Avoid .dl-thumb to prevent grabbing the thumbnail instead of the actual media
                 const btnContainers = item.querySelectorAll('.download-items__btn:not(.dl-thumb)');
                 for (const container of btnContainers) {
                     const a = container.querySelector('a[href]');
                     if (a && a.href && !seen.has(a.href)) {
-                        // Check if it's a valid link 
                         if (a.href.includes('token=') || a.href.includes('snapcdn.app') || a.hasAttribute('download')) {
                             seen.add(a.href);
                             items.push({ directUrl: a.href, uri: a.href });
@@ -2815,7 +3137,7 @@ async function processPost(postDoc, page, recorder) {
 
             if (frames.length === 0) {
                 log('info', `  [!] Video yielded 0 frames. Discarding video entirely.`);
-                continue; // Skip uploading the video blob
+                continue; 
             }
             fileEntry.frames = frames;
         }
@@ -2899,7 +3221,6 @@ async function processBatch(posts, browser, collection) {
             results.fail += pendingCommit.length;
         }
     } else {
-        // Even if there were no valid files uploaded, we should still update posts that yielded 0 valid files to be discarded
         for (const { postDoc, fileUrls } of pendingCommit) {
             if (fileUrls.length === 0) {
                 try {
@@ -2950,10 +3271,8 @@ async function main() {
         process.exit(1);
     }
 
-    // Prepare Python script
     fs.writeFileSync(path.join(CONFIG.tmpDir, 'extract_frames.py'), EXTRACT_FRAMES_PY);
 
-    // ── MongoDB connect ──────────────────────────────────────────────────────
     log('info', 'Connecting to MongoDB…');
     const mongoClient = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 15_000 });
     await mongoClient.connect();
@@ -2998,7 +3317,6 @@ async function main() {
         log('info', 'No posts pending download — skipping browser phase.');
     }
 
-    // ── Compile recordings ───────────────────────────────────────────────────
     if (CONFIG.recording.enabled) {
         log('info', 'Compiling recordings into one session video…');
         await compileRecordings();
@@ -3030,10 +3348,21 @@ async function main() {
         log('info', 'Audit stage disabled (ORCH_AUDIT_ENABLED=false) — skipping.');
     }
 
-    // ── Step 7 — Product Source Image Extraction ───────────────────────────────
+    // ── Step 7 — Data Enrichment (Text Extraction + LLM Structuring) ──
+    let dataEnrichmentResults = { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
+    if (CONFIG.textExtraction.enabled) {
+        try {
+            dataEnrichmentResults = await runDataEnrichmentStage(db, collection);
+        } catch (err) {
+            log('error', `Data enrichment stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'Data enrichment stage disabled (ORCH_TEXT_EXTRACT_ENABLED=false) — skipping.');
+    }
+
+    // ── Step 8 — Product Source Image Extraction (Fallback) ──
     let productImageResults = { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
     if (CONFIG.productImageExtraction.enabled) {
-        log('info', '── Step 7: Product Source Image Extraction ──');
         try {
             productImageResults = await runProductImageExtractionStage(db, collection);
         } catch (err) {
@@ -3043,20 +3372,19 @@ async function main() {
         log('info', 'Product image extraction stage disabled (ORCH_PRODUCT_IMG_ENABLED=false) — skipping.');
     }
 
-    // ── MongoDB close ────────────────────────────────────────────────────────
     await mongoClient.close();
 
     // ── Summary ──────────────────────────────────────────────────────────────
     const elapsed = ((Date.now() - tStart) / 1000).toFixed(1);
     log('info', '═══════════════════════════════════════════════════════════════');
     log('info', `DONE in ${elapsed}s`);
-    log('info', `  Sync:     data.json → MongoDB (see logs above)`);
+    log('info', `  Sync:     data.json → MongoDB`);
     log('info', `  Download: ${downloadResults.ok} OK | ${downloadResults.fail} FAIL out of ${posts.length} post(s)`);
     if (CONFIG.recording.enabled) log('info', `  Recording: ${RECORDINGS_DIR}`);
     if (CONFIG.review.enabled) log('info', `  Review:   ${reviewResults.reviewed} reviewed | ${reviewResults.kept} kept | ${reviewResults.rejected} rejected | ${reviewResults.collages} collage(s) | ${reviewResults.failed} failed`);
-    if (CONFIG.review.enabled && CONFIG.review.saveCollages) log('info', `  Collages: ${COLLAGES_DIR}`);
-    if (CONFIG.audit.enabled) log('info', `  Audit:    ${auditResults.audited} audited | ${auditResults.fixed} fixed | ${auditResults.unchanged} unchanged | ${auditResults.empty} empty | ${auditResults.unfixable} unfixable | ${auditResults.discarded} post(s) discarded | ${auditResults.failed} failed`);
-    if (CONFIG.productImageExtraction.enabled) log('info', `  Product Images: ${productImageResults.processed} processed | ${productImageResults.succeeded} succeeded | ${productImageResults.failed} failed | ${productImageResults.updatedPosts} post(s) updated`);
+    if (CONFIG.audit.enabled) log('info', `  Audit:    ${auditResults.audited} audited | ${auditResults.fixed} fixed | ${auditResults.discarded} discarded | ${auditResults.failed} failed`);
+    if (CONFIG.textExtraction.enabled) log('info', `  Data Enrich: ${dataEnrichmentResults.processed} processed | ${dataEnrichmentResults.succeeded} succeeded | ${dataEnrichmentResults.failed} failed | ${dataEnrichmentResults.updatedPosts} post(s) updated`);
+    if (CONFIG.productImageExtraction.enabled) log('info', `  Image FB: ${productImageResults.processed} processed | ${productImageResults.succeeded} succeeded | ${productImageResults.failed} failed | ${productImageResults.updatedPosts} post(s) updated`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
     fs.writeFileSync(
@@ -3070,8 +3398,8 @@ async function main() {
             elapsedSeconds: parseFloat(elapsed),
             recording: CONFIG.recording.enabled,
             review: CONFIG.review.enabled ? reviewResults : null,
-            collagesSaved: CONFIG.review.enabled && CONFIG.review.saveCollages,
             audit: CONFIG.audit.enabled ? auditResults : null,
+            dataEnrichment: CONFIG.textExtraction.enabled ? dataEnrichmentResults : null,
             productImageExtraction: CONFIG.productImageExtraction.enabled ? productImageResults : null,
         }, null, 2)
     );

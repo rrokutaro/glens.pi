@@ -5,10 +5,7 @@
  * Brutalist Native Apple Aesthetic, lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
- *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
- *
- * FINAL PRODUCTION v1.1 - Polished UX, robust error handling, keyboard support,
- * selected image count + clear, refresh, ObjectId safety, Python script validation.
+ *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN, ORCH_GEMINI_API_KEYS
  */
 
 import http from 'http';
@@ -45,8 +42,38 @@ function log(level, ...args) {
     else console.log(prefix, ...args);
 }
 
+const DATA_EXTRACTION_PROMPT = `You are a product data extraction expert. I will provide you with a messy JSON payload containing data from one or multiple e-commerce product pages. Each input object will have a "source_id". Your task is to extract all relevant product information and output a clean, structured JSON array where each element strictly follows the schema template provided below.
+
+SYSTEM RULES AND OUTPUT FORMAT
+1. OUTPUT JSON ONLY. Output nothing but raw, valid JSON. Do not wrap the JSON in markdown formatting. Do not include any conversational text before or after the JSON.
+2. ALWAYS RETURN AN ARRAY. Your output must always be a JSON array. If the input is a single product, return an array containing one object.
+3. NULL VERSUS EMPTY ARRAYS. For string or number fields that cannot be found, use null. For missing array fields ("images", "variants", "reviews", "product_tags", "coupon_codes", "breadcrumb", "features"), use an empty array [] NEVER use null for an array.
+4. STRIP HTML. Remove all HTML tags from descriptions, reviews, and text fields. Return clean, readable plain text.
+
+EXTRACTION RULES
+1. DEEP EXTRACTION. Extract data from all available sources: schema_org, open_graph, meta_tags, dom_text, shopify_product, microdata, tables, lists, etc.
+2. IGNORE RELATED PRODUCTS. Focus ONLY on the main product(s) the page is actually selling. Strictly ignore products found in "You might also like", "Related Products", or "Recently Viewed" sections to prevent data pollution.
+3. 404 AND FAILED PAGES. If "success" is false or "status_code" is 400 or above, set all product details ("name", "price", "brand", etc.) to null or []. Provide a "dropship_advisory" explaining the page failed to load.
+4. VARIANTS. Include all available options inside the "variants" array. Ensure you capture the specific "size", "color", and variant "image_url" if available. If a product has variants but no specific size, use "One Size" for the "size" field.
+5. SIZE GUIDE. Only extract a size guide into the "size_guide" object if a sizing table explicitly exists on the page. Do not hallucinate or generate a fallback size guide. If none exists, set "size_guide" to null.
+6. POLICIES AND FEATURES. Summarize relevant text for "shipping_info" and "return_policy". Extract bulleted highlights or technical details into the "features" array.
+7. IMAGES. Deduplicate images. Include ALL distinct, high-resolution main product images found across all JSON nodes in the "images" array.
+8. MISSING CURRENCY. If "currency" is missing, attempt to infer it from the domain extension (.co.uk = GBP, .com.au = AUD) or default to USD.
+
+DROPSHIPPING AND MARKUP LOGIC You must reason and determine the optimal markup based on the product data. Do NOT use a fixed default percentage.
+- "base_price_for_markup": Use "compare_at_price" if it exists and is greater than "price". Otherwise, use "price".
+- "recommended_markup_percentage": Determine based on brand reputation (luxury equals higher, fast fashion equals lower), price point, category, sale status, and review scores.
+- "calculated_markup_amount": "base_price_for_markup" multiplied by ("recommended_markup_percentage" divided by 100).
+- "suggested_resell_price": "base_price_for_markup" plus "calculated_markup_amount".
+- MATH CONSTRAINT: Round all calculated monetary values to EXACTLY 2 decimal places. All values are in the product native "currency".
+- FAILURE CONSTRAINT: If "price" is null, set "base_price_for_markup", "recommended_markup_percentage", "calculated_markup_amount", and "suggested_resell_price" to null.
+- "dropship_advisory": Write 1 to 2 sentences explaining your markup reasoning and overall suitability for dropshipping based on stock, margins, and brand.
+
+OUTPUT SCHEMA TEMPLATE [ { "source_id": "string (MUST EXACTLY MATCH INPUT)", "url": "string", "canonical_url": "string or null", "success": boolean, "status_code": number, "extracted_at": "ISO 8601 timestamp", "name": "string or null", "brand": "string or null", "primary_category": "string or null", "product_type": "string or null", "color": "string or null", "material": "string or null", "description": "string or null", "features": ["string"], "price": number or null, "compare_at_price": number or null, "is_on_sale": boolean, "currency": "string (3-letter ISO code) or null", "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "handle": "string or null", "product_id": number or null, "vendor": "string or null", "created_at": "ISO timestamp or null", "updated_at": "ISO timestamp or null", "images": ["string"], "rating": number or null, "review_count": number or null, "reviews": [ { "author": "string or null", "rating": number, "text": "string", "date": "ISO timestamp or null", "helpful_count": number or null } ], "variants": [ { "size": "string or null", "color": "string or null", "price": number or null, "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "inventory_quantity": number or null, "weight": "string or null", "barcode": "string or null", "image_url": "string or null", "url": "string or null" } ], "size_guide": { "headers": ["string"], "rows": [["string"]] } or null, "shipping_info": "string or null", "return_policy": "string or null", "coupon_codes": ["string"], "product_tags": ["string"], "breadcrumb": ["string"], "base_price_for_markup": number or null, "recommended_markup_percentage": number or null, "calculated_markup_amount": number or null, "suggested_resell_price": number or null, "dropship_advisory": "string or null" } ]`;
+
+
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
+/* HTML UI                                                                    */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -93,14 +120,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Typography Overrides */
 h1, h2, h3, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
-/* Controls */
 button {
   cursor: pointer;
   border: 1px solid var(--border);
@@ -137,10 +162,7 @@ input, select, textarea {
   transition: border-color 0.2s ease;
 }
 input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--text);
-}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
 textarea { resize: vertical; min-height: 100px; }
 select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23737373'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
@@ -153,7 +175,6 @@ img { max-width: 100%; display: block; }
 a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
 a:active { opacity: 0.7; }
 
-/* Layout Screens */
 .screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .screen.active { display: block; }
 
@@ -185,29 +206,18 @@ a:active { opacity: 0.7; }
 .badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
 
 .theme-toggle {
-  font-size: 10px;
-  padding: 0 8px;
-  height: 24px;
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  color: var(--text);
-  background: transparent;
+  font-size: 10px; padding: 0 8px; height: 24px; min-height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); color: var(--text); background: transparent;
 }
 
-/* Lists & Groups */
 .post-group { border-bottom: 1px solid var(--border); margin: 0; background: var(--bg); }
 .post-header {
   display: flex; align-items: center; gap: 12px;
   padding: 20px 16px; cursor: pointer; user-select: none;
 }
 .post-header:active { background: var(--surface-2); }
-.post-thumb {
-  width: 48px; height: 48px;
-  background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
-}
+.post-thumb { width: 48px; height: 48px; background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border); }
 .post-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .post-info { flex: 1; min-width: 0; }
 .post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -230,12 +240,10 @@ a:active { opacity: 0.7; }
 .item-info { flex: 1; min-width: 0; }
 .item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
 
-/* Hero (Review Main Image) */
 .hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
 .hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; }
 .hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
 
-/* Section & Cards */
 .section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
 .section h2 { font-size: 14px; padding: 20px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
 
@@ -254,28 +262,23 @@ a:active { opacity: 0.7; }
 .p-brand { font-size: 13px; color: var(--text-2); margin-bottom: 8px; font-weight: 500; }
 .p-status { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 
-/* Modal / Editor */
 .modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
 .modal.active { display: flex; }
 .modal-header { padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
 .modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; }
 .modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
 
-/* Video Modal */
 #videoModal { background: #000; z-index: 200; cursor: pointer; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
 .card { padding: 24px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .card h3 { font-size: 13px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px dashed var(--border); }
 
-/* 3:4 Carousel Images - Taller (75%) */
 .carousel { 
   display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
   scroll-snap-type: x mandatory; margin-bottom: 16px;
-  -webkit-overflow-scrolling: touch;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  transform: translateZ(0); /* Hardware acceleration */
+  -webkit-overflow-scrolling: touch; -ms-overflow-style: none; scrollbar-width: none;
+  transform: translateZ(0); 
 }
 .carousel::-webkit-scrollbar { display: none; }
 
@@ -290,7 +293,6 @@ a:active { opacity: 0.7; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
-/* Order Number Box */
 .img-cell .check { 
   position: absolute; top: 12px; right: 12px; 
   width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
@@ -300,7 +302,6 @@ a:active { opacity: 0.7; }
 }
 .img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
-/* Extraction Animation Feedback */
 @keyframes pulse-extract {
   0% { opacity: 1; }
   50% { opacity: 0.3; filter: grayscale(100%); }
@@ -311,19 +312,16 @@ a:active { opacity: 0.7; }
   pointer-events: none;
 }
 
-/* Form fields */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
-/* Actions Bar */
 .actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
 
-/* Loading & Utils */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
 .spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -378,7 +376,6 @@ a:active { opacity: 0.7; }
     <div class="modal-body" id="eBody"></div>
   </div>
   
-  <!-- Fullscreen Video Modal -->
   <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
     <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
       <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
@@ -399,11 +396,10 @@ const state = {
   currentSelected: [], 
   currentGridUrls: [], 
   io: null,
-  justEditedProdIdx: null,           // for scrolling back to the card we were editing
-  formPersistKey: null               // current editor localStorage key
+  justEditedProdIdx: null,
+  formPersistKey: null
 };
 
-// Theme Toggle
 function toggleTheme() {
   const root = document.documentElement;
   const current = root.getAttribute('data-theme');
@@ -412,7 +408,6 @@ function toggleTheme() {
   document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
   localStorage.setItem('theme', newTheme);
 }
-// Init theme
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
   document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
@@ -570,14 +565,12 @@ async function openItem(_id, fileIdx, frameIdx) {
 function renderItem() {
   const item = state.current;
   
-  // Format alias link
   let igLink = 'https://www.instagram.com/' + item.postId + '/';
   if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
   document.getElementById("rTitle").innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
   
-  // Proxy Video Button
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     document.getElementById('rTopRight').innerHTML = \`<button class="btn-ghost" onclick="openVideo('\${proxyUrl}')" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);">WATCH</button>\`;
@@ -640,11 +633,9 @@ function renderItem() {
     \`;
   }).join("");
 
-  // After returning from product editor, scroll the card we were just editing into view
   if (state.justEditedProdIdx !== null && prods.length > state.justEditedProdIdx) {
     const targetCard = list.querySelector(\`.p-card[data-prod-idx="\${state.justEditedProdIdx}"]\`);
     if (targetCard) {
-      // Use requestAnimationFrame so layout is ready
       requestAnimationFrame(() => {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
@@ -668,23 +659,13 @@ function closeVideo() {
 
 function getAllImages(p) {
   const allUrls = new Set();
-  
-  if (state.current && state.current.url) {
-    allUrls.add(state.current.url);
-  }
-
-  (p.images || []).forEach(u => {
-    const url = getImageUrl(u);
-    if (url) allUrls.add(url);
-  });
-  
+  if (state.current && state.current.url) { allUrls.add(state.current.url); }
+  (p.images || []).forEach(u => { const url = getImageUrl(u); if (url) allUrls.add(url); });
   (p.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
   (p.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  
   return { urls: Array.from(allUrls) };
 }
 
-// Generate stable key for persisting unsaved editor form state
 function getFormPersistKey() {
   if (!state.current || state.editingIdx === null) return null;
   const fid = state.current.frameIdx !== null && state.current.frameIdx !== undefined 
@@ -715,10 +696,11 @@ function saveFormToLocalStorage() {
       desc: document.getElementById("eDesc")?.value || "",
       sizingGuide: document.getElementById("eSizingGuide")?.value || "",
       shipping: document.getElementById("eShipping")?.value || "",
-      // Note: selectedImages & currentGridUrls are already in state, persisted via normal flow
+      features: document.getElementById("eFeatures")?.value || "",
+      dropship_advisory: document.getElementById("eDropshipAdvisory")?.value || ""
     };
     localStorage.setItem(key, JSON.stringify(data));
-  } catch(e) { /* ignore quota errors */ }
+  } catch(e) { }
 }
 
 function restoreFormFromLocalStorage() {
@@ -729,10 +711,7 @@ function restoreFormFromLocalStorage() {
     if (!raw) return;
     const data = JSON.parse(raw);
 
-    const setVal = (id, val) => { 
-      const el = document.getElementById(id); 
-      if (el && val != null) el.value = val; 
-    };
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
 
     setVal("eTitle", data.title);
     setVal("eStore", data.store);
@@ -751,12 +730,9 @@ function restoreFormFromLocalStorage() {
     setVal("eDesc", data.desc);
     setVal("eSizingGuide", data.sizingGuide);
     setVal("eShipping", data.shipping);
-
-    // Optional toast so user knows we restored unsaved work
-    if (data.title || data.store) {
-      // silent restore is usually better; only toast if significant
-    }
-  } catch(e) { /* corrupted data, ignore */ }
+    setVal("eFeatures", data.features);
+    setVal("eDropshipAdvisory", data.dropship_advisory);
+  } catch(e) { }
 }
 
 function clearFormPersist(key) {
@@ -770,14 +746,10 @@ function openProduct(idx) {
   
   state.currentSelected = [...(p.selectedImages || [])];
   
-  // Reorder for the UI: selected images first in their chosen sequence, then unselected
   const sortedUrls = [...state.currentSelected];
-  allImages.urls.forEach(u => {
-    if (!sortedUrls.includes(u)) sortedUrls.push(u);
-  });
+  allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
   state.currentGridUrls = sortedUrls;
 
-  // Setup persistence key for this specific product edit session
   state.formPersistKey = getFormPersistKey();
   
   let html = \`
@@ -796,7 +768,8 @@ function openProduct(idx) {
     </div>
     <div class="card">
       <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
+      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5; margin-bottom: 16px;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
+      <div class="field"><label>Dropship Advisory (LLM Data Enrich)</label><textarea id="eDropshipAdvisory" readonly style="background:var(--surface-2); font-size:12px;">\${escapeHtml(p.dropship_advisory || "")}</textarea></div>
     </div>
     <div class="card">
       <h3>BASIC INFO</h3>
@@ -811,11 +784,12 @@ function openProduct(idx) {
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
           <input id="eUrl" type="url" value="\${escapeHtml(p.url || "")}" style="flex:1;">
+          <button id="btnSyncData" class="btn-primary" style="padding:0 16px; font-size:11px; min-height:48px; background:var(--text); color:var(--bg); border:1px solid var(--text);" onclick="syncDataLlm()">SYNC DATA</button>
           \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">IMG EXTRACT (LAZY)</button>
+          <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">IMG EXTRACT (FULL)</button>
         </div>
       </div>
 
@@ -841,6 +815,7 @@ function openProduct(idx) {
           <option \${p.availability === "In stock" ? "selected" : ""}>IN STOCK</option>
           <option \${p.availability === "Out of stock" ? "selected" : ""}>OUT OF STOCK</option>
           <option \${p.availability === "Pre-order" ? "selected" : ""}>PRE-ORDER</option>
+          <option \${p.availability === "Unknown" ? "selected" : ""}>UNKNOWN</option>
         </select>
       </div>
       <div class="field-row">
@@ -860,7 +835,8 @@ function openProduct(idx) {
         <div class="field"><label>Shipping Cost</label><input id="eShippingCost" inputmode="decimal" value="\${escapeHtml(p.recommendedShippingRate?.amount || '')}"></div>
         <div class="field"><label>Shipping Cov</label><input id="eShippingCov" value="\${escapeHtml(p.recommendedShippingRate?.coverage || '')}"></div>
       </div>
-      <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
+      <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizes || []).join(", "))}"></div>
+      <div class="field"><label>Features (CSV)</label><input id="eFeatures" value="\${escapeHtml(Array.isArray(p.features) ? p.features.join(" | ") : (p.features || ""))} "></div>
       <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(p.description || "")}</textarea></div>
       <div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\${escapeHtml(p.sizingGuide || "")}</textarea></div>
       <div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\${escapeHtml(p.shippingAndReturns || "")}</textarea></div>
@@ -880,10 +856,8 @@ function openProduct(idx) {
   showScreen("editor");
   document.getElementById("eBody").scrollTop = 0;
 
-  // Restore any unsaved work from previous session (crash / accidental back)
   restoreFormFromLocalStorage();
 
-  // Auto-save form state to localStorage on any change (robust against refresh/crash)
   const editorBody = document.getElementById("eBody");
   if (editorBody) {
     editorBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
@@ -980,8 +954,8 @@ async function extractImages(mode) {
   const btnFull = document.getElementById("btnExtractFull");
 
   if (carousel) carousel.classList.add("extracting");
-  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = mode==='lazy' ? "EXTRACTING..." : "EXTRACT (LAZY)"; }
-  if (btnFull) { btnFull.disabled = true; btnFull.innerText = mode==='full' ? "EXTRACTING..." : "EXTRACT (FULL)"; }
+  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = mode==='lazy' ? "EXTRACTING..." : "IMG EXTRACT (LAZY)"; }
+  if (btnFull) { btnFull.disabled = true; btnFull.innerText = mode==='full' ? "EXTRACTING..." : "IMG EXTRACT (FULL)"; }
   
   try {
     const r = await fetch("/api/extract", {
@@ -998,7 +972,6 @@ async function extractImages(mode) {
     if (d.images && d.images.length > 0) {
       const p = state.current.response.products[state.editingIdx];
       
-      // Deduplicate against existing images and limit payload to 20
       const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
       
       if (newUnique.length > 0) {
@@ -1006,7 +979,6 @@ async function extractImages(mode) {
         p.customImages = [...newUnique, ...p.customImages];
         state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
         
-        // Auto-select newly extracted images (they appear first)
         newUnique.forEach(u => {
           if (!state.currentSelected.includes(u)) state.currentSelected.push(u);
         });
@@ -1024,8 +996,85 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "IMG EXTRACT (LAZY)"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "IMG EXTRACT (FULL)"; }
+  }
+}
+
+async function syncDataLlm() {
+  const url = document.getElementById("eUrl").value;
+  if (!url) return toast("NO URL PROVIDED");
+  
+  const btn = document.getElementById("btnSyncData");
+  if (btn) { btn.disabled = true; btn.innerText = "SYNCING..."; }
+  
+  try {
+    const r = await fetch("/api/extract-data", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    
+    const resText = await r.text();
+    let d;
+    try { d = JSON.parse(resText); } catch(err) { throw new Error(resText.slice(0, 100)); }
+
+    if (d.error) throw new Error(d.error);
+    if (!d.data) throw new Error("No data returned");
+
+    const cleanJson = d.data;
+
+    if (cleanJson.name) document.getElementById("eTitle").value = cleanJson.name;
+    if (cleanJson.brand) document.getElementById("eBrand").value = cleanJson.brand;
+    if (cleanJson.price !== null) document.getElementById("ePrice").value = cleanJson.price;
+    if (cleanJson.currency) document.getElementById("eCurrency").value = cleanJson.currency;
+    if (cleanJson.compare_at_price !== null) document.getElementById("eBasePrice").value = cleanJson.compare_at_price;
+    
+    if (cleanJson.availability) {
+        const availMap = { 'InStock': 'IN STOCK', 'OutOfStock': 'OUT OF STOCK', 'PreOrder': 'PRE-ORDER' };
+        const selectAvail = document.getElementById("eAvail");
+        if (availMap[cleanJson.availability]) selectAvail.value = availMap[cleanJson.availability];
+    }
+
+    if (cleanJson.features && cleanJson.features.length) document.getElementById("eFeatures").value = cleanJson.features.join(" | ");
+    if (cleanJson.dropship_advisory) document.getElementById("eDropshipAdvisory").value = cleanJson.dropship_advisory;
+    if (cleanJson.description) document.getElementById("eDesc").value = cleanJson.description;
+    
+    const shippingPolicies = [cleanJson.shipping_info, cleanJson.return_policy].filter(Boolean).join("\\n\\n");
+    if (shippingPolicies) document.getElementById("eShipping").value = shippingPolicies;
+    
+    if (cleanJson.variants && cleanJson.variants.length) {
+        const sizes = [...new Set(cleanJson.variants.map(v => v.size).filter(Boolean))];
+        if (sizes.length) document.getElementById("eSizes").value = sizes.join(", ");
+    }
+
+    if (cleanJson.images && cleanJson.images.length) {
+        const newUnique = cleanJson.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
+        if (newUnique.length > 0) {
+            const p = state.current.response.products[state.editingIdx];
+            p.customImages = p.customImages || [];
+            p.customImages = [...newUnique, ...p.customImages];
+            state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
+            
+            newUnique.forEach(u => {
+              if (!state.currentSelected.includes(u)) state.currentSelected.push(u);
+            });
+            
+            renderImgGrid(state.currentGridUrls);
+            updateSelCount();
+            toast(\`SYNC SUCCESS! ADDED \${newUnique.length} IMAGES.\`);
+        } else {
+            toast("SYNC SUCCESS! NO NEW IMAGES.");
+        }
+    } else {
+        toast("SYNC SUCCESS!");
+    }
+
+    saveFormToLocalStorage();
+
+  } catch(e) {
+    toast("ERROR: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = "SYNC DATA"; }
   }
 }
 
@@ -1040,10 +1089,13 @@ async function saveProduct(status = "completed") {
   p.category = document.getElementById("eCategory").value;
   p.price = { current: document.getElementById("ePrice").value, currency: document.getElementById("eCurrency").value };
   p.basePrice = document.getElementById("eBasePrice").value;
-  p.availability = document.getElementById("eAvail").value;
+  
+  const rawAvail = document.getElementById("eAvail").value;
+  const dbAvailMap = { 'IN STOCK': 'In stock', 'OUT OF STOCK': 'Out of stock', 'PRE-ORDER': 'Pre-order', 'UNKNOWN': 'Unknown' };
+  p.availability = dbAvailMap[rawAvail] || 'Unknown';
   
   p.recommendedMarkup = {
-    type: document.getElementById("eMarkupType").value,
+    type: document.getElementById("eMarkupType").value === 'FIXED' ? 'fixed' : 'percentage',
     value: document.getElementById("eMarkupVal").value,
     currency: document.getElementById("eCurrency").value
   };
@@ -1057,15 +1109,16 @@ async function saveProduct(status = "completed") {
   const sizesRaw = document.getElementById("eSizes").value;
   p.sizing = sizesRaw.split(",").map(s => s.trim()).filter(Boolean);
   p.sizes = p.sizing;
+
+  const featuresRaw = document.getElementById("eFeatures").value;
+  p.features = featuresRaw.split("|").map(s => s.trim()).filter(Boolean);
   
   p.description = document.getElementById("eDesc").value;
   p.sizingGuide = document.getElementById("eSizingGuide").value;
   p.shippingAndReturns = document.getElementById("eShipping").value;
+  p.dropship_advisory = document.getElementById("eDropshipAdvisory").value;
   
-  // Save custom images array
   p.customImages = p.customImages || [];
-  
-  // Set ordered selection directly from state array
   p.selectedImages = [...state.currentSelected];
   
   p.reviewStatus = status;
@@ -1076,7 +1129,6 @@ async function saveProduct(status = "completed") {
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
     
-    // Clear persisted draft + remember which card to scroll back to
     clearFormPersist(state.formPersistKey);
     state.justEditedProdIdx = idx;
     
@@ -1089,8 +1141,6 @@ async function saveProduct(status = "completed") {
 }
 
 function rejectProduct() {
-  const idx = state.editingIdx;
-  const p = state.current.response.products[idx];
   state.currentSelected = [];
   saveProduct("rejected");
 }
@@ -1135,7 +1185,6 @@ async function deleteItem() {
 
 function showQueue() { showScreen("queue"); }
 
-// Keyboard shortcuts (Escape closes modals, power user friendly)
 function initKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -1149,7 +1198,6 @@ function initKeyboard() {
         showQueue();
       }
     }
-    // Future: could add 's' for save when in editor, etc.
   });
 }
 
@@ -1172,19 +1220,11 @@ function resolvePrice(basePriceObj, sourcePriceStr) {
     };
 }
 
-/**
- * Flattens the old AI schema (1 product -> many sources/alternatives)
- * into a 1-to-1 array (1 product = 1 source/url).
- * Strictly deduplicates by URL across the entire product list to prevent redundant review cards.
- */
 function flattenProducts(products) {
     let modified = false;
     const flattened = [];
-    
-    // Track URLs globally for this item to merge duplicates seamlessly
     const seenUrls = new Map();
 
-    // Helper to safely merge image arrays without introducing duplicates
     const mergeArrays = (existingItem, newItem, field, isObjectArray = false) => {
         if (!newItem[field] || !Array.isArray(newItem[field]) || newItem[field].length === 0) return;
         const existingArr = Array.isArray(existingItem[field]) ? existingItem[field] : [];
@@ -1208,7 +1248,6 @@ function flattenProducts(products) {
 
     for (const p of products) {
         if (p.isFlattened) {
-            // Deduplicate if already flattened items have overlapping URLs
             if (p.url) {
                 if (seenUrls.has(p.url)) {
                     const existing = seenUrls.get(p.url);
@@ -1216,7 +1255,7 @@ function flattenProducts(products) {
                     mergeArrays(existing, p, 'customImages', false);
                     mergeArrays(existing, p, 'selectedImages', false);
                     modified = true;
-                    continue; // Skip adding duplicate card
+                    continue; 
                 }
                 seenUrls.set(p.url, p);
             }
@@ -1236,7 +1275,6 @@ function flattenProducts(products) {
             ...(Array.isArray(p.customSources) ? p.customSources : [])
         ];
         
-        // Track total to know if we need to emit a blank fallback
         const totalOriginalVariants = allSources.length + (Array.isArray(p.alternatives) ? p.alternatives.length : 0);
 
         const addVariant = (variant) => {
@@ -1246,7 +1284,7 @@ function flattenProducts(products) {
                     mergeArrays(existing, variant, 'images', true);
                     mergeArrays(existing, variant, 'customImages', false);
                     mergeArrays(existing, variant, 'selectedImages', false);
-                    return; // Skip adding duplicate card
+                    return; 
                 }
                 seenUrls.set(variant.url, variant);
             }
@@ -1256,6 +1294,17 @@ function flattenProducts(products) {
         allSources.forEach(s => {
             addVariant({
                 ...base,
+                // FIX: Respect source-level overrides if they exist
+                title: s.title || base.title,
+                brand: s.brand || base.brand,
+                category: s.category || base.category,
+                features: s.features || base.features,
+                dropship_advisory: s.dropship_advisory || base.dropship_advisory,
+                description: s.description || base.description,
+                sizing: s.sizing || base.sizing,
+                sizes: s.sizes || base.sizes,
+                sizingGuide: s.sizingGuide || base.sizingGuide,
+                shippingAndReturns: s.shippingAndReturns || base.shippingAndReturns,
                 store: s.store || '',
                 url: s.url || '',
                 price: resolvePrice(base.price, s.price),
@@ -1278,7 +1327,6 @@ function flattenProducts(products) {
             });
         }
 
-        // Only add an empty fallback if there were absolutely no sources/alternatives provided
         if (totalOriginalVariants === 0) {
             addVariant({ ...base, store: '', url: '', images: [] });
         }
@@ -1308,6 +1356,8 @@ function normalizeResponse(item) {
         selectedImages: p.selectedImages || [],
         customImages: p.customImages || [],
         images: p.images || [],
+        features: p.features || [],
+        dropship_advisory: p.dropship_advisory || "",
         price: p.price || { current: '', original: null, currency: 'USD' },
         sizing: Array.isArray(p.sizing) ? p.sizing : (p.sizes ? String(p.sizes).split(',').map(s => s.trim()).filter(Boolean) : []),
         sizes: p.sizes || p.sizing || [],
@@ -1322,8 +1372,6 @@ function normalizeResponse(item) {
 
 function getItemStatus(item) {
     const resp = normalizeResponse(item);
-    
-    // Auto-flatten purely in memory for status calculation so the queue reflects the correct state
     const { flattened } = flattenProducts(resp.products);
     
     if (!flattened.length) return 'pending';
@@ -1471,13 +1519,9 @@ async function maybeDiscardEmptyPost(collection, docId) {
     }
 }
 
-/**
- * When a product is reviewed, propagate the human review decisions (status, selected images,
- * overrides) to any *other* items/frames in the SAME post that have a product with the exact
- * same supplier URL. This prevents the reviewer from having to do duplicate work.
- */
+// FIX 4: Complete Data Propagation across duplicate sources
 async function propagateReviewToSameSources(collection, docId, sourceUrl, updatedProduct, currentFileIdx, currentFrameIdx) {
-  if (!sourceUrl) return 0; // nothing to propagate without a URL to match on
+  if (!sourceUrl) return 0;
 
   try {
     const post = await collection.findOne(
@@ -1488,35 +1532,47 @@ async function propagateReviewToSameSources(collection, docId, sourceUrl, update
 
     let updatedCount = 0;
 
+    const applyUpdate = async (base) => {
+        const setObj = {};
+        setObj[`${base}.title`] = updatedProduct.title;
+        setObj[`${base}.brand`] = updatedProduct.brand;
+        setObj[`${base}.category`] = updatedProduct.category;
+        setObj[`${base}.description`] = updatedProduct.description;
+        setObj[`${base}.features`] = updatedProduct.features || [];
+        setObj[`${base}.dropship_advisory`] = updatedProduct.dropship_advisory || "";
+        setObj[`${base}.price`] = updatedProduct.price;
+        setObj[`${base}.basePrice`] = updatedProduct.basePrice;
+        setObj[`${base}.availability`] = updatedProduct.availability;
+        setObj[`${base}.sizing`] = updatedProduct.sizing || [];
+        setObj[`${base}.sizes`] = updatedProduct.sizes || [];
+        setObj[`${base}.sizingGuide`] = updatedProduct.sizingGuide;
+        setObj[`${base}.shippingAndReturns`] = updatedProduct.shippingAndReturns;
+        setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
+        setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
+        setObj[`${base}.images`] = updatedProduct.images || [];
+        setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
+        setObj[`${base}.customImages`] = updatedProduct.customImages || [];
+        setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
+        setObj[`${base}.reviewedAt`] = new Date();
+
+        await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
+        updatedCount++;
+    };
+
     for (let fi = 0; fi < post.file_urls.length; fi++) {
       const f = post.file_urls[fi];
       if (!f || f.discarded) continue;
 
-      // Check main image item
       if (f.type === 'image' && f.response && Array.isArray(f.response.products)) {
         for (let pi = 0; pi < f.response.products.length; pi++) {
           const prod = f.response.products[pi];
-          if (prod.url === sourceUrl) {
-            // Found a match in another (or same) item — apply review fields
-            const setObj = {};
+          if (prod.url === sourceUrl && !(fi === currentFileIdx && currentFrameIdx === -1)) {
             const base = `file_urls.${fi}.response.products.${pi}`;
-
-            // Propagate key human decisions
-            setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
-            setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
-            setObj[`${base}.reviewedAt`] = new Date();
-            setObj[`${base}.price`] = updatedProduct.price;
-            setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
-            setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
-            setObj[`${base}.availability`] = updatedProduct.availability;
-
-            await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
-            updatedCount++;
+            await applyUpdate(base);
           }
         }
       }
 
-      // Check frames inside video
       if (f.type === 'video' && Array.isArray(f.frames)) {
         for (let fr = 0; fr < f.frames.length; fr++) {
           const frame = f.frames[fr];
@@ -1524,20 +1580,9 @@ async function propagateReviewToSameSources(collection, docId, sourceUrl, update
 
           for (let pi = 0; pi < frame.response.products.length; pi++) {
             const prod = frame.response.products[pi];
-            if (prod.url === sourceUrl) {
-              const setObj = {};
+            if (prod.url === sourceUrl && !(fi === currentFileIdx && fr === currentFrameIdx)) {
               const base = `file_urls.${fi}.frames.${fr}.response.products.${pi}`;
-
-              setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
-              setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
-              setObj[`${base}.reviewedAt`] = new Date();
-              setObj[`${base}.price`] = updatedProduct.price;
-              setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
-              setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
-              setObj[`${base}.availability`] = updatedProduct.availability;
-
-              await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
-              updatedCount++;
+              await applyUpdate(base);
             }
           }
         }
@@ -1555,7 +1600,7 @@ async function propagateReviewToSameSources(collection, docId, sourceUrl, update
 }
 
 /* -------------------------------------------------------------------------- */
-/* EXTERNAL API HELPERS (Catbox Upload & Python Extract)                      */
+/* EXTERNAL API HELPERS (Catbox Upload, Python Extract, LLM Sync)             */
 /* -------------------------------------------------------------------------- */
 
 async function uploadToCatbox(base64Data, filename) {
@@ -1580,17 +1625,16 @@ async function runPythonExtractor(targetUrl, mode) {
         
         fs.writeFileSync(inFile, JSON.stringify([targetUrl]));
 
-        // Ensure we point precisely to the script in the workspace root
-        const scriptPath = path.resolve(process.cwd(), 'ecom-image-extractor.py');
+        const scriptPath = path.resolve(process.cwd(), mode === 'text' ? 'ecom-text-extractor.py' : 'ecom-image-extractor.py');
         
         if (!fs.existsSync(scriptPath)) {
             try { fs.unlinkSync(inFile); } catch(e){}
-            return reject(new Error('ecom-image-extractor.py NOT FOUND in current working directory. Please place the Python extractor script next to review-server.js'));
+            return reject(new Error(`${mode === 'text' ? 'ecom-text-extractor.py' : 'ecom-image-extractor.py'} NOT FOUND in current working directory.`));
         }
 
         const args = [scriptPath, '-u', inFile, '-o', outFile];
         
-        if (mode === 'lazy') {
+        if (mode === 'lazy' || mode === 'text') {
             args.push('--lazy-extraction');
         } else {
             args.push('--no-lazy-extraction');
@@ -1618,16 +1662,58 @@ async function runPythonExtractor(targetUrl, mode) {
                 const resultData = JSON.parse(fs.readFileSync(outFile, 'utf8'));
                 fs.unlinkSync(inFile); fs.unlinkSync(outFile);
                 
-                const images = resultData[targetUrl] || [];
-                if (images.error) throw new Error(images.error);
+                const data = resultData[targetUrl] || [];
+                if (data.error) throw new Error(data.error);
                 
-                log('info', `Extraction success: ${images.length} images found.`);
-                resolve(images.map(i => i.url));
+                resolve(data);
             } catch (err) {
                 reject(err);
             }
         });
     });
+}
+
+async function callGeminiForExtraction(rawJson) {
+    const keys = (process.env.ORCH_GEMINI_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean);
+    if (!keys.length) throw new Error('No Gemini API keys configured on Review Server. Manual LLM sync is disabled.');
+    
+    const apiKey = keys[Math.floor(Math.random() * keys.length)];
+    const model = process.env.ORCH_GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const payload = JSON.stringify([{ source_id: 'sync_test', raw_data: rawJson }]);
+
+    const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: DATA_EXTRACTION_PROMPT },
+                        { text: payload },
+                    ],
+                }],
+                generationConfig: {
+                    temperature: 0.1,
+                    responseMimeType: 'application/json',
+                },
+            }),
+        }
+    );
+
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        throw new Error(`Gemini API error (${resp.status}): ${body.slice(0, 300)}`);
+    }
+
+    const data = await resp.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Gemini response missing text content');
+
+    const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('Gemini response invalid or empty');
+    return parsed[0]; 
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1737,7 +1823,6 @@ async function main() {
                 const fRes = await fetch(vidUrl, { headers: fetchHeaders });
                 const resHeaders = {};
                 fRes.headers.forEach((v, k) => {
-                    // Filter out content-encoding because we are streaming the raw bytes
                     if (k.toLowerCase() !== 'content-encoding') resHeaders[k] = v;
                 });
                 
@@ -1809,7 +1894,6 @@ async function main() {
 
                 const response = normalizeResponse(item);
                 
-                // BACKWARD COMPATIBILITY: Auto-flatten if necessary and write immediately to DB so indices lock in place.
                 const { flattened, modified } = flattenProducts(response.products);
                 if (modified) {
                     log('info', `Auto-flattening legacy schema for doc ${docId}`);
@@ -1867,10 +1951,32 @@ async function main() {
                 try {
                     const { url, mode } = JSON.parse(body);
                     if (!url) throw new Error("No URL provided");
-                    const images = await runPythonExtractor(url, mode);
+                    const rawData = await runPythonExtractor(url, mode);
+                    const images = Array.isArray(rawData) ? rawData.map(i => i.url) : [];
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ images }));
                 } catch (e) {
+                    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        if (parsed.pathname === '/api/extract-data' && req.method === 'POST') {
+            let body = '';
+            req.on('data', d => body += d);
+            req.on('end', async () => {
+                try {
+                    const { url } = JSON.parse(body);
+                    if (!url) throw new Error("No URL provided");
+                    
+                    const rawData = await runPythonExtractor(url, 'text');
+                    const cleanData = await callGeminiForExtraction(rawData);
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ data: cleanData }));
+                } catch (e) {
+                    log('error', `Sync API error: ${e.message}`);
                     res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
                 }
             });
@@ -1912,6 +2018,8 @@ async function main() {
                             [`${basePath}.availability`]: product.availability,
                             [`${basePath}.sizing`]: product.sizing,
                             [`${basePath}.sizes`]: product.sizes,
+                            [`${basePath}.features`]: product.features,
+                            [`${basePath}.dropship_advisory`]: product.dropship_advisory,
                             [`${basePath}.sizingGuide`]: product.sizingGuide,
                             [`${basePath}.shippingAndReturns`]: product.shippingAndReturns,
                             [`${basePath}.recommendedMarkup`]: product.recommendedMarkup,
@@ -1925,10 +2033,6 @@ async function main() {
                         }}
                     );
 
-                    // === SMART DUPLICATE PROPAGATION ===
-                    // If this product has a supplier URL, apply the same review decisions to any other
-                    // items/frames in this same post that reference the exact same source URL.
-                    // This dramatically reduces duplicate review work across frames of a reel/post.
                     if (product.url) {
                       propagateReviewToSameSources(
                         collection,
