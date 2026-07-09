@@ -1789,9 +1789,9 @@ async function auditBatchWithGemini(db, batchItems) {
                                 { text: payload },
                             ],
                         }],
-                        systemInstruction: {
-                            parts: AUDIT_PROMPT_INSTRUCTIONS
-                        },
+                        // systemInstruction: {
+                        //    parts: AUDIT_PROMPT_INSTRUCTIONS
+                        // },
                         generationConfig: {
                             temperature: 0.1,
                             maxOutputTokens: 65536, // <-- Prevent JSON cutoff
