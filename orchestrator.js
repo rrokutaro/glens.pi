@@ -1545,10 +1545,11 @@ function chunkAuditBatches(items, targetTokens) {
     const batches = [];
     let current = [];
     let currentTokens = 0;
+    const MAX_ITEMS_PER_BATCH = 10; // 👈 Forces the LLM to process shorter lists reliably
 
     for (const item of items) {
         const itemTokens = estimateTokens(item.raw);
-        if (current.length > 0 && currentTokens + itemTokens > targetTokens) {
+        if (current.length >= MAX_ITEMS_PER_BATCH || (current.length > 0 && currentTokens + itemTokens > targetTokens)) {
             batches.push(current);
             current = [item];
             currentTokens = itemTokens;
@@ -2004,44 +2005,35 @@ async function runAuditStage(db, collection) {
                 { projection: { post_id: 1, file_urls: 1, discarded: 1 } }
             );
             if (!postDoc || postDoc.discarded) continue;
-            if (!Array.isArray(postDoc.file_urls) || postDoc.file_urls.length === 0) continue;
 
-            let allEmpty = true;
+            let allProcessed = true;
+            let allTrulyEmpty = true;
+
+            const check = (f) => {
+                // 👇 If item hasn't been explicitly audited yet, do NOT discard the post
+                if (!f.auditStatus) { allProcessed = false; return; }
+                const hasProducts = f.response && Array.isArray(f.response.products) && f.response.products.length > 0;
+                if (hasProducts) { allTrulyEmpty = false; }
+            };
+
             for (const file of postDoc.file_urls) {
-                if (!file) continue;
-
-                if (file.type === 'image') {
-                    const productsEmpty = !file.response ||
-                        !Array.isArray(file.response.products) ||
-                        file.response.products.length === 0;
-                    const isUnfixable = file.auditStatus === 'unfixable';
-                    if (!(productsEmpty || isUnfixable)) { allEmpty = false; break; }
-                } else if (file.type === 'video' && Array.isArray(file.frames)) {
-                    for (const frame of file.frames) {
-                        if (!frame) continue;
-                        const productsEmpty = !frame.response ||
-                            !Array.isArray(frame.response.products) ||
-                            frame.response.products.length === 0;
-                        const isUnfixable = frame.auditStatus === 'unfixable';
-                        if (!(productsEmpty || isUnfixable)) { allEmpty = false; break; }
-                    }
-                    if (!allEmpty) break;
-                }
+                if (file.type === 'image') check(file);
+                else if (file.type === 'video' && Array.isArray(file.frames)) file.frames.forEach(check);
             }
 
-            if (allEmpty) {
+            if (allProcessed && allTrulyEmpty) {
                 await collection.updateOne(
                     { _id: postDoc._id },
-                    { $set: { discarded: true, discardedReason: 'audit: all products empty or unfixable' } }
+                    { $set: { discarded: true, discardedReason: 'audit: all items processed and returned no products' } }
                 );
                 results.discarded++;
-                log('info', `Audit: discarded post ${postDoc.post_id} — all products empty/unfixable`);
+                log('info', `Audit: discarded post ${postDoc.post_id} — confirmed empty`);
             }
         } catch (err) {
             log('warn', `Audit: post-discard check failed for ${postObjIdStr}: ${err.message}`);
         }
     }
-
+    
     return results;
 }
 
@@ -2335,73 +2327,76 @@ async function runDataEnrichmentStage(db, collection) {
     }
 
     const llmChunks = chunkArray(llmBatchQueue, CONFIG.textExtraction.llmBatchSize);
-    
-    // Process as many batches concurrently as you have API keys (fallback to 1 if empty)
     const llmConcurrency = Math.max(1, CONFIG.review.apiKeys.length);
 
     for (let c = 0; c < llmChunks.length; c += llmConcurrency) {
         const concurrentChunks = llmChunks.slice(c, c + llmConcurrency);
         log('info', `Gemini LLM Structuring: processing batches ${c + 1} to ${c + concurrentChunks.length} of ${llmChunks.length} concurrently...`);
 
-        // Execute LLM API calls in parallel
         await Promise.all(concurrentChunks.map(async (chunk, chunkIdx) => {
-            const batchNum = c + chunkIdx + 1;
-            const t0 = Date.now(); // 👇 NEW: Start a timer for feedback
-            let cleanResults = [];
-            let batchSuccessCount = 0; // Fix: Variable defined here
-            
-            try {
-                cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
-            } catch (err) {
-                // 👇 CHANGED: Do NOT update MongoDB on LLM error. Leave sources for the next run.
-                log('error', `Gemini batch ${batchNum} failed: ${err.message}. Sources left for next run.`);
-                failed += chunk.length;
-                return; // Exit this parallel promise early
-            }
-
-            for (const item of chunk) {
-                const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
-                if (!cleanJson) {
-                    // 👇 CHANGED: Do NOT update MongoDB if AI missed a source. Leave for next run.
-                    log('warn', `Gemini missed source_id ${item.source_id} in batch ${batchNum}. Leaving for next run.`);
-                    failed++;
-                    continue; 
-                }
-
+            try { // 👇 Top-level safety to prevent cascading DB close
+                const batchNum = c + chunkIdx + 1;
+                const t0 = Date.now();
+                let cleanResults = [];
+                let batchSuccessCount = 0; // 👈 Fixed: Variable defined here
+                
                 try {
-                    // Carry over original fallback details
-                    cleanJson.url = cleanJson.url || item.oldSource.url;
-                    if (!Array.isArray(cleanJson.images) || cleanJson.images.length === 0) {
-                        cleanJson.images = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
-                    }
-                    cleanJson.textExtraction = { status: 'completed' };
-
-                    // Replace the entire source object with the clean schema
-                    bulkOps.push({
-                        updateOne: {
-                            filter: { _id: item.docId },
-                            update: { $set: { [item.dbPath]: cleanJson } }
-                        }
-                    });
-                    succeeded++;
+                    cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
                 } catch (err) {
-                    // We only write a fallback here if the code itself crashes while merging
-                    log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
-                    bulkOps.push({
-                        updateOne: {
-                            filter: { _id: item.docId },
-                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
-                        }
-                    });
-                    failed++;
+                    log('error', `❌ Gemini batch ${batchNum} failed: ${err.message}. Sources left for next run.`);
+                    failed += chunk.length;
+                    return; 
                 }
+
+                for (const item of chunk) {
+                    const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
+                    if (!cleanJson) {
+                        log('warn', `⚠️ Gemini missed source_id ${item.source_id} in batch ${batchNum}. Leaving for next run.`);
+                        failed++;
+                        continue; 
+                    }
+
+                    try {
+                        cleanJson.url = cleanJson.url || item.oldSource.url;
+                        
+                        // 👇 NEW: Flatten images to URL strings only
+                        if (Array.isArray(cleanJson.images)) {
+                            cleanJson.images = cleanJson.images.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
+                        }
+
+                        // Fallback to old images if LLM found none
+                        if (!cleanJson.images || cleanJson.images.length === 0) {
+                            const oldImgs = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
+                            cleanJson.images = oldImgs.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
+                        }
+
+                        cleanJson.textExtraction = { status: 'completed' };
+
+                        bulkOps.push({
+                            updateOne: {
+                                filter: { _id: item.docId },
+                                update: { $set: { [item.dbPath]: cleanJson } }
+                            }
+                        });
+                        succeeded++;
+                        batchSuccessCount++;
+                    } catch (err) {
+                        log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
+                        bulkOps.push({
+                            updateOne: {
+                                filter: { _id: item.docId },
+                                update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
+                            }
+                        });
+                        failed++;
+                    }
+                }
+                log('info', `✅ Gemini batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchSuccessCount}/${chunk.length} items structured).`);
+            } catch (fatalErr) {
+                log('error', `🔥 Fatal JS error in concurrent LLM loop: ${fatalErr.message}`);
             }
-            
-            // 👇 NEW: Feedback log when the batch finishes successfully
-            log('info', `✅ Gemini batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchSuccessCount}/${chunk.length} items structured).`);
         }));
-        
-        await sleep(2000); // Brief pause before the next concurrent wave
+        await sleep(2000);
     }
     
     let updatedPosts = 0;
@@ -2484,7 +2479,9 @@ async function fetchPostsWithPendingImages(collection, limit) {
                                         url: { $exists: true },
                                         $or: [
                                             { images: { $exists: false } },
-                                            { images: { $size: 0 } }
+                                            { images: { $size: 0 } },
+                                            { images: { $size: 1 } },
+                                            { images: { $size: 2 } }
                                         ],
                                         'textExtraction.status': 'completed'
                                     }
@@ -2505,7 +2502,9 @@ async function fetchPostsWithPendingImages(collection, limit) {
                                         url: { $exists: true },
                                         $or: [
                                             { images: { $exists: false } },
-                                            { images: { $size: 0 } }
+                                            { images: { $size: 0 } },
+                                            { images: { $size: 1 } },
+                                            { images: { $size: 2 } }
                                         ],
                                         'textExtraction.status': 'completed'
                                     }
@@ -2662,14 +2661,18 @@ async function runProductImageExtractionStage(db, collection) {
         for (const item of pending) {
             if (!urlToImages.has(item.url)) continue;
 
-            const images = urlToImages.get(item.url);
-            let dbPath;
-            if (item.frameIndex === -1) {
-                dbPath = `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
-            } else {
-                dbPath = `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
-            }
-            $set[dbPath] = images;
+            // 👇 NEW: Flatten incoming Python objects and merge with existing URL strings
+            const existingImages = (item.oldImages || []).map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
+            const extractedRaw = urlToImages.get(item.url) || [];
+            const extractedUrls = extractedRaw.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
+            
+            const combinedImages = [...new Set([...existingImages, ...extractedUrls])];
+
+            let dbPath = item.frameIndex === -1
+                ? `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`
+                : `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
+            
+            $set[dbPath] = combinedImages;
             hasUpdates = true;
         }
 
