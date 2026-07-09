@@ -1096,7 +1096,7 @@ async function extractDataBatchWithGemini(db, batch) {
                             maxOutputTokens: 65536, // <-- Overrides default 8k limit to prevent JSON cutoff
                             responseMimeType: 'application/json',
                             thinkingConfig: {
-                                thinking_effort: "HIGH" // <-- High thinking level configuration
+                                thinkingLevel: "HIGH" // <-- High thinking level configuration
                             }
                         },
                     }),
