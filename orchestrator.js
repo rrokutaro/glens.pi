@@ -1795,6 +1795,9 @@ async function auditBatchWithGemini(db, batchItems) {
                         generationConfig: {
                             temperature: 0.1,
                             maxOutputTokens: 65536, // <-- Prevent JSON cutoff
+                            thinkingConfig: {
+                                thinkingLevel: "HIGH" // Add this
+                            },
                             responseMimeType: 'application/json',
                         },
                     }),
@@ -1880,105 +1883,104 @@ async function runAuditStage(db, collection) {
         log('info', `Audit: processing batches ${b + 1} to ${b + concurrentBatches.length} of ${batches.length} concurrently...`);
 
         await Promise.all(concurrentBatches.map(async (batch, idx) => {
-            const batchNum = b + idx + 1;
-            const t0 = Date.now();
-            let llmResults;
+            try { // Top-level safety catch
+                const batchNum = b + idx + 1;
+                const t0 = Date.now();
+                let llmResults;
 
-            try {
-                llmResults = await auditBatchWithGemini(db, batch);
-            } catch (err) {
-                // Fails here: we log it and exit early. Because auditedAt is not written,
-                // fetchUnauditedFiles will automatically grab these again on the next run!
-                log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
-                results.failed += batch.length;
-                return;
-            }
-
-            const batchResultBySeq = new Map();
-            for (const r of llmResults) {
-                if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
-            }
-
-            let batchAuditedCount = 0;
-
-            for (const batchItem of batch) {
-                const llmResult = batchResultBySeq.get(batchItem.seq);
-                if (!llmResult) {
-                    log('warn', `⚠️ Audit: no result returned for seq=${batchItem.seq} in batch ${batchNum} — skipping`);
-                    results.failed++;
-                    continue;
+                try {
+                    llmResults = await auditBatchWithGemini(db, batch);
+                } catch (err) {
+                    log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
+                    results.failed += batch.length;
+                    return;
                 }
 
-                const { status, products, changes } = llmResult;
-                const { path, postObjectId } = batchItem;
-                const now = new Date();
-                let $set;
+                const batchResultBySeq = new Map();
+                for (const r of llmResults) {
+                    if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
+                }
 
-                if (status === 'fixed' || status === 'unchanged') {
-                    const productsArray = Array.isArray(products) ? products : [];
-                    
-                    // 👇 Migrate alternatives into the sources array
-                    for (const prod of productsArray) {
-                        if (Array.isArray(prod.alternatives) && prod.alternatives.length > 0) {
-                            if (!Array.isArray(prod.sources)) prod.sources = [];
-                            for (const alt of prod.alternatives) {
-                                if (alt.url) {
-                                    prod.sources.push({
-                                        store: alt.brand || 'Alternative Source',
-                                        url: alt.url,
-                                        price: alt.price || null,
-                                        availability: 'Unknown'
-                                    });
+                let batchAuditedCount = 0;
+
+                for (const batchItem of batch) {
+                    const llmResult = batchResultBySeq.get(batchItem.seq);
+                    if (!llmResult) {
+                        log('warn', `⚠️ Audit: no result returned for seq=${batchItem.seq} in batch ${batchNum} — skipping`);
+                        results.failed++;
+                        continue;
+                    }
+
+                    const { status, products, changes } = llmResult;
+                    const { path, postObjectId } = batchItem;
+                    const now = new Date();
+                    let $set;
+
+                    if (status === 'fixed' || status === 'unchanged') {
+                        const productsArray = Array.isArray(products) ? products : [];
+                        for (const prod of productsArray) {
+                            if (Array.isArray(prod.alternatives) && prod.alternatives.length > 0) {
+                                if (!Array.isArray(prod.sources)) prod.sources = [];
+                                for (const alt of prod.alternatives) {
+                                    if (alt.url) {
+                                        prod.sources.push({
+                                            store: alt.brand || 'Alternative Source',
+                                            url: alt.url,
+                                            price: alt.price || null,
+                                            availability: 'Unknown'
+                                        });
+                                    }
                                 }
+                                prod.alternatives = [];
                             }
-                            prod.alternatives = []; // Clear the alternatives array once migrated
                         }
+
+                        $set = {
+                            [`${path}.response`]:     { products: productsArray },
+                            [`${path}.auditedAt`]:    now,
+                            [`${path}.auditStatus`]:  'audited',
+                        };
+                        if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                            $set[`${path}.auditChanges`] = changes;
+                        }
+                        results[status === 'fixed' ? 'fixed' : 'unchanged']++;
+                    } else if (status === 'empty') {
+                        $set = {
+                            [`${path}.response`]:    { products: [] },
+                            [`${path}.auditedAt`]:   now,
+                            [`${path}.auditStatus`]: 'audited',
+                        };
+                        if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                            $set[`${path}.auditChanges`] = changes;
+                        }
+                        results.empty++;
+                    } else {
+                        $set = {
+                            [`${path}.response`]:    { products: [] },
+                            [`${path}.auditedAt`]:   now,
+                            [`${path}.auditStatus`]: 'unfixable',
+                        };
+                        if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                            $set[`${path}.auditChanges`] = changes;
+                        }
+                        results.unfixable++;
                     }
 
-                    $set = {
-                        [`${path}.response`]:     { products: productsArray },
-                        [`${path}.auditedAt`]:    now,
-                        [`${path}.auditStatus`]:  'audited',
-                    };
-                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                        $set[`${path}.auditChanges`] = changes;
-                    }
-                    results[status === 'fixed' ? 'fixed' : 'unchanged']++;
-                } else if (status === 'empty') {
-                    $set = {
-                        [`${path}.response`]:    { products: [] },
-                        [`${path}.auditedAt`]:   now,
-                        [`${path}.auditStatus`]: 'audited',
-                    };
-                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                        $set[`${path}.auditChanges`] = changes;
-                    }
-                    results.empty++;
-                } else {
-                    $set = {
-                        [`${path}.response`]:    { products: [] },
-                        [`${path}.auditedAt`]:   now,
-                        [`${path}.auditStatus`]: 'unfixable',
-                    };
-                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                        $set[`${path}.auditChanges`] = changes;
-                    }
-                    results.unfixable++;
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: postObjectId },
+                            update: { $set }
+                        }
+                    });
+                    
+                    batchAuditedCount++;
+                    results.audited++;
                 }
 
-                // Add to our efficient bulk write queue
-                bulkOps.push({
-                    updateOne: {
-                        filter: { _id: postObjectId },
-                        update: { $set }
-                    }
-                });
-                
-                batchAuditedCount++;
-                results.audited++;
+                log('info', `✅ Audit: batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchAuditedCount}/${batch.length} items audited).`);
+            } catch (fatalErr) {
+                log('error', `🔥 Fatal error in concurrent Audit loop: ${fatalErr.message}`);
             }
-
-            log('info', `✅ Audit: batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchAuditedCount}/${batch.length} items audited).`);
         }));
 
         await sleep(2000); // Brief pause before the next concurrent wave
@@ -2346,6 +2348,7 @@ async function runDataEnrichmentStage(db, collection) {
             const batchNum = c + chunkIdx + 1;
             const t0 = Date.now(); // 👇 NEW: Start a timer for feedback
             let cleanResults = [];
+            let batchSuccessCount = 0; // Fix: Variable defined here
             
             try {
                 cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
