@@ -1123,7 +1123,23 @@ async function extractDataBatchWithGemini(db, batch) {
             if (!text) throw new Error('Data Extraction: Gemini response missing text content');
 
             const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
-            const parsed = JSON.parse(cleaned);
+            
+            // 👇 NEW: Try JSON parse, fallback to jsonrepair
+            let parsed;
+            try {
+                parsed = JSON.parse(cleaned);
+            } catch (parseErr) {
+                try {
+                    const { jsonrepair } = await import('jsonrepair'); // Dynamic import
+                    const repaired = jsonrepair(cleaned);
+                    parsed = JSON.parse(repaired);
+                    log('info', 'Data Extraction: JSON repair successfully fixed malformed output.');
+                } catch (repairErr) {
+                    throw new Error('Data Extraction: JSON parse and repair both failed');
+                }
+            }
+            // 👆 END NEW
+
             if (!Array.isArray(parsed)) throw new Error('Data Extraction: Gemini response was not a JSON array');
             return parsed;
         } catch (err) {
@@ -1714,11 +1730,32 @@ async function runAuditStage(db, collection) {
 
             if (status === 'fixed' || status === 'unchanged') {
                 const productsArray = Array.isArray(products) ? products : [];
+                
+                // 👇 NEW: Migrate alternatives into the sources array
+                for (const prod of productsArray) {
+                    if (Array.isArray(prod.alternatives) && prod.alternatives.length > 0) {
+                        if (!Array.isArray(prod.sources)) prod.sources = [];
+                        for (const alt of prod.alternatives) {
+                            if (alt.url) {
+                                prod.sources.push({
+                                    store: alt.brand || 'Alternative Source',
+                                    url: alt.url,
+                                    price: alt.price || null,
+                                    availability: 'Unknown'
+                                });
+                            }
+                        }
+                        prod.alternatives = []; // Clear the alternatives array once migrated
+                    }
+                }
+                // 👆 END NEW
+
                 $set = {
                     [`${path}.response`]:     { products: productsArray },
                     [`${path}.auditedAt`]:    now,
                     [`${path}.auditStatus`]:  'audited',
                 };
+                
                 if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
                     $set[`${path}.auditChanges`] = changes;
                 }
@@ -2106,36 +2143,25 @@ async function runDataEnrichmentStage(db, collection) {
         // Execute LLM API calls in parallel
         await Promise.all(concurrentChunks.map(async (chunk, chunkIdx) => {
             const batchNum = c + chunkIdx + 1;
+            const t0 = Date.now(); // 👇 NEW: Start a timer for feedback
             let cleanResults = [];
             
             try {
                 cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
             } catch (err) {
-                log('error', `Gemini batch ${batchNum} failed: ${err.message}`);
-                for (const item of chunk) {
-                    bulkOps.push({
-                        updateOne: {
-                            filter: { _id: item.docId },
-                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'LLM structuring failed') } }
-                        }
-                    });
-                    failed++;
-                }
-                return; // Exit this parallel promise early on fail
+                // 👇 CHANGED: Do NOT update MongoDB on LLM error. Leave sources for the next run.
+                log('error', `Gemini batch ${batchNum} failed: ${err.message}. Sources left for next run.`);
+                failed += chunk.length;
+                return; // Exit this parallel promise early
             }
 
             for (const item of chunk) {
                 const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
                 if (!cleanJson) {
-                    log('warn', `Gemini missed source_id ${item.source_id} in batch ${batchNum}`);
-                    bulkOps.push({
-                        updateOne: {
-                            filter: { _id: item.docId },
-                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini missed source_id') } }
-                        }
-                    });
+                    // 👇 CHANGED: Do NOT update MongoDB if AI missed a source. Leave for next run.
+                    log('warn', `Gemini missed source_id ${item.source_id} in batch ${batchNum}. Leaving for next run.`);
                     failed++;
-                    continue;
+                    continue; 
                 }
 
                 try {
@@ -2155,6 +2181,7 @@ async function runDataEnrichmentStage(db, collection) {
                     });
                     succeeded++;
                 } catch (err) {
+                    // We only write a fallback here if the code itself crashes while merging
                     log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
                     bulkOps.push({
                         updateOne: {
@@ -2165,8 +2192,11 @@ async function runDataEnrichmentStage(db, collection) {
                     failed++;
                 }
             }
+            
+            // 👇 NEW: Feedback log when the batch finishes successfully
+            log('info', `✅ Gemini batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchSuccessCount}/${chunk.length} items structured).`);
         }));
-
+        
         await sleep(2000); // Brief pause before the next concurrent wave
     }
     
