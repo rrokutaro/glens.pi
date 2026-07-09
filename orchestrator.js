@@ -1638,6 +1638,54 @@ RULES — apply in this exact order:
    - Do not hallucinate product data. If you cannot reconstruct a product with confidence, omit it.
    - The "changes" array should be concise: e.g., "Fixed malformed JSON", "Removed 2 invalid source URLs", "Deduplicated 1 alternative", "Clamped dropshipViability.score from 15 to 10".`;
 
+const AUDIT_PROMPT_INSTRUCTIONS = [
+    {
+        text: "You are a JSON repair and data-quality enforcement engine for an e-commerce dropshipping platform. Your sole job is to receive an array of raw product-analysis responses, fix any structural or logical defects, and return a strictly formatted result array. You operate silently — no explanations, no commentary, no markdown. Only raw, valid JSON output."
+    },
+    {
+        text: "IDENTITY AND BEHAVIOR: You are a silent JSON repair processor. You never speak conversationally. You never wrap output in markdown code fences or backticks. You never add preamble, postamble, or any text outside the JSON structure. You do not hallucinate product data — if you cannot reconstruct a product with confidence, omit it."
+    },
+    {
+        text: "INPUT FORMAT: You will receive a JSON object with a single key 'items'. Each item has: seq (integer — your reference ID, echo it back exactly) and raw (string containing either valid JSON, malformed JSON, or plain text)."
+    },
+    {
+        text: "OUTPUT FORMAT: Return ONLY a JSON object with key 'results'. Each result must have: seq (integer matching input seq exactly), status (one of: fixed, unchanged, empty, unfixable), products (array of product objects, or null if unfixable), changes (array of short human-readable strings describing what was modified). Schema: {\"results\":[{\"seq\":0,\"status\":\"fixed|unchanged|empty|unfixable\",\"products\":[...],\"changes\":[]}]}"
+    },
+    {
+        text: "RULE 1 — PARSING: If raw is valid JSON and contains a products array, proceed to validation. If raw is malformed JSON but you can confidently reconstruct the intended structure, set status to 'fixed'. If raw is unparseable garbage, contains no product data, or is just conversational text, set status to 'unfixable' and products to null. If parseable but products array is empty after validation, set status to 'empty' and products to []."
+    },
+    {
+        text: "RULE 2 — PER-PRODUCT VALIDATION — BASIC FIELDS: Mutate every product in place. title: non-empty string, if missing or empty use 'Unknown Product'. brand: non-empty string, if missing or empty use 'Unknown'. description: string, if missing or empty use ''. category: must be one of clothing, footwear, accessory, jewelry, bag, watch, eyewear, hat, belt, cosmetics, skincare, tech_accessory, lifestyle, other — if invalid use 'other'. availability: one of 'In stock', 'Out of stock', 'Pre-order', 'Limited', 'Unknown' — if invalid use 'Unknown'. sizing: array of strings, if a plain string wrap in array, if missing or invalid use []. sizingGuide: string, if missing use ''. shippingAndReturns: string, if missing use ''."
+    },
+    {
+        text: "RULE 2 — PER-PRODUCT VALIDATION — PRICE FIELDS: price.current: string containing a numeric value, if missing or invalid use '0.00'. price.original: string or null, if same as current use null, if missing use null. price.currency: 3-letter ISO code (USD, EUR, GBP, etc.), if missing or invalid use 'USD'. basePrice: string, if missing use price.current value."
+    },
+    {
+        text: "RULE 2 — PER-PRODUCT VALIDATION — MARKUP AND SHIPPING FIELDS: recommendedMarkup.type: must be 'percentage' or 'fixed', if invalid use 'percentage'. recommendedMarkup.value: string, if missing or invalid use '30'. recommendedMarkup.currency: string or null, if type is 'percentage' set to null. recommendedShippingRate.amount: string, if missing use '0'. recommendedShippingRate.currency: string, if missing use 'USD'. recommendedShippingRate.coverage: string, if missing use 'Worldwide'."
+    },
+    {
+        text: "RULE 2 — PER-PRODUCT VALIDATION — DROPSHIP AND ARRAY FIELDS: dropshipViability.score: integer 1–10, clamp to range if outside. dropshipViability.reasoning: non-empty string, if missing use ''. dropshipViability.risks: array of strings, if missing or invalid use []. sources: array of source objects, if missing use [], if not an array use []. alternatives: array of alternative objects, if missing use [], if not an array use []."
+    },
+    {
+        text: "RULE 3 — SOURCE URL CLEANUP: Remove any source where the URL is a bare domain with no path or path is exactly '/', '/home', or '/index.html'. Also remove if the URL path contains any of: /collections/, /category/, /categories/, /shop/, /store/, /search, /find, /query, /blog/, /article/, /news/, /about/, /contact/. Also remove if query params indicate a search: ?q=, ?search=, ?query=, ?find=. Also remove if the path is generic with no product slug (e.g. '/products' with nothing after it)."
+    },
+    {
+        text: "RULE 3 — SOURCE URL DEDUPLICATION: After removal, deduplicate sources by normalized URL. Normalization: lowercase the full URL, strip trailing slash, strip tracking params (utm_source, utm_medium, utm_campaign, fbclid, gclid). Keep the FIRST occurrence in original order and discard later duplicates."
+    },
+    {
+        text: "RULE 4 — ALTERNATIVE URL CLEANUP AND DEDUPLICATION: Apply the exact same invalid-URL removal rules as sources. Then deduplicate alternatives by normalized URL using the same normalization rules. Then remove any alternative whose normalized URL exactly matches any source's normalized URL within the same product."
+    },
+    {
+        text: "RULE 5 — POST-CLEANUP PRODUCT STATE: If a product's sources array becomes empty after cleanup, set sources to []. If a product's alternatives array becomes empty, set alternatives to []. Do NOT remove the product from the array just because it has no sources."
+    },
+    {
+        text: "RULE 6 — CHANGES ARRAY: The changes array must be concise and human-readable. Examples: 'Fixed malformed JSON', 'Removed 2 invalid source URLs', 'Deduplicated 1 alternative', 'Clamped dropshipViability.score from 15 to 10', 'Set missing title to Unknown Product'."
+    },
+    {
+        text: "FINAL VALIDATION: Before outputting, mentally validate your JSON. Check that all brackets and braces are correctly opened and closed, all strings are properly quoted and escaped, no trailing commas exist after the last item in any object or array, all boolean values are true or false (not quoted), all null values are unquoted, and numbers are not wrapped in quotes. If the output would be truncated due to length, prioritize completing valid JSON over including all results — a partial but parseable object is better than a broken one."
+    }
+];
+
 async function fetchUnauditedFiles(collection, limit) {
     const candidatePosts = await collection
         .find({
@@ -1741,8 +1789,12 @@ async function auditBatchWithGemini(db, batchItems) {
                                 { text: payload },
                             ],
                         }],
+                        systemInstruction: {
+                            parts: AUDIT_PROMPT_INSTRUCTIONS
+                        },
                         generationConfig: {
                             temperature: 0.1,
+                            maxOutputTokens: 65536, // <-- Prevent JSON cutoff
                             responseMimeType: 'application/json',
                         },
                     }),
@@ -1769,7 +1821,22 @@ async function auditBatchWithGemini(db, batchItems) {
             if (!text) throw new Error('Audit: Gemini response missing text content');
 
             const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
-            const parsed = JSON.parse(cleaned);
+            
+            // 👇 NEW: Try JSON parse, fallback to jsonrepair
+            let parsed;
+            try {
+                parsed = JSON.parse(cleaned);
+            } catch (parseErr) {
+                try {
+                    const { jsonrepair } = await import('jsonrepair'); // Dynamic import
+                    const repaired = jsonrepair(cleaned);
+                    parsed = JSON.parse(repaired);
+                    log('info', 'Audit: JSON repair successfully fixed malformed output.');
+                } catch (repairErr) {
+                    throw new Error('Audit: JSON parse and repair both failed');
+                }
+            }
+
             if (!parsed || !Array.isArray(parsed.results)) {
                 throw new Error('Audit: Gemini response missing "results" array');
             }
@@ -1804,102 +1871,128 @@ async function runAuditStage(db, collection) {
     const batches = chunkAuditBatches(allItems, CONFIG.audit.targetBatchTokens);
     log('info', `Audit: ${allItems.length} item(s) split into ${batches.length} batch(es).`);
 
-    for (let b = 0; b < batches.length; b++) {
-        const batch = batches[b];
-        log('info', `Audit: batch ${b + 1}/${batches.length} — ${batch.length} item(s)`);
+    // 👇 Process concurrently across available keys
+    const auditConcurrency = Math.max(1, CONFIG.review.apiKeys.length);
+    const bulkOps = []; // Collect all database updates
 
-        let llmResults;
-        try {
-            llmResults = await auditBatchWithGemini(db, batch);
-        } catch (err) {
-            log('error', `Audit: Gemini call failed for batch ${b + 1}: ${err.message.slice(0, 200)}`);
-            results.failed += batch.length;
-            continue;
-        }
+    for (let b = 0; b < batches.length; b += auditConcurrency) {
+        const concurrentBatches = batches.slice(b, b + auditConcurrency);
+        log('info', `Audit: processing batches ${b + 1} to ${b + concurrentBatches.length} of ${batches.length} concurrently...`);
 
-        const batchResultBySeq = new Map();
-        for (const r of llmResults) {
-            if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
-        }
-
-        for (const batchItem of batch) {
-            const llmResult = batchResultBySeq.get(batchItem.seq);
-            if (!llmResult) {
-                log('warn', `Audit: no result returned for seq=${batchItem.seq} (${batchItem.postId} ${batchItem.path}) — skipping`);
-                results.failed++;
-                continue;
-            }
-
-            const { status, products, changes } = llmResult;
-            const { path, postObjectId, postId } = batchItem;
-
-            const now = new Date();
-            let $set;
-
-            if (status === 'fixed' || status === 'unchanged') {
-                const productsArray = Array.isArray(products) ? products : [];
-                
-                // 👇 NEW: Migrate alternatives into the sources array
-                for (const prod of productsArray) {
-                    if (Array.isArray(prod.alternatives) && prod.alternatives.length > 0) {
-                        if (!Array.isArray(prod.sources)) prod.sources = [];
-                        for (const alt of prod.alternatives) {
-                            if (alt.url) {
-                                prod.sources.push({
-                                    store: alt.brand || 'Alternative Source',
-                                    url: alt.url,
-                                    price: alt.price || null,
-                                    availability: 'Unknown'
-                                });
-                            }
-                        }
-                        prod.alternatives = []; // Clear the alternatives array once migrated
-                    }
-                }
-                // 👆 END NEW
-
-                $set = {
-                    [`${path}.response`]:     { products: productsArray },
-                    [`${path}.auditedAt`]:    now,
-                    [`${path}.auditStatus`]:  'audited',
-                };
-                
-                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                    $set[`${path}.auditChanges`] = changes;
-                }
-                results[status === 'fixed' ? 'fixed' : 'unchanged']++;
-            } else if (status === 'empty') {
-                $set = {
-                    [`${path}.response`]:    { products: [] },
-                    [`${path}.auditedAt`]:   now,
-                    [`${path}.auditStatus`]: 'audited',
-                };
-                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                    $set[`${path}.auditChanges`] = changes;
-                }
-                results.empty++;
-            } else {
-                $set = {
-                    [`${path}.response`]:    { products: [] },
-                    [`${path}.auditedAt`]:   now,
-                    [`${path}.auditStatus`]: 'unfixable',
-                };
-                if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
-                    $set[`${path}.auditChanges`] = changes;
-                }
-                results.unfixable++;
-            }
+        await Promise.all(concurrentBatches.map(async (batch, idx) => {
+            const batchNum = b + idx + 1;
+            const t0 = Date.now();
+            let llmResults;
 
             try {
-                await collection.updateOne({ _id: postObjectId }, { $set });
-                results.audited++;
+                llmResults = await auditBatchWithGemini(db, batch);
             } catch (err) {
-                log('error', `Audit: failed to write audit result for ${postId} ${path}: ${err.message}`);
-                results.failed++;
+                // Fails here: we log it and exit early. Because auditedAt is not written,
+                // fetchUnauditedFiles will automatically grab these again on the next run!
+                log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
+                results.failed += batch.length;
+                return;
             }
-        }
+
+            const batchResultBySeq = new Map();
+            for (const r of llmResults) {
+                if (typeof r.seq === 'number') batchResultBySeq.set(r.seq, r);
+            }
+
+            let batchAuditedCount = 0;
+
+            for (const batchItem of batch) {
+                const llmResult = batchResultBySeq.get(batchItem.seq);
+                if (!llmResult) {
+                    log('warn', `⚠️ Audit: no result returned for seq=${batchItem.seq} in batch ${batchNum} — skipping`);
+                    results.failed++;
+                    continue;
+                }
+
+                const { status, products, changes } = llmResult;
+                const { path, postObjectId } = batchItem;
+                const now = new Date();
+                let $set;
+
+                if (status === 'fixed' || status === 'unchanged') {
+                    const productsArray = Array.isArray(products) ? products : [];
+                    
+                    // 👇 Migrate alternatives into the sources array
+                    for (const prod of productsArray) {
+                        if (Array.isArray(prod.alternatives) && prod.alternatives.length > 0) {
+                            if (!Array.isArray(prod.sources)) prod.sources = [];
+                            for (const alt of prod.alternatives) {
+                                if (alt.url) {
+                                    prod.sources.push({
+                                        store: alt.brand || 'Alternative Source',
+                                        url: alt.url,
+                                        price: alt.price || null,
+                                        availability: 'Unknown'
+                                    });
+                                }
+                            }
+                            prod.alternatives = []; // Clear the alternatives array once migrated
+                        }
+                    }
+
+                    $set = {
+                        [`${path}.response`]:     { products: productsArray },
+                        [`${path}.auditedAt`]:    now,
+                        [`${path}.auditStatus`]:  'audited',
+                    };
+                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                        $set[`${path}.auditChanges`] = changes;
+                    }
+                    results[status === 'fixed' ? 'fixed' : 'unchanged']++;
+                } else if (status === 'empty') {
+                    $set = {
+                        [`${path}.response`]:    { products: [] },
+                        [`${path}.auditedAt`]:   now,
+                        [`${path}.auditStatus`]: 'audited',
+                    };
+                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                        $set[`${path}.auditChanges`] = changes;
+                    }
+                    results.empty++;
+                } else {
+                    $set = {
+                        [`${path}.response`]:    { products: [] },
+                        [`${path}.auditedAt`]:   now,
+                        [`${path}.auditStatus`]: 'unfixable',
+                    };
+                    if (CONFIG.audit.saveChanges && Array.isArray(changes)) {
+                        $set[`${path}.auditChanges`] = changes;
+                    }
+                    results.unfixable++;
+                }
+
+                // Add to our efficient bulk write queue
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: postObjectId },
+                        update: { $set }
+                    }
+                });
+                
+                batchAuditedCount++;
+                results.audited++;
+            }
+
+            log('info', `✅ Audit: batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchAuditedCount}/${batch.length} items audited).`);
+        }));
+
+        await sleep(2000); // Brief pause before the next concurrent wave
     }
 
+    // Execute all MongoDB updates cleanly at the end
+    if (bulkOps.length > 0) {
+        try {
+            await collection.bulkWrite(bulkOps, { ordered: false });
+        } catch (err) {
+            log('error', `Audit: failed to write audit results to MongoDB: ${err.message}`);
+        }
+    }
+    
     const affectedPostIds = [...new Set(allItems.map(i => String(i.postObjectId)))];
 
     for (const postObjIdStr of affectedPostIds) {
