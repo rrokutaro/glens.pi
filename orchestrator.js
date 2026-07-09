@@ -1093,9 +1093,10 @@ async function extractDataBatchWithGemini(db, batch) {
                         }],
                         generationConfig: {
                             temperature: 0.1,
+                            maxOutputTokens: 65536, // <-- Overrides default 8k limit to prevent JSON cutoff
                             responseMimeType: 'application/json',
                             thinkingConfig: {
-                                thinkingLevel: "HIGH" // (or use the exact key required by your Gemini API version, e.g., reasoning_effort: "high")
+                                thinking_effort: "HIGH" // <-- High thinking level configuration
                             }
                         },
                     }),
@@ -2094,76 +2095,81 @@ async function runDataEnrichmentStage(db, collection) {
     }
 
     const llmChunks = chunkArray(llmBatchQueue, CONFIG.textExtraction.llmBatchSize);
-    for (let c = 0; c < llmChunks.length; c++) {
-        const chunk = llmChunks[c];
-        log('info', `Gemini LLM Structuring: batch ${c + 1}/${llmChunks.length} (${chunk.length} items)...`);
+    
+    // Process as many batches concurrently as you have API keys (fallback to 1 if empty)
+    const llmConcurrency = Math.max(1, CONFIG.review.apiKeys.length);
 
-        let cleanResults = [];
-        try {
-            cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
-        } catch (err) {
-            log('error', `Gemini batch failed: ${err.message}`);
-            for (const item of chunk) {
-                bulkOps.push({
-                    updateOne: {
-                        filter: { _id: item.docId },
-                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'LLM structuring failed') } }
-                    }
-                });
-                failed++;
-            }
-            continue;
-        }
+    for (let c = 0; c < llmChunks.length; c += llmConcurrency) {
+        const concurrentChunks = llmChunks.slice(c, c + llmConcurrency);
+        log('info', `Gemini LLM Structuring: processing batches ${c + 1} to ${c + concurrentChunks.length} of ${llmChunks.length} concurrently...`);
 
-        for (const item of chunk) {
-            const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
-            if (!cleanJson) {
-                log('warn', `Gemini missed source_id ${item.source_id}`);
-                bulkOps.push({
-                    updateOne: {
-                        filter: { _id: item.docId },
-                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini missed source_id') } }
-                    }
-                });
-                failed++;
-                continue;
-            }
-
+        // Execute LLM API calls in parallel
+        await Promise.all(concurrentChunks.map(async (chunk, chunkIdx) => {
+            const batchNum = c + chunkIdx + 1;
+            let cleanResults = [];
+            
             try {
-                // Carry over the original URL just to be perfectly safe
-                cleanJson.url = cleanJson.url || item.oldSource.url;
+                cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
+            } catch (err) {
+                log('error', `Gemini batch ${batchNum} failed: ${err.message}`);
+                for (const item of chunk) {
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: item.docId },
+                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'LLM structuring failed') } }
+                        }
+                    });
+                    failed++;
+                }
+                return; // Exit this parallel promise early on fail
+            }
 
-                // Carry over old images if the LLM/crawler failed to find any 
-                if (!Array.isArray(cleanJson.images) || cleanJson.images.length === 0) {
-                    cleanJson.images = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
+            for (const item of chunk) {
+                const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
+                if (!cleanJson) {
+                    log('warn', `Gemini missed source_id ${item.source_id} in batch ${batchNum}`);
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: item.docId },
+                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini missed source_id') } }
+                        }
+                    });
+                    failed++;
+                    continue;
                 }
 
-                cleanJson.textExtraction = {
-                    status: 'completed'
-                };
+                try {
+                    // Carry over original fallback details
+                    cleanJson.url = cleanJson.url || item.oldSource.url;
+                    if (!Array.isArray(cleanJson.images) || cleanJson.images.length === 0) {
+                        cleanJson.images = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
+                    }
+                    cleanJson.textExtraction = { status: 'completed' };
 
-                // Replace the entire source object in the array with our clean, unified schema
-                bulkOps.push({
-                    updateOne: {
-                        filter: { _id: item.docId },
-                        update: { $set: { [item.dbPath]: cleanJson } }
-                    }
-                });
-                succeeded++;
-            } catch (err) {
-                log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
-                bulkOps.push({
-                    updateOne: {
-                        filter: { _id: item.docId },
-                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
-                    }
-                });
-                failed++;
+                    // Replace the entire source object with the clean schema
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: item.docId },
+                            update: { $set: { [item.dbPath]: cleanJson } }
+                        }
+                    });
+                    succeeded++;
+                } catch (err) {
+                    log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: item.docId },
+                            update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
+                        }
+                    });
+                    failed++;
+                }
             }
-        }
-        await sleep(2000); 
-    }
+        }));
 
+        await sleep(2000); // Brief pause before the next concurrent wave
+    }
+    
     let updatedPosts = 0;
     if (bulkOps.length > 0) {
         try {
