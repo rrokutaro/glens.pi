@@ -1545,7 +1545,7 @@ function chunkAuditBatches(items, targetTokens) {
     const batches = [];
     let current = [];
     let currentTokens = 0;
-    const MAX_ITEMS_PER_BATCH = 10; // 👈 Forces the LLM to process shorter lists reliably
+    const MAX_ITEMS_PER_BATCH = 3; // 👈 Forces the LLM to process shorter lists reliably
 
     for (const item of items) {
         const itemTokens = estimateTokens(item.raw);
@@ -1844,6 +1844,17 @@ async function auditBatchWithGemini(db, batchItems) {
             if (!parsed || !Array.isArray(parsed.results)) {
                 throw new Error('Audit: Gemini response missing "results" array');
             }
+            
+            // 👇 NEW: Validate completeness — detect truncated responses
+            const expectedSeqs = new Set(batchItems.map(b => b.seq));
+            const actualSeqs = new Set(parsed.results.map(r => r.seq).filter(s => typeof s === 'number'));
+            const missingSeqs = [...expectedSeqs].filter(s => !actualSeqs.has(s));
+            
+            if (missingSeqs.length > 0) {
+                log('warn', `Audit: Gemini returned incomplete results. Missing seqs: ${missingSeqs.join(', ')} (${actualSeqs.size}/${expectedSeqs.size})`);
+                throw new Error(`Audit: Incomplete results — expected ${expectedSeqs.size}, got ${actualSeqs.size}. Missing: ${missingSeqs.join(', ')}`);
+            }
+
             return parsed.results;
 
         } catch (err) {
@@ -1892,8 +1903,14 @@ async function runAuditStage(db, collection) {
                 try {
                     llmResults = await auditBatchWithGemini(db, batch);
                 } catch (err) {
-                    log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
-                    results.failed += batch.length;
+                    if (err.message?.includes('Incomplete results') && batch.length > 1) {
+                        // Don't mark as failed — they'll be retried on next run as smaller batches
+                        log('warn', `Audit: batch ${batchNum} incomplete (${batch.length} items), leaving for next run with smaller batches.`);
+                        // Items remain un-audited (no auditStatus set), so they'll be re-fetched next run
+                    } else {
+                        log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
+                        results.failed += batch.length;
+                    }
                     return;
                 }
 
