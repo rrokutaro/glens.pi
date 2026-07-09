@@ -2048,6 +2048,9 @@ function parseGlensPrice(priceStr) {
 }
 
 function createFallbackSource(oldSource, errorMsg) {
+    const glensPriceString = oldSource.price ? String(oldSource.price) : null;
+    const parsedPriceNum = parseGlensPrice(glensPriceString);
+    
     return {
         source_id: oldSource.source_id || "",
         url: oldSource.url,
@@ -2063,16 +2066,17 @@ function createFallbackSource(oldSource, errorMsg) {
         material: null,
         description: null,
         features: [],
-        price: parseGlensPrice(oldSource.price),
-        compare_at_price: null,
-        is_on_sale: false,
-        currency: "USD", // Assumed fallback
+        price: {
+            current: glensPriceString ? glensPriceString.replace(/[^0-9.]/g, '') : "",
+            original: null,
+            currency: "USD" // Assumed default fallback
+        },
         availability: oldSource.availability || "Unknown",
         sku: null,
         handle: null,
         product_id: null,
         vendor: oldSource.store || oldSource.vendor || oldSource.brand || null,
-        images: Array.isArray(oldSource.images) ? oldSource.images : [], // Preserve any existing fallback images
+        images: Array.isArray(oldSource.images) ? oldSource.images : [], // Preserve existing fallback images
         rating: null,
         review_count: null,
         reviews: [],
@@ -2083,7 +2087,7 @@ function createFallbackSource(oldSource, errorMsg) {
         coupon_codes: [],
         product_tags: [],
         breadcrumb: [],
-        base_price_for_markup: parseGlensPrice(oldSource.price),
+        base_price_for_markup: parsedPriceNum,
         recommended_markup_percentage: null,
         calculated_markup_amount: null,
         suggested_resell_price: null,
@@ -2357,21 +2361,63 @@ async function runDataEnrichmentStage(db, collection) {
                     }
 
                     try {
+                        // 1. Maintain original URL
                         cleanJson.url = cleanJson.url || item.oldSource.url;
-                        
-                        // 👇 NEW: Flatten images to URL strings only
+    
+                        // 2. Fallback basic text details to GLENS if extracted empty
+                        const glensStore = item.oldSource.store || item.oldSource.vendor || item.oldSource.brand || "Unknown";
+                        cleanJson.name = cleanJson.name || "Unknown Product";
+                        cleanJson.brand = cleanJson.brand || cleanJson.vendor || glensStore;
+                        cleanJson.vendor = cleanJson.vendor || cleanJson.brand || glensStore;
+    
+                        // 3. Fallback availability to GLENS
+                        const availabilityMap = { 'InStock': 'In stock', 'OutOfStock': 'Out of stock', 'PreOrder': 'Pre-order' };
+                        const rawAvail = cleanJson.availability;
+                        const mappedAvailability = availabilityMap[rawAvail] || rawAvail;
+                        cleanJson.availability = mappedAvailability || item.oldSource.availability || "Unknown";
+    
+                        // 4. Fallback Price structure to GLENS
+                        const oldGlensPriceStr = item.oldSource.price ? String(item.oldSource.price).replace(/[^0-9.]/g, '') : "";
+                        if (!cleanJson.price || typeof cleanJson.price !== 'object') {
+                            cleanJson.price = {
+                                current: oldGlensPriceStr,
+                                original: null,
+                                currency: cleanJson.currency || "USD"
+                            };
+                        } else {
+                            cleanJson.price.current = cleanJson.price.current != null && String(cleanJson.price.current).trim() !== "" 
+                                ? String(cleanJson.price.current) 
+                                : oldGlensPriceStr;
+                            cleanJson.price.original = cleanJson.price.original != null ? String(cleanJson.price.original) : null;
+                            cleanJson.price.currency = cleanJson.price.currency || cleanJson.currency || "USD";
+                        }
+    
+                        // 5. Fallback markup properties to GLENS price if LLM failed math
+                        if (cleanJson.base_price_for_markup == null && oldGlensPriceStr) {
+                            const parsedGlens = parseFloat(oldGlensPriceStr);
+                            if (!isNaN(parsedGlens)) {
+                                cleanJson.base_price_for_markup = parsedGlens;
+                                if (cleanJson.recommended_markup_percentage != null) {
+                                    cleanJson.calculated_markup_amount = Number((parsedGlens * (cleanJson.recommended_markup_percentage / 100)).toFixed(2));
+                                    cleanJson.suggested_resell_price = Number((parsedGlens + cleanJson.calculated_markup_amount).toFixed(2));
+                                }
+                            }
+                        }
+    
+                        // 6. Flatten image objects to URL strings
                         if (Array.isArray(cleanJson.images)) {
                             cleanJson.images = cleanJson.images.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
                         }
-
+    
                         // Fallback to old images if LLM found none
                         if (!cleanJson.images || cleanJson.images.length === 0) {
                             const oldImgs = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
                             cleanJson.images = oldImgs.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
                         }
-
+    
                         cleanJson.textExtraction = { status: 'completed' };
-
+    
+                        // Replace the entire source object with the clean schema
                         bulkOps.push({
                             updateOne: {
                                 filter: { _id: item.docId },
@@ -2391,6 +2437,7 @@ async function runDataEnrichmentStage(db, collection) {
                         failed++;
                     }
                 }
+                
                 log('info', `✅ Gemini batch ${batchNum} completed in ${((Date.now() - t0) / 1000).toFixed(1)}s (${batchSuccessCount}/${chunk.length} items structured).`);
             } catch (fatalErr) {
                 log('error', `🔥 Fatal JS error in concurrent LLM loop: ${fatalErr.message}`);
