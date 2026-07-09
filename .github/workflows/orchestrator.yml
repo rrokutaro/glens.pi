@@ -82,7 +82,7 @@ on:
       gemini_model:
         description: 'Google Gemini model to use for review'
         required: false
-        default: 'gemini-3.1-flash-lite'
+        default: 'gemini-3.5-flash-lite'
       gemini_api_keys:
         description: 'Comma-separated Google Gemini API keys (or leave empty to use secrets.ORCHESTRATOR_GEMINI_API_KEYS)'
         required: false
