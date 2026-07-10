@@ -732,7 +732,7 @@ function renderItem() {
           const extStatus = s.textExtraction?.status;
           if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
           else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
-          else statusBadge = '<span class="badge src-status">PENDING</span>';
+          else statusBadge = '<span class="badge src-status">PENDING EXTRACT</span>';
         }
 
         const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
@@ -740,7 +740,7 @@ function renderItem() {
         const storeLabel = s.brand || s.vendor || s.store || "Unknown Store";
 
         listHtml += \`
-          <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\dots)">
+          <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
             <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
             <div class="p-info">
               <div class="p-title">\${escapeHtml(nameLabel)}</div>
@@ -772,7 +772,7 @@ function renderItem() {
   }
 
   if (state.justEditedSId !== null) {
-    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`);
+    const targetCard = document.querySelector('.p-card[data-source-id="' + state.justEditedSId + '"]');
     if (targetCard) {
       requestAnimationFrame(() => {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -810,6 +810,7 @@ function openSourceUnsafe(pIdx, sIdx) {
 
   // Extremely safe type checking on arrays to avoid .forEach of null issues
   state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
+  state.currentVariants = state.currentVariants.filter(v => v && typeof v === 'object');
   
   let rawSg = s.size_guide;
   state.currentSizeGuide = {
@@ -857,7 +858,7 @@ function openSourceUnsafe(pIdx, sIdx) {
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
           <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-          \--s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+          \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
@@ -1091,7 +1092,7 @@ function renderVariantsTable() {
             <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
         </td>
-        <td><button class="table-btn" onclick="delVariantRow(\dots)">&times;</button></td>
+        <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
       </tr>
     \`;
   });
@@ -1302,9 +1303,9 @@ function closeEditor() {
   clearFormPersist(state.formPersistKey);
   showScreen("review");
   
-  // Re-scroll back to source card context instantly upon pressing cancel
+  // Re-scroll back to source card context instantly upon pressing cancel (vetted and completely safe)
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\\${state.editingSIdx}"]\`);
+    const targetCard = document.querySelector('.p-card[data-source-id="' + state.editingPIdx + '-' + state.editingSIdx + '"]');
     if (targetCard) {
       requestAnimationFrame(() => {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1724,7 +1725,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v2.2.0 (New Schema)');
+    log('info', '  REVIEW SERVER — Production Human Review v2.2.1 (New Schema)');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
