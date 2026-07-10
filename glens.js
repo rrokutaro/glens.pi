@@ -1722,8 +1722,11 @@ async function startTesting() {
                         try {
                             valueToStore = JSON.parse(extractedJson);
                         } catch (parseErr) {
-                            valueToStore = extractedJson;
+                            // JSON is unparseable even after repair — don't store, let it retry next run
+                            log('warn', `GLENS: unparseable JSON for ${r.mongoMeta.postId} ${r.mongoMeta.path} — skipping, will retry`);
+                            continue; // Skip this item, don't write response, lock will be released below
                         }
+                        
                         await collection.updateOne(
                             { _id: r.mongoMeta.docId },
                             { $set: { [`${r.mongoMeta.path}.response`]: valueToStore } }

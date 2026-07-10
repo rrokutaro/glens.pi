@@ -1533,6 +1533,173 @@ async function runReviewStage(db, collection) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  LAZY AUDIT HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BARE_DOMAIN_PATHS = new Set(['', '/', '/home', '/index.html', '/index.php']);
+const SOCIAL_MEDIA_HOSTS = new Set([
+    'instagram.com', 'www.instagram.com',
+    'tiktok.com', 'www.tiktok.com',
+    'youtube.com', 'www.youtube.com', 'youtu.be',
+    'facebook.com', 'www.facebook.com', 'fb.com',
+    'twitter.com', 'www.twitter.com', 'x.com', 'www.x.com',
+    'pinterest.com', 'www.pinterest.com',
+    'reddit.com', 'www.reddit.com',
+]);
+
+function isBareDomain(urlStr) {
+    try {
+        const u = new URL(urlStr);
+        return BARE_DOMAIN_PATHS.has(u.pathname);
+    } catch { return true; }
+}
+
+function isSocialMediaUrl(urlStr) {
+    try {
+        const u = new URL(urlStr);
+        return SOCIAL_MEDIA_HOSTS.has(u.hostname.toLowerCase());
+    } catch { return false; }
+}
+
+function isInvalidSourceUrl(urlStr) {
+    if (!urlStr || typeof urlStr !== 'string') return true;
+    if (isBareDomain(urlStr)) return true;
+    if (isSocialMediaUrl(urlStr)) return true;
+    return false;
+}
+
+function clampDropshipScore(score) {
+    const n = parseInt(score, 10);
+    if (isNaN(n)) return 5;
+    return Math.max(1, Math.min(10, n));
+}
+
+function ensureString(val, fallback = '') {
+    if (val === null || val === undefined) return fallback;
+    return String(val);
+}
+
+function ensureArray(val) {
+    if (Array.isArray(val)) return val;
+    if (val === null || val === undefined) return [];
+    return [val];
+}
+
+function ensurePriceString(val) {
+    if (val === null || val === undefined) return '0.00';
+    const s = String(val).trim();
+    if (!s) return '0.00';
+    const num = parseFloat(s.replace(/[^0-9.]/g, ''));
+    return isNaN(num) ? '0.00' : s;
+}
+
+function lazyAuditProduct(product) {
+    if (!product || typeof product !== 'object') return null;
+
+    // 1. Basic field defaults
+    product.title = ensureString(product.title, 'Unknown Product').trim() || 'Unknown Product';
+    product.brand = ensureString(product.brand, 'Unknown').trim() || 'Unknown';
+    product.description = ensureString(product.description);
+    product.category = ensureString(product.category, 'other');
+    product.availability = ensureString(product.availability, 'Unknown');
+    product.sizingGuide = ensureString(product.sizingGuide);
+    product.shippingAndReturns = ensureString(product.shippingAndReturns);
+    product.basePrice = ensureString(product.basePrice, product.price?.current || '0.00');
+
+    // 2. Price validation
+    if (!product.price || typeof product.price !== 'object') {
+        product.price = { current: '0.00', original: null, currency: 'USD' };
+    }
+    product.price.current = ensurePriceString(product.price.current);
+    product.price.original = product.price.original != null ? ensurePriceString(product.price.original) : null;
+    if (product.price.original === product.price.current) product.price.original = null;
+    product.price.currency = ensureString(product.price.currency, 'USD').toUpperCase() || 'USD';
+
+    // 3. Sizing — ensure array
+    product.sizing = ensureArray(product.sizing);
+
+    // 4. Dropship viability
+    if (!product.dropshipViability || typeof product.dropshipViability !== 'object') {
+        product.dropshipViability = { score: 5, reasoning: '', risks: [] };
+    }
+    product.dropshipViability.score = clampDropshipScore(product.dropshipViability.score);
+    product.dropshipViability.reasoning = ensureString(product.dropshipViability.reasoning);
+    product.dropshipViability.risks = ensureArray(product.dropshipViability.risks);
+
+    // 5. Sources — cleanup invalid URLs
+    product.sources = ensureArray(product.sources).filter(s => {
+        if (!s || typeof s !== 'object') return false;
+        if (isInvalidSourceUrl(s.url)) return false;
+        return true;
+    });
+
+    // 6. Alternatives → sources migration
+    const alts = ensureArray(product.alternatives);
+    for (const alt of alts) {
+        if (!alt || typeof alt !== 'object') continue;
+        if (isInvalidSourceUrl(alt.url)) continue;
+        product.sources.push({
+            store: ensureString(alt.brand || alt.store, 'Alternative Source'),
+            url: alt.url,
+            price: alt.price != null ? ensurePriceString(alt.price) : null,
+            availability: ensureString(alt.availability, 'Unknown'),
+        });
+    }
+    product.alternatives = []; // Clear after migration
+
+    // 7. Remove alternatives whose URL exactly matches any source URL
+    const sourceUrls = new Set(product.sources.map(s => s.url));
+    product.alternatives = ensureArray(product.alternatives).filter(alt => {
+        if (!alt || !alt.url) return false;
+        return !sourceUrls.has(alt.url);
+    });
+
+    // 8. Markup defaults
+    if (!product.recommendedMarkup || typeof product.recommendedMarkup !== 'object') {
+        product.recommendedMarkup = { type: 'percentage', value: '30', currency: null };
+    }
+    product.recommendedMarkup.type = ['percentage', 'fixed'].includes(product.recommendedMarkup.type)
+        ? product.recommendedMarkup.type : 'percentage';
+    product.recommendedMarkup.value = ensureString(product.recommendedMarkup.value, '30');
+    if (product.recommendedMarkup.type === 'percentage') {
+        product.recommendedMarkup.currency = null;
+    } else {
+        product.recommendedMarkup.currency = ensureString(product.recommendedMarkup.currency, 'USD');
+    }
+
+    // 9. Shipping rate defaults
+    if (!product.recommendedShippingRate || typeof product.recommendedShippingRate !== 'object') {
+        product.recommendedShippingRate = { amount: '0', currency: 'USD', coverage: 'Worldwide' };
+    }
+    product.recommendedShippingRate.amount = ensureString(product.recommendedShippingRate.amount, '0');
+    product.recommendedShippingRate.currency = ensureString(product.recommendedShippingRate.currency, 'USD');
+    product.recommendedShippingRate.coverage = ensureString(product.recommendedShippingRate.coverage, 'Worldwide');
+
+    return product;
+}
+
+function lazyAuditResponse(response) {
+    if (!response || typeof response !== 'object') {
+        return { products: [], auditStatus: 'empty' };
+    }
+    if (!Array.isArray(response.products)) {
+        return { products: [], auditStatus: 'empty' };
+    }
+
+    const auditedProducts = [];
+    for (const prod of response.products) {
+        const audited = lazyAuditProduct(prod);
+        if (audited) auditedProducts.push(audited);
+    }
+
+    return {
+        products: auditedProducts,
+        auditStatus: auditedProducts.length > 0 ? 'audited' : 'empty'
+    };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  JSON AUDIT & REPAIR STAGE (STEP 6.5)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2054,6 +2221,187 @@ async function runAuditStage(db, collection) {
     return results;
 }
 
+async function runLazyAuditStage(db, collection) {
+    log('info', '── Lazy Audit Stage: Programmatic validation ──');
+
+    const allItems = await fetchUnauditedFilesLazy(collection, CONFIG.audit.limit);
+    log('info', `Found ${allItems.length} un-audited item(s) (limit=${CONFIG.audit.limit}).`);
+
+    const results = { audited: 0, empty: 0, discarded: 0, failed: 0 };
+    if (allItems.length === 0) return results;
+
+    const bulkOps = [];
+    const now = new Date();
+
+    for (const item of allItems) {
+        try {
+            const rawResponse = item.response;
+            let responseObj;
+
+            // Parse if stored as string
+            if (typeof rawResponse === 'string') {
+                try {
+                    responseObj = JSON.parse(rawResponse);
+                } catch {
+                    try {
+                        const { jsonrepair } = await import('jsonrepair');
+                        const repaired = jsonrepair(rawResponse);
+                        responseObj = JSON.parse(repaired);
+                    } catch {
+                        responseObj = null;
+                    }
+                }
+            } else if (typeof rawResponse === 'object') {
+                responseObj = rawResponse;
+            } else {
+                responseObj = null;
+            }
+
+            const audited = lazyAuditResponse(responseObj);
+            const $set = {
+                [`${item.path}.response`]: audited,
+                [`${item.path}.auditedAt`]: now,
+                [`${item.path}.auditStatus`]: audited.auditStatus,
+            };
+
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: item.postObjectId },
+                    update: { $set }
+                }
+            });
+
+            if (audited.auditStatus === 'empty') {
+                results.empty++;
+            } else {
+                results.audited++;
+            }
+        } catch (err) {
+            log('warn', `Lazy audit failed for ${item.postId} ${item.path}: ${err.message}`);
+            results.failed++;
+        }
+    }
+
+    if (bulkOps.length > 0) {
+        try {
+            await collection.bulkWrite(bulkOps, { ordered: false });
+            log('info', `Lazy audit: wrote ${bulkOps.length} item(s) to MongoDB`);
+        } catch (err) {
+            log('error', `Lazy audit: bulkWrite failed: ${err.message}`);
+        }
+    }
+
+    // Discard posts where all items are now empty/audited with no products
+    const affectedPostIds = [...new Set(allItems.map(i => String(i.postObjectId)))];
+    for (const postObjIdStr of affectedPostIds) {
+        try {
+            const postDoc = await collection.findOne(
+                { _id: allItems.find(i => String(i.postObjectId) === postObjIdStr).postObjectId },
+                { projection: { post_id: 1, file_urls: 1, discarded: 1 } }
+            );
+            if (!postDoc || postDoc.discarded) continue;
+
+            let allProcessed = true;
+            let allTrulyEmpty = true;
+
+            const check = (f) => {
+                if (!f.auditStatus) { allProcessed = false; return; }
+                const hasProducts = f.response && Array.isArray(f.response.products) && f.response.products.length > 0;
+                if (hasProducts) { allTrulyEmpty = false; }
+            };
+
+            for (const file of postDoc.file_urls) {
+                if (file.type === 'image') check(file);
+                else if (file.type === 'video' && Array.isArray(file.frames)) file.frames.forEach(check);
+            }
+
+            if (allProcessed && allTrulyEmpty) {
+                await collection.updateOne(
+                    { _id: postDoc._id },
+                    { $set: { discarded: true, discardedReason: 'lazy audit: all items processed and returned no products' } }
+                );
+                results.discarded++;
+                log('info', `Lazy audit: discarded post ${postDoc.post_id} — confirmed empty`);
+            }
+        } catch (err) {
+            log('warn', `Lazy audit: post-discard check failed for ${postObjIdStr}: ${err.message}`);
+        }
+    }
+
+    return results;
+}
+
+async function fetchUnauditedFilesLazy(collection, limit) {
+    const candidatePosts = await collection
+        .find({
+            discarded: { $ne: true },
+            $or: [
+                {
+                    file_urls: {
+                        $elemMatch: {
+                            type: 'image',
+                            reviewed: true,
+                            response: { $exists: true, $ne: null },
+                            auditedAt: { $exists: false },
+                        }
+                    }
+                },
+                {
+                    'file_urls.frames': {
+                        $elemMatch: {
+                            type: 'image',
+                            reviewed: true,
+                            response: { $exists: true, $ne: null },
+                            auditedAt: { $exists: false },
+                        }
+                    }
+                }
+            ]
+        })
+        .project({ post_id: 1, file_urls: 1 })
+        .limit(limit * 3 + 10)
+        .toArray();
+
+    const items = [];
+
+    outer:
+    for (const post of candidatePosts) {
+        if (!Array.isArray(post.file_urls)) continue;
+
+        for (let i = 0; i < post.file_urls.length; i++) {
+            if (items.length >= limit) break outer;
+
+            const file = post.file_urls[i];
+            if (!file) continue;
+
+            if (file.type === 'image' && file.reviewed && file.response != null && !file.auditedAt) {
+                items.push({
+                    postId: post.post_id,
+                    postObjectId: post._id,
+                    path: `file_urls.${i}`,
+                    response: file.response,
+                });
+            } else if (file.type === 'video' && Array.isArray(file.frames)) {
+                for (let j = 0; j < file.frames.length; j++) {
+                    if (items.length >= limit) break outer;
+
+                    const frame = file.frames[j];
+                    if (!frame || !frame.reviewed || frame.response == null || frame.auditedAt) continue;
+
+                    items.push({
+                        postId: post.post_id,
+                        postObjectId: post._id,
+                        path: `file_urls.${i}.frames.${j}`,
+                        response: frame.response,
+                    });
+                }
+            }
+        }
+    }
+
+    return items;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STEP 7 — DATA ENRICHMENT (TEXT EXTRACTION & LLM STRUCTURING)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2075,7 +2423,7 @@ function createFallbackSource(oldSource, errorMsg) {
         success: false,
         status_code: 400,
         extracted_at: new Date().toISOString(),
-        name: "Unknown Product",
+        name: oldSource.productTitle || "Unknown Product",
         brand: oldSource.store || oldSource.vendor || oldSource.brand || null,
         primary_category: null,
         product_type: null,
@@ -2138,7 +2486,7 @@ function gatherPendingTextSources(post) {
                         sourceIndex: s,
                         url: source.url,
                         source_id: `src_${post._id}_${i}_${frameIndex}_${p}_${s}`,
-                        oldSource: source // Retained so we can map fallback fields
+                        oldSource: { ...source, productTitle: product.title } // Retained so we can map fallback fields
                     });
                 }
             }
@@ -3683,6 +4031,19 @@ async function main() {
     // ── Step 6.5 — JSON Audit & Repair ────────────────────────────────────────
     let auditResults = { audited: 0, fixed: 0, unchanged: 0, empty: 0, unfixable: 0, discarded: 0, failed: 0 };
     if (CONFIG.audit.enabled) {
+        // Lazy and fast audit (no LLM, current)
+        log('info', '── Step 6.5: Lazy Audit (programmatic validation) ──');
+        try {
+            auditResults = await runLazyAuditStage(db, collection);
+        } catch (err) {
+            log('error', `Lazy audit stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'Audit stage disabled (ORCH_AUDIT_ENABLED=false) — skipping.');
+    }
+    
+    /* if (CONFIG.audit.enabled) {
+        // Full Audit using LLM (disabled for now > may enable later dont remove)
         log('info', '── Step 6.5: JSON Audit & Repair (Gemini) ──');
         try {
             auditResults = await runAuditStage(db, collection);
@@ -3691,7 +4052,7 @@ async function main() {
         }
     } else {
         log('info', 'Audit stage disabled (ORCH_AUDIT_ENABLED=false) — skipping.');
-    }
+    } */
 
     // ── Step 7 — Data Enrichment (Text Extraction + LLM Structuring) ──
     let dataEnrichmentResults = { processed: 0, succeeded: 0, failed: 0, updatedPosts: 0 };
