@@ -7,8 +7,8 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v1.1 - Polished UX, robust error handling, keyboard support,
- * selected image count + clear, refresh, ObjectId safety, Python script validation.
+ * FINAL PRODUCTION v2.1.0 - Price Normalization, Vendor & Compare-At Price 
+ * write-backs, robust schema alignment, and zero-data-loss updating.
  */
 
 import http from 'http';
@@ -56,7 +56,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v1.1</title>
+<title>DropShip Review • v2.1</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -69,6 +69,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
   --focus: #000000;
   --danger: #dc2626;
   --success: #16a34a;
+  --warning: #ca8a04;
 }
 :root[data-theme="dark"] {
   --bg: #121212;
@@ -80,6 +81,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
   --focus: #ffffff;
   --danger: #ef4444;
   --success: #22c55e;
+  --warning: #eab308;
 }
 
 body {
@@ -137,10 +139,7 @@ input, select, textarea {
   transition: border-color 0.2s ease;
 }
 input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--text);
-}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
 textarea { resize: vertical; min-height: 100px; }
 select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23737373'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
@@ -148,6 +147,14 @@ select {
   background-position: right 14px center;
   padding-right: 32px;
 }
+
+/* Tables */
+.simple-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+.simple-table th, .simple-table td { border: 1px solid var(--border); padding: 0; }
+.simple-table th { background: var(--surface-2); padding: 8px; font-size: 11px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
+.simple-table input, .simple-table select { border: none; min-height: 36px; padding: 8px; font-size: 13px; }
+.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text); }
+.table-btn { width: 36px; min-height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; }
 
 img { max-width: 100%; display: block; }
 a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
@@ -182,6 +189,8 @@ a:active { opacity: 0.7; }
   letter-spacing: 0.03em;
 }
 .badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+.badge.success { color: var(--success); background: var(--bg); border-color: var(--success); }
+.badge.failed { color: var(--danger); background: var(--bg); border-color: var(--danger); }
 .badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
 
 .theme-toggle {
@@ -239,6 +248,8 @@ a:active { opacity: 0.7; }
 .section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
 .section h2 { font-size: 14px; padding: 20px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
 
+.product-group-title { font-size: 11px; padding: 16px 16px 8px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+
 .p-card {
   padding: 16px; display: flex; gap: 16px; cursor: pointer;
   border-bottom: 1px solid var(--border); background: var(--bg);
@@ -252,13 +263,13 @@ a:active { opacity: 0.7; }
 .p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .p-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p-brand { font-size: 13px; color: var(--text-2); margin-bottom: 8px; font-weight: 500; }
-.p-status { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.p-status { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-top: 4px; }
 
 /* Modal / Editor */
 .modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
 .modal.active { display: flex; }
 .modal-header { padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
-.modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; }
+.modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
 
 /* Video Modal */
@@ -266,7 +277,14 @@ a:active { opacity: 0.7; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
 .card { padding: 24px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
-.card h3 { font-size: 13px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px dashed var(--border); }
+.card h3 { font-size: 13px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px dashed var(--border); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 700; }
+
+details.card { padding: 0; }
+details.card > summary { padding: 24px 16px; font-size: 13px; color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.card > summary::after { content: '+'; font-size: 16px; font-weight: 400; }
+details[open].card > summary { border-bottom: 1px dashed var(--border); }
+details[open].card > summary::after { content: '−'; }
+details.card > .details-content { padding: 16px; border-top: 1px solid var(--border); }
 
 /* 3:4 Carousel Images - Taller (75%) */
 .carousel { 
@@ -275,7 +293,7 @@ a:active { opacity: 0.7; }
   -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
   scrollbar-width: none;
-  transform: translateZ(0); /* Hardware acceleration */
+  transform: translateZ(0);
 }
 .carousel::-webkit-scrollbar { display: none; }
 
@@ -290,7 +308,6 @@ a:active { opacity: 0.7; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
-/* Order Number Box */
 .img-cell .check { 
   position: absolute; top: 12px; right: 12px; 
   width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
@@ -300,20 +317,16 @@ a:active { opacity: 0.7; }
 }
 .img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
-/* Extraction Animation Feedback */
 @keyframes pulse-extract {
   0% { opacity: 1; }
   50% { opacity: 0.3; filter: grayscale(100%); }
   100% { opacity: 1; }
 }
-.extracting {
-  animation: pulse-extract 1.5s infinite ease-in-out;
-  pointer-events: none;
-}
+.extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
 
 /* Form fields */
 .field { margin-bottom: 16px; }
-.field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; }
+.field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; text-transform: uppercase; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
@@ -341,6 +354,8 @@ a:active { opacity: 0.7; }
   <div id="loading" class="screen active">
     <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
   </div>
+  
+  <!-- QUEUE SCREEN -->
   <div id="queue" class="screen">
     <div class="topbar">
       <h1>REVIEW QUEUE</h1>
@@ -350,6 +365,8 @@ a:active { opacity: 0.7; }
     </div>
     <div id="qList"></div>
   </div>
+
+  <!-- REVIEW SCREEN (Item Level) -->
   <div id="review" class="screen">
     <div class="topbar">
       <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
@@ -361,19 +378,21 @@ a:active { opacity: 0.7; }
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>PRODUCTS <span class="badge" id="pCount">0</span></h2>
+      <h2>SOURCES <span class="badge" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">DELETE ITEM</button>
-      <button class="btn-primary" onclick="commitItem()">COMMIT ITEM</button>
+      <button class="btn-danger" onclick="deleteItem()">DISCARD ITEM</button>
+      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
+
+  <!-- EDITOR MODAL (Source Level) -->
   <div id="editor" class="modal">
     <div class="modal-header">
       <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
-      <h2>EDIT PRODUCT</h2>
-      <button class="btn-primary" onclick="saveProduct('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
+      <h2 id="eModalTitle">EDIT SOURCE</h2>
+      <button class="btn-primary" onclick="saveSource('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
@@ -390,17 +409,21 @@ a:active { opacity: 0.7; }
 
 </div>
 <div class="toast" id="toast"></div>
+
 <script>
 const state = { 
   queue: [], 
   posts: {}, 
   current: null, 
-  editingIdx: null, 
+  editingPIdx: null,
+  editingSIdx: null, 
   currentSelected: [], 
   currentGridUrls: [], 
+  currentVariants: [],
+  currentSizeGuide: { headers: [], rows: [] },
   io: null,
-  justEditedProdIdx: null,           // for scrolling back to the card we were editing
-  formPersistKey: null               // current editor localStorage key
+  justEditedSId: null,
+  formPersistKey: null
 };
 
 // Theme Toggle
@@ -412,7 +435,6 @@ function toggleTheme() {
   document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
   localStorage.setItem('theme', newTheme);
 }
-// Init theme
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
   document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
@@ -441,19 +463,27 @@ function getImageUrl(u) {
   return String(u);
 }
 
-function formatPrice(p) {
-  if (!p) return "TBD";
-  if (typeof p === "string") return p;
-  if (typeof p === "object" && p !== null) {
-    if (p.current) return p.current + (p.currency ? " " + p.currency : "");
-    return JSON.stringify(p);
-  }
-  return String(p);
+// Safely parse messy string numbers (e.g. "$120.00" -> 120.00)
+function getSafeNumber(val) {
+  if (val == null || val === '') return '';
+  const str = String(val).replace(/[^0-9.-]/g, '');
+  const num = parseFloat(str);
+  return isNaN(num) ? '' : num.toFixed(2);
 }
 
-function copyRaw() {
-   navigator.clipboard.writeText(state.current.response.rawText || "");
-   toast('COPIED TO CLIPBOARD');
+function formatPrice(p, fallbackCurrency = "USD") {
+  if (p == null || p === "") return "TBD";
+  let num = '';
+  let curr = fallbackCurrency || '';
+  
+  if (typeof p === "number" || typeof p === "string") {
+    num = getSafeNumber(p);
+  } else if (typeof p === "object" && p !== null) {
+    num = getSafeNumber(p.current);
+    if (p.currency) curr = p.currency;
+  }
+  
+  return num !== '' ? num + (curr ? " " + curr : "") : "TBD";
 }
 
 function initLazyImages() {
@@ -478,6 +508,89 @@ function observeImage(img) {
   if (state.io) state.io.observe(img);
 }
 
+/* --- Local Storage Draft Saving --- */
+function getFormPersistKey() {
+  if (!state.current || state.editingPIdx === null || state.editingSIdx === null) return null;
+  const fid = state.current.frameIdx !== null ? \`f\${state.current.frameIdx}\` : \`img\${state.current.fileIdx}\`;
+  return \`reviewV2_\${state.current._id}_\${fid}_p\${state.editingPIdx}_s\${state.editingSIdx}\`;
+}
+
+function saveFormToLocalStorage() {
+  const key = state.formPersistKey;
+  if (!key) return;
+  
+  syncVariantsFromDOM();
+  syncSizeGuideFromDOM();
+
+  try {
+    const data = {
+      name: document.getElementById("eTitle")?.value || "",
+      brand: document.getElementById("eBrand")?.value || "",
+      vendor: document.getElementById("eVendor")?.value || "",
+      url: document.getElementById("eUrl")?.value || "",
+      category: document.getElementById("eCategory")?.value || "",
+      price: document.getElementById("ePrice")?.value || "",
+      comparePrice: document.getElementById("eComparePrice")?.value || "",
+      currency: document.getElementById("eCurrency")?.value || "",
+      availability: document.getElementById("eAvail")?.value || "",
+      desc: document.getElementById("eDesc")?.value || "",
+      features: document.getElementById("eFeatures")?.value || "",
+      shipping: document.getElementById("eShippingInfo")?.value || "",
+      returns: document.getElementById("eReturnPolicy")?.value || "",
+      variants: state.currentVariants,
+      sizeGuide: state.currentSizeGuide,
+      selectedImages: state.currentSelected
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch(e) {}
+}
+
+function restoreFormFromLocalStorage() {
+  const key = state.formPersistKey;
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+
+    setVal("eTitle", data.name);
+    setVal("eBrand", data.brand);
+    setVal("eVendor", data.vendor);
+    setVal("eUrl", data.url);
+    setVal("eCategory", data.category);
+    setVal("ePrice", data.price);
+    setVal("eComparePrice", data.comparePrice);
+    setVal("eCurrency", data.currency);
+    setVal("eAvail", data.availability);
+    setVal("eDesc", data.desc);
+    setVal("eFeatures", data.features);
+    setVal("eShippingInfo", data.shipping);
+    setVal("eReturnPolicy", data.returns);
+
+    if (data.variants && Array.isArray(data.variants)) {
+      state.currentVariants = data.variants;
+      renderVariantsTable();
+    }
+    if (data.sizeGuide && data.sizeGuide.headers) {
+      state.currentSizeGuide = data.sizeGuide;
+      renderSizeGuideTable();
+    }
+    if (data.selectedImages && Array.isArray(data.selectedImages)) {
+      state.currentSelected = data.selectedImages;
+      renderImgGrid(state.currentGridUrls);
+      updateSelCount();
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+function clearFormPersist(key) {
+  if (key) localStorage.removeItem(key);
+}
+
+/* --- Core Loading & Display --- */
 async function loadQueue() {
   try {
     const r = await fetch("/api/queue");
@@ -570,14 +683,12 @@ async function openItem(_id, fileIdx, frameIdx) {
 function renderItem() {
   const item = state.current;
   
-  // Format alias link
   let igLink = 'https://www.instagram.com/' + item.postId + '/';
   if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
   document.getElementById("rTitle").innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
   
-  // Proxy Video Button
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     document.getElementById('rTopRight').innerHTML = \`<button class="btn-ghost" onclick="openVideo('\${proxyUrl}')" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);">WATCH</button>\`;
@@ -588,69 +699,88 @@ function renderItem() {
   document.getElementById("rImage").src = item.url;
   
   const prods = item.response && item.response.products ? item.response.products : [];
-  const pending = prods.filter(p => p.reviewStatus !== "completed" && p.reviewStatus !== "rejected").length;
   
+  let totalSources = 0;
+  let pendingSources = 0;
+  let listHtml = "";
+
+  if (!prods.length) {
+    listHtml = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
+  } else {
+    prods.forEach((p, pIdx) => {
+      listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
+      
+      const sources = p.sources || [];
+      totalSources += sources.length;
+      
+      if (!sources.length) {
+        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
+      } else {
+        sources.forEach((s, sIdx) => {
+          if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
+          
+          let statusColor = "var(--text)";
+          let rejectedClass = "";
+          let statusBadge = "";
+
+          if (s.reviewStatus === "rejected") {
+            statusColor = "var(--text-2)";
+            rejectedClass = "rejected";
+            statusBadge = '<span class="badge" style="background:transparent; color:var(--text-2); border-color:var(--text-2);">REJECTED</span>';
+          } else if (s.reviewStatus === "completed") {
+            statusBadge = '<span class="badge success" style="color:var(--success); border-color:var(--success);">REVIEWED</span>';
+          } else {
+            const extStatus = s.textExtraction?.status;
+            if (extStatus === 'completed') statusBadge = '<span class="badge success">EXTRACTED</span>';
+            else if (extStatus === 'failed') statusBadge = '<span class="badge failed">FAILED</span>';
+            else statusBadge = '<span class="badge pending">PENDING EXTRACT</span>';
+          }
+
+          const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
+          const nameLabel = s.name || p.title || "UNTITLED";
+          const storeLabel = s.brand || s.vendor || s.store || "Unknown Store";
+
+          listHtml += \`
+            <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
+              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+              <div class="p-info">
+                <div class="p-title">\${escapeHtml(nameLabel)}</div>
+                <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
+                <div class="p-status" style="color:\${statusColor}">\${statusBadge}</div>
+              </div>
+            </div>
+          \`;
+        });
+      }
+    });
+  }
+
+  document.getElementById("pList").innerHTML = listHtml;
+  document.getElementById("pCount").textContent = totalSources;
+
   document.getElementById("rMeta").innerHTML = \`
     <span class="badge">\${item.type === "frame" ? "FRAME" : "IMAGE"}</span>
-    <span class="badge">\${prods.length} PROD</span>
-    \${pending ? \`<span class="badge pending">\${pending} PEND</span>\` : ""}
+    <span class="badge">\${totalSources} SRC</span>
+    \${pendingSources ? \`<span class="badge pending">\${pendingSources} PEND</span>\` : ""}
   \`;
-  
-  document.getElementById("pCount").textContent = prods.length;
-  const list = document.getElementById("pList");
-  
-  if (!prods.length) {
-    if (item.response && item.response.rawText) {
-      list.innerHTML = \`
-        <div class="card" style="margin:16px;">
-          <h3 style="color:var(--danger); border-bottom:1px solid var(--danger);">RAW AI STRING (PARSE FAILED)</h3>
-          <div style="background:var(--surface-2); padding:12px; font-family:monospace; font-size:12px; white-space:pre-wrap; overflow-x:auto; margin-bottom:12px; border:1px solid var(--border);">\${escapeHtml(item.response.rawText)}</div>
-          <button class="btn-ghost" style="width:100%; border:1px solid var(--border);" onclick="copyRaw()">COPY RAW RESPONSE</button>
-        </div>
-      \`;
-    } else {
-      list.innerHTML = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
-    }
-    return;
+
+  const btnCommit = document.getElementById("btnCommitItem");
+  if (pendingSources > 0) {
+    btnCommit.disabled = true;
+    btnCommit.title = "Review all sources first";
+  } else {
+    btnCommit.disabled = false;
+    btnCommit.title = "";
   }
-  
-  list.innerHTML = prods.map((p, i) => {
-    let statusLabel = p.reviewStatus || "pending";
-    let statusColor = "var(--text)";
-    let rejectedClass = "";
-    
-    if (p.reviewStatus === "rejected") {
-      statusLabel = "REJECTED";
-      statusColor = "var(--text-2)";
-      rejectedClass = "rejected";
-    }
 
-    const imgUrl = getImageUrl((p.selectedImages && p.selectedImages[0]) || (p.images && p.images[0]));
-    const storeLabel = p.store ? \`\${escapeHtml(p.store)} &middot; \` : '';
-
-    return \`
-      <div class="p-card \${rejectedClass}" data-prod-idx="\${i}" onclick="openProduct(\${i})">
-        <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
-        <div class="p-info">
-          <div class="p-title">\${escapeHtml(p.title || "UNTITLED")}</div>
-          <div class="p-brand">\${storeLabel}\${escapeHtml(formatPrice(p.price))}</div>
-          \${(p.textExtraction?.status === 'completed' || p.dropship_advisory) ? \`<div style="font-size:9px; font-weight:700; color:var(--success); margin-top:1px; letter-spacing:0.5px;">ENRICHED</div>\` : ''}
-          <div class="p-status" style="color:\${statusColor}">\u25A0 \${statusLabel}</div>
-        </div>
-      </div>
-    \`;
-  }).join("");
-
-  // After returning from product editor, scroll the card we were just editing into view
-  if (state.justEditedProdIdx !== null && prods.length > state.justEditedProdIdx) {
-    const targetCard = list.querySelector(\`.p-card[data-prod-idx="\${state.justEditedProdIdx}"]\`);
+  if (state.justEditedSId !== null) {
+    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`);
     if (targetCard) {
-      // Use requestAnimationFrame so layout is ready
       requestAnimationFrame(() => {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
     }
-    state.justEditedProdIdx = null;
+    state.justEditedSId = null;
   }
 }
 
@@ -667,135 +797,54 @@ function closeVideo() {
   document.getElementById('videoModal').classList.remove('active');
 }
 
-function getAllImages(p) {
+function getAllImages(source) {
   const allUrls = new Set();
-  
-  if (state.current && state.current.url) {
-    allUrls.add(state.current.url);
-  }
+  if (state.current && state.current.url) allUrls.add(state.current.url);
 
-  (p.images || []).forEach(u => {
+  (source.images || []).forEach(u => {
     const url = getImageUrl(u);
     if (url) allUrls.add(url);
   });
   
-  (p.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  (p.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
+  (source.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
+  (source.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
   
   return { urls: Array.from(allUrls) };
 }
 
-// Generate stable key for persisting unsaved editor form state
-function getFormPersistKey() {
-  if (!state.current || state.editingIdx === null) return null;
-  const fid = state.current.frameIdx !== null && state.current.frameIdx !== undefined 
-    ? \`f\${state.current.frameIdx}\` 
-    : \`img\${state.current.fileIdx}\`;
-  return \`reviewForm_\${state.current._id}_\${fid}_\${state.editingIdx}\`;
-}
-
-function saveFormToLocalStorage() {
-  const key = state.formPersistKey;
-  if (!key) return;
-  try {
-    const data = {
-      title: document.getElementById("eTitle")?.value || "",
-      store: document.getElementById("eStore")?.value || "",
-      url: document.getElementById("eUrl")?.value || "",
-      brand: document.getElementById("eBrand")?.value || "",
-      category: document.getElementById("eCategory")?.value || "",
-      price: document.getElementById("ePrice")?.value || "",
-      currency: document.getElementById("eCurrency")?.value || "",
-      basePrice: document.getElementById("eBasePrice")?.value || "",
-      availability: document.getElementById("eAvail")?.value || "",
-      markupType: document.getElementById("eMarkupType")?.value || "",
-      markupVal: document.getElementById("eMarkupVal")?.value || "",
-      shippingCost: document.getElementById("eShippingCost")?.value || "",
-      shippingCov: document.getElementById("eShippingCov")?.value || "",
-      sizes: document.getElementById("eSizes")?.value || "",
-      desc: document.getElementById("eDesc")?.value || "",
-      sizingGuide: document.getElementById("eSizingGuide")?.value || "",
-      shipping: document.getElementById("eShipping")?.value || "",
-      features: document.getElementById("eFeatures")?.value || "",
-      advisory: document.getElementById("eAdvisory")?.value || "",
-      variants: document.getElementById("eVariants")?.value || "",
-      sizeGuide: document.getElementById("eSizeGuide")?.value || "",
-      reviews: document.getElementById("eReviews")?.value || "",
-      rating: document.getElementById("eRating")?.value || "",
-      reviewCount: document.getElementById("eReviewCount")?.value || "",
-      // Note: selectedImages & currentGridUrls are already in state, persisted via normal flow
-    };
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch(e) { /* ignore quota errors */ }
-}
-
-function restoreFormFromLocalStorage() {
-  const key = state.formPersistKey;
-  if (!key) return;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-
-    const setVal = (id, val) => { 
-      const el = document.getElementById(id); 
-      if (el && val != null) el.value = val; 
-    };
-
-    setVal("eTitle", data.title);
-    setVal("eStore", data.store);
-    setVal("eUrl", data.url);
-    setVal("eBrand", data.brand);
-    setVal("eCategory", data.category);
-    setVal("ePrice", data.price);
-    setVal("eCurrency", data.currency);
-    setVal("eBasePrice", data.basePrice);
-    setVal("eAvail", data.availability);
-    setVal("eMarkupType", data.markupType);
-    setVal("eMarkupVal", data.markupVal);
-    setVal("eShippingCost", data.shippingCost);
-    setVal("eShippingCov", data.shippingCov);
-    setVal("eSizes", data.sizes);
-    setVal("eDesc", data.desc);
-    setVal("eSizingGuide", data.sizingGuide);
-    setVal("eShipping", data.shipping);
-    setVal("eFeatures", data.features);
-    setVal("eAdvisory", data.advisory);
-    setVal("eVariants", data.variants);
-    setVal("eSizeGuide", data.sizeGuide);
-    setVal("eReviews", data.reviews);
-    setVal("eRating", data.rating);
-    setVal("eReviewCount", data.reviewCount);
-
-    // Optional toast so user knows we restored unsaved work
-    if (data.title || data.store) {
-      // silent restore is usually better; only toast if significant
-    }
-  } catch(e) { /* corrupted data, ignore */ }
-}
-
-function clearFormPersist(key) {
-  if (key) localStorage.removeItem(key);
-}
-
-function openProduct(idx) {
-  state.editingIdx = idx;
-  const p = state.current.response.products[idx];
-  const allImages = getAllImages(p);
+function openSource(pIdx, sIdx) {
+  state.editingPIdx = pIdx;
+  state.editingSIdx = sIdx;
   
-  state.currentSelected = [...(p.selectedImages || [])];
+  const product = state.current.response.products[pIdx];
+  const s = product.sources[sIdx];
   
-  // Reorder for the UI: selected images first in their chosen sequence, then unselected
+  document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
+
+  const allImages = getAllImages(s);
+  state.currentSelected = [...(s.selectedImages || [])];
+  
   const sortedUrls = [...state.currentSelected];
-  allImages.urls.forEach(u => {
-    if (!sortedUrls.includes(u)) sortedUrls.push(u);
-  });
+  allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
   state.currentGridUrls = sortedUrls;
 
-  // Setup persistence key for this specific product edit session
-  state.formPersistKey = getFormPersistKey();
-  
+  state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
+  state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
+    ? JSON.parse(JSON.stringify(s.size_guide)) 
+    : { headers: ["US", "EU", "UK"], rows: [] };
+
+  const extStatus = s.textExtraction?.status;
+  let statusBadge = "";
+  if (extStatus === 'completed') statusBadge = '<span class="badge success" style="margin-bottom:12px;">✅ EXTRACTED</span>';
+  else if (extStatus === 'failed') statusBadge = '<span class="badge failed" style="margin-bottom:12px;">⚠️ EXTRACTION FAILED (MANUAL ENTRY)</span>';
+  else statusBadge = '<span class="badge pending" style="margin-bottom:12px;">⏳ PENDING PIPELINE</span>';
+
+  const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
+  const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
+
   let html = \`
+    <div style="padding: 16px 16px 0;">\${statusBadge}</div>
+    
     <div class="card" style="padding-bottom: 0;">
       <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
         IMAGES 
@@ -809,113 +858,121 @@ function openProduct(idx) {
         <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
       </div>
     </div>
-    <div class="card">
-      <h3>AI VIABILITY: \${p.dropshipViability?.score || '?'} / 10</h3>
-      <p style="font-size: 13px; color: var(--text-2); line-height: 1.5;">\${escapeHtml(p.dropshipViability?.reasoning || 'N/A')}</p>
-    </div>
+    
     <div class="card">
       <h3>BASIC INFO</h3>
-      <div class="field"><label>Product Title</label><input id="eTitle" value="\${escapeHtml(p.title || "")}"></div>
+      <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
       
       <div class="field-row">
-        <div class="field"><label>Store / Supplier Name</label><input id="eStore" value="\${escapeHtml(p.store || "")}"></div>
-        <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(p.brand || "")}"></div>
+        <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
+        <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
       </div>
+      
+      <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
       <div class="field" style="margin-bottom:24px;">
         <label>Supplier URL</label>
         <div style="display:flex; gap:8px;">
-          <input id="eUrl" type="url" value="\${escapeHtml(p.url || "")}" style="flex:1;">
-          \${p.url ? \`<a href="\${escapeHtml(p.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+          <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
+          \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-          <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
         </div>
       </div>
 
-      <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(p.category || "")}"></div>
       <div class="field-row">
-        <div class="field"><label>Price</label><input id="ePrice" inputmode="decimal" value="\${escapeHtml((p.price && p.price.current) ? p.price.current : "")}"></div>
+        <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
+        <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
         <div class="field" style="width:100px">
           <label>Currency</label>
           <select id="eCurrency">
-            <option \${p.price?.currency === "USD" ? "selected" : ""}>USD</option>
-            <option \${p.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
-            <option \${p.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
-            <option \${p.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
-            <option \${p.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
-            <option \${p.price?.currency === "JPY" ? "selected" : ""}>JPY</option>
+            <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
+            <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
+            <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
+            <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
+            <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
           </select>
         </div>
       </div>
-      <div class="field"><label>Base Price</label><input id="eBasePrice" inputmode="decimal" value="\${escapeHtml(p.basePrice || "")}"></div>
       <div class="field">
         <label>Availability</label>
         <select id="eAvail">
-          <option \${p.availability === "In stock" ? "selected" : ""}>IN STOCK</option>
-          <option \${p.availability === "Out of stock" ? "selected" : ""}>OUT OF STOCK</option>
-          <option \${p.availability === "Pre-order" ? "selected" : ""}>PRE-ORDER</option>
+          <option \${s.availability === "InStock" ? "selected" : ""}>InStock</option>
+          <option \${s.availability === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
+          <option \${s.availability === "PreOrder" ? "selected" : ""}>PreOrder</option>
         </select>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Markup Type</label>
-          <select id="eMarkupType">
-            <option \${p.recommendedMarkup?.type === 'fixed' ? 'selected' : ''}>FIXED</option>
-            <option \${p.recommendedMarkup?.type === 'percentage' || !p.recommendedMarkup?.type ? 'selected' : ''}>PERCENTAGE</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Markup Val</label>
-          <input id="eMarkupVal" inputmode="decimal" value="\${escapeHtml(p.recommendedMarkup?.value || '')}">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Shipping Cost</label><input id="eShippingCost" inputmode="decimal" value="\${escapeHtml(p.recommendedShippingRate?.amount || '')}"></div>
-        <div class="field"><label>Shipping Cov</label><input id="eShippingCov" value="\${escapeHtml(p.recommendedShippingRate?.coverage || '')}"></div>
-      </div>
-      <div class="field"><label>Sizes (CSV)</label><input id="eSizes" value="\${escapeHtml((p.sizing || []).join(", "))}"></div>
-      <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(p.description || "")}</textarea></div>
-      <div class="field"><label>Features (one per line)</label><textarea id="eFeatures" placeholder="Durable\nWater resistant\n...">\${escapeHtml((p.features || []).join('\n'))}</textarea></div>
-      <div class="field"><label>Dropship Advisory</label><textarea id="eAdvisory">\${escapeHtml(p.dropship_advisory || "")}</textarea></div>
-      <div class="field"><label>Sizing Guide</label><textarea id="eSizingGuide">\${escapeHtml(p.sizingGuide || "")}</textarea></div>
-      <div class="field"><label>Shipping & Returns</label><textarea id="eShipping">\${escapeHtml(p.shippingAndReturns || "")}</textarea></div>
     </div>
+    
+    <div class="card" style="background:var(--surface-2);">
+      <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
+      <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+      <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+        <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+        <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+        <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+        <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+      </div>
+    </div>
+    
     <div class="card">
-      <h3>ADVANCED ENRICHED DATA</h3>
-      <div class="field"><label>Variants (JSON array)</label><textarea id="eVariants" style="min-height:110px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.variants || [], null, 2))}</textarea></div>
-      <div class="field"><label>Size Guide (JSON)</label><textarea id="eSizeGuide" style="min-height:80px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.size_guide || null, null, 2))}</textarea></div>
-      <div class="field"><label>Reviews (JSON array)</label><textarea id="eReviews" style="min-height:80px; font-family:ui-monospace,monospace;font-size:11px;">\${escapeHtml(JSON.stringify(p.reviews || [], null, 2))}</textarea></div>
-      <div class="field-row">
-        <div class="field"><label>Rating</label><input id="eRating" type="number" step="0.1" value="\${escapeHtml(p.rating != null ? String(p.rating) : '')}"></div>
-        <div class="field"><label>Review Count</label><input id="eReviewCount" type="number" value="\${escapeHtml(p.review_count != null ? String(p.review_count) : '')}"></div>
+      <h3>VARIANTS (SIZE & STOCK)</h3>
+      <div id="variantsContainer"></div>
+      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
+    </div>
+
+    <div class="card">
+      <h3>SIZE GUIDE</h3>
+      <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border);">+ ADD ROW</button>
+        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border);">+ ADD COL</button>
       </div>
     </div>
+
+    <details class="card">
+      <summary>DETAILS & POLICIES</summary>
+      <div class="details-content">
+        <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
+        <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml((s.features || []).join("\\n"))}</textarea></div>
+        <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
+        <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
+      </div>
+    </details>
+
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
-      <div style="display:flex;gap:12px">
-        <button class="btn-danger" onclick="rejectProduct()" style="flex:1">REJECT</button>
-        <button class="btn-primary" onclick="saveProduct('completed')" style="flex:1">SAVE</button>
+      <div style="display:flex; gap:12px; margin-bottom:12px;">
+        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
+      </div>
+      <div style="display:flex; gap:12px">
+        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT (KEEP)</button>
+        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE & APPROVE</button>
       </div>
     </div>
   \`;
   
   document.getElementById("eBody").innerHTML = html;
+  
   renderImgGrid(state.currentGridUrls);
   updateSelCount();
-  showScreen("editor");
-  document.getElementById("eBody").scrollTop = 0;
-
-  // Restore any unsaved work from previous session (crash / accidental back)
+  renderVariantsTable();
+  renderSizeGuideTable();
+  
+  state.formPersistKey = getFormPersistKey();
   restoreFormFromLocalStorage();
 
-  // Auto-save form state to localStorage on any change (robust against refresh/crash)
-  const editorBody = document.getElementById("eBody");
-  if (editorBody) {
-    editorBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
-    editorBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
+  const eBody = document.getElementById("eBody");
+  if (eBody) {
+    eBody.removeEventListener('input', saveFormToLocalStorage);
+    eBody.removeEventListener('change', saveFormToLocalStorage);
+    eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
+    eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
   }
+
+  showScreen("editor");
+  document.getElementById("eBody").scrollTop = 0;
 }
 
 function updateSelCount() {
@@ -925,13 +982,11 @@ function updateSelCount() {
 
 function toggleImageSelection(url) {
   const idx = state.currentSelected.indexOf(url);
-  if (idx > -1) {
-    state.currentSelected.splice(idx, 1);
-  } else {
-    state.currentSelected.push(url);
-  }
+  if (idx > -1) state.currentSelected.splice(idx, 1);
+  else state.currentSelected.push(url);
   renderImgGrid(state.currentGridUrls);
   updateSelCount();
+  saveFormToLocalStorage();
 }
 
 function clearSelection() {
@@ -939,63 +994,44 @@ function clearSelection() {
   state.currentSelected = [];
   renderImgGrid(state.currentGridUrls);
   updateSelCount();
-  toast('SELECTION CLEARED — TAP IMAGES IN DESIRED ORDER');
+  saveFormToLocalStorage();
+  toast('SELECTION CLEARED');
 }
 
 function renderImgGrid(urls) {
   const grid = document.getElementById("eImgGrid");
-  if (!urls.length) {
-    grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>';
-    return;
-  }
+  if (!urls.length) { grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>'; return; }
   
   grid.innerHTML = urls.map(url => {
     const selIdx = state.currentSelected.indexOf(url);
     const isOn = selIdx > -1;
-    const num = isOn ? (selIdx + 1) : '';
-
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
         <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
-        <div class="check">\${num}</div>
-      </div>
-    \`;
+        <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
+      </div>\`;
   }).join("");
 }
 
 async function addImage() {
-  let url = "";
-  try {
-    const text = await navigator.clipboard.readText();
-    if (text && /^https?:\\/\\//i.test(text.trim())) {
-      url = text.trim();
-    }
-  } catch (err) {
-    console.warn("Clipboard read skipped/failed:", err);
-  }
-  
-  if (!url) {
-    url = prompt("NO URL FOUND IN CLIPBOARD.\\n\\nPASTE IMAGE URL MANUALLY:");
-  }
-  
+  let url = prompt("PASTE IMAGE URL:");
   if (!url) return;
   url = url.trim();
+  if (!/^https?:\\/\\//i.test(url)) return toast("INVALID URL");
   
-  if (!/^https?:\\/\\//i.test(url)) {
-    return toast("INVALID URL");
-  }
+  const product = state.current.response.products[state.editingPIdx];
+  const s = product.sources[state.editingSIdx];
   
-  const p = state.current.response.products[state.editingIdx];
-  p.customImages = p.customImages || [];
-  if (!p.customImages.includes(url)) p.customImages.push(url);
+  s.customImages = s.customImages || [];
+  if (!s.customImages.includes(url)) s.customImages.push(url);
   
-  const wasSelected = state.currentSelected.includes(url);
-  if (!wasSelected) state.currentSelected.push(url);
+  if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
   if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
   
   renderImgGrid(state.currentGridUrls);
   updateSelCount();
-  toast(wasSelected ? "IMAGE ALREADY IN LIST" : "IMAGE ADDED + SELECTED");
+  saveFormToLocalStorage();
+  toast("IMAGE ADDED + SELECTED");
 }
 
 async function extractImages(mode) {
@@ -1003,12 +1039,9 @@ async function extractImages(mode) {
   if (!url) return toast("NO URL PROVIDED");
   
   const carousel = document.getElementById("eImgGrid");
-  const btnLazy = document.getElementById("btnExtractLazy");
-  const btnFull = document.getElementById("btnExtractFull");
-
+  const btn = document.getElementById("btnExtractLazy");
   if (carousel) carousel.classList.add("extracting");
-  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = mode==='lazy' ? "EXTRACTING..." : "EXTRACT (LAZY)"; }
-  if (btnFull) { btnFull.disabled = true; btnFull.innerText = mode==='full' ? "EXTRACTING..." : "EXTRACT (FULL)"; }
+  if (btn) { btn.disabled = true; btn.innerText = "EXTRACTING..."; }
   
   try {
     const r = await fetch("/api/extract", {
@@ -1016,33 +1049,25 @@ async function extractImages(mode) {
       body: JSON.stringify({ url, mode })
     });
     
-    const resText = await r.text();
-    let d;
-    try { d = JSON.parse(resText); } catch(err) { throw new Error(resText.slice(0, 100)); }
-
+    const d = await r.json();
     if (d.error) throw new Error(d.error);
     
     if (d.images && d.images.length > 0) {
-      const p = state.current.response.products[state.editingIdx];
-      
-      // Deduplicate against existing images and limit payload to 20
+      const s = state.current.response.products[state.editingPIdx].sources[state.editingSIdx];
       const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
       
       if (newUnique.length > 0) {
-        p.customImages = p.customImages || [];
-        p.customImages = [...newUnique, ...p.customImages];
+        s.customImages = s.customImages || [];
+        s.customImages = [...newUnique, ...s.customImages];
         state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
-        
-        // Auto-select newly extracted images (they appear first)
-        newUnique.forEach(u => {
-          if (!state.currentSelected.includes(u)) state.currentSelected.push(u);
-        });
+        newUnique.forEach(u => { if (!state.currentSelected.includes(u)) state.currentSelected.push(u); });
         
         renderImgGrid(state.currentGridUrls);
         updateSelCount();
-        toast(\`EXTRACTED \${newUnique.length} NEW IMAGES (AUTO-SELECTED)\`);
+        saveFormToLocalStorage();
+        toast(\`EXTRACTED \${newUnique.length} IMAGES\`);
       } else {
-        toast("NO NEW IMAGES FOUND (ALL DUPES)");
+        toast("NO NEW IMAGES (ALL DUPES)");
       }
     } else {
       toast("NO IMAGES EXTRACTED");
@@ -1051,77 +1076,191 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
+    if (btn) { btn.disabled = false; btn.innerText = "EXTRACT IMAGES"; }
   }
 }
 
-async function saveProduct(status = "completed") {
-  const idx = state.editingIdx;
-  const p = state.current.response.products[idx];
+/* --- Variants Table Logic --- */
+function renderVariantsTable() {
+  const container = document.getElementById("variantsContainer");
+  if (!state.currentVariants.length) { container.innerHTML = ''; return; }
   
-  p.title = document.getElementById("eTitle").value;
-  p.store = document.getElementById("eStore").value;
-  p.url = document.getElementById("eUrl").value;
-  p.brand = document.getElementById("eBrand").value;
-  p.category = document.getElementById("eCategory").value;
-  p.price = { current: document.getElementById("ePrice").value, currency: document.getElementById("eCurrency").value };
-  p.basePrice = document.getElementById("eBasePrice").value;
-  p.availability = document.getElementById("eAvail").value;
+  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>STOCK</th><th style="width:36px;"></th></tr></thead><tbody>';
+  state.currentVariants.forEach((v, i) => {
+    html += \`
+      <tr class="v-row" data-idx="\${i}">
+        <td><input type="text" class="v-size" value="\${escapeHtml(v.size || '')}"></td>
+        <td>
+          <select class="v-avail">
+            <option \${v.availability === "InStock" ? "selected" : ""}>InStock</option>
+            <option \${v.availability === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
+            <option \${v.availability === "PreOrder" ? "selected" : ""}>PreOrder</option>
+          </select>
+        </td>
+        <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
+      </tr>
+    \`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function syncVariantsFromDOM() {
+  const rows = document.querySelectorAll(".v-row");
+  state.currentVariants = Array.from(rows).map(row => ({
+    size: row.querySelector(".v-size").value,
+    availability: row.querySelector(".v-avail").value
+  }));
+}
+
+function addVariantRow() {
+  syncVariantsFromDOM();
+  state.currentVariants.push({ size: "", availability: "InStock" });
+  renderVariantsTable();
+  saveFormToLocalStorage();
+}
+
+function delVariantRow(idx) {
+  syncVariantsFromDOM();
+  state.currentVariants.splice(idx, 1);
+  renderVariantsTable();
+  saveFormToLocalStorage();
+}
+
+/* --- Size Guide Table Logic --- */
+function renderSizeGuideTable() {
+  const container = document.getElementById("sizeGuideContainer");
+  const sg = state.currentSizeGuide;
+  if (!sg.headers.length) { container.innerHTML = ''; return; }
   
-  p.recommendedMarkup = {
-    type: document.getElementById("eMarkupType").value,
-    value: document.getElementById("eMarkupVal").value,
-    currency: document.getElementById("eCurrency").value
+  let html = '<table class="simple-table"><thead><tr>';
+  sg.headers.forEach((h, cIdx) => {
+    html += \`<th>
+      <div style="display:flex; align-items:center;">
+        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
+        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:14px; min-height:0;">&times;</button>
+      </div>
+    </th>\`;
+  });
+  html += '<th style="width:36px;"></th></tr></thead><tbody>';
+  
+  sg.rows.forEach((row, rIdx) => {
+    html += \`<tr class="sg-row" data-ridx="\${rIdx}">\`;
+    sg.headers.forEach((_, cIdx) => {
+      const val = row[cIdx] || "";
+      html += \`<td><input type="text" class="sg-cell" data-ridx="\${rIdx}" data-cidx="\${cIdx}" value="\${escapeHtml(val)}"></td>\`;
+    });
+    html += \`<td><button class="table-btn" onclick="delSizeGuideRow(\${rIdx})">&times;</button></td></tr>\`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function syncSizeGuideFromDOM() {
+  const sg = state.currentSizeGuide;
+  document.querySelectorAll(".sg-header").forEach(inp => {
+    sg.headers[inp.dataset.cidx] = inp.value;
+  });
+  document.querySelectorAll(".sg-cell").forEach(inp => {
+    const r = inp.dataset.ridx;
+    const c = inp.dataset.cidx;
+    if (!sg.rows[r]) sg.rows[r] = [];
+    sg.rows[r][c] = inp.value;
+  });
+}
+
+function addSizeGuideRow() {
+  syncSizeGuideFromDOM();
+  if (!state.currentSizeGuide.headers.length) state.currentSizeGuide.headers = ["US", "EU", "UK"];
+  state.currentSizeGuide.rows.push(new Array(state.currentSizeGuide.headers.length).fill(""));
+  renderSizeGuideTable();
+  saveFormToLocalStorage();
+}
+
+function addSizeGuideCol() {
+  syncSizeGuideFromDOM();
+  state.currentSizeGuide.headers.push("NEW");
+  state.currentSizeGuide.rows.forEach(r => r.push(""));
+  renderSizeGuideTable();
+  saveFormToLocalStorage();
+}
+
+function delSizeGuideRow(rIdx) {
+  syncSizeGuideFromDOM();
+  state.currentSizeGuide.rows.splice(rIdx, 1);
+  renderSizeGuideTable();
+  saveFormToLocalStorage();
+}
+
+function delSizeGuideCol(cIdx) {
+  syncSizeGuideFromDOM();
+  state.currentSizeGuide.headers.splice(cIdx, 1);
+  state.currentSizeGuide.rows.forEach(r => r.splice(cIdx, 1));
+  renderSizeGuideTable();
+  saveFormToLocalStorage();
+}
+
+/* --- Saving --- */
+async function saveSource(status = "completed") {
+  syncVariantsFromDOM();
+  syncSizeGuideFromDOM();
+  
+  const pIdx = state.editingPIdx;
+  const sIdx = state.editingSIdx;
+  const source = state.current.response.products[pIdx].sources[sIdx];
+  
+  source.name = document.getElementById("eTitle").value;
+  source.brand = document.getElementById("eBrand").value;
+  source.vendor = document.getElementById("eVendor").value;
+  source.url = document.getElementById("eUrl").value;
+  source.primary_category = document.getElementById("eCategory").value;
+  
+  const priceVal = parseFloat(document.getElementById("ePrice").value);
+  const compareVal = parseFloat(document.getElementById("eComparePrice").value);
+  const oldPrice = source.price || {};
+  
+  source.price = { 
+    ...oldPrice,
+    current: isNaN(priceVal) ? null : priceVal, 
+    original: isNaN(compareVal) ? null : compareVal,
+    currency: document.getElementById("eCurrency").value 
   };
   
-  p.recommendedShippingRate = {
-    amount: document.getElementById("eShippingCost").value,
-    coverage: document.getElementById("eShippingCov").value,
-    currency: document.getElementById("eCurrency").value
-  };
+  source.compare_at_price = source.price.original;
+  source.is_on_sale = (source.compare_at_price != null && source.price.current != null && source.compare_at_price > source.price.current);
+  source.currency = source.price.currency;
   
-  const sizesRaw = document.getElementById("eSizes").value;
-  p.sizing = sizesRaw.split(",").map(s => s.trim()).filter(Boolean);
-  p.sizes = p.sizing;
+  source.availability = document.getElementById("eAvail").value;
+  source.description = document.getElementById("eDesc").value;
+  source.features = document.getElementById("eFeatures").value.split("\\n").map(s => s.trim()).filter(Boolean);
+  source.shipping_info = document.getElementById("eShippingInfo").value;
+  source.return_policy = document.getElementById("eReturnPolicy").value;
   
-  p.description = document.getElementById("eDesc").value;
-  p.sizingGuide = document.getElementById("eSizingGuide").value;
-  p.shippingAndReturns = document.getElementById("eShipping").value;
+  const oldVariants = source.variants || [];
+  source.variants = state.currentVariants.map(v => {
+    const existing = oldVariants.find(ov => ov.size === v.size) || {};
+    return { ...existing, size: v.size, availability: v.availability };
+  });
   
-  // NEW: enriched fields from orchestrator schema
-  const featEl = document.getElementById("eFeatures");
-  p.features = featEl ? featEl.value.split('\n').map(s => s.trim()).filter(Boolean) : (p.features || []);
-  p.dropship_advisory = document.getElementById("eAdvisory")?.value || "";
-  const varEl = document.getElementById("eVariants");
-  if (varEl) { try { p.variants = varEl.value.trim() ? JSON.parse(varEl.value) : (p.variants || []); } catch(e){} }
-  const sgEl = document.getElementById("eSizeGuide");
-  if (sgEl) { try { p.size_guide = sgEl.value.trim() ? JSON.parse(sgEl.value) : (p.size_guide || null); } catch(e){} }
-  const revEl = document.getElementById("eReviews");
-  if (revEl) { try { p.reviews = revEl.value.trim() ? JSON.parse(revEl.value) : (p.reviews || []); } catch(e){} }
-  const ratEl = document.getElementById("eRating");
-  if (ratEl && ratEl.value) p.rating = parseFloat(ratEl.value);
-  const rcEl = document.getElementById("eReviewCount");
-  if (rcEl && rcEl.value) p.review_count = parseInt(rcEl.value, 10);
-  
-  // Save custom images array
-  p.customImages = p.customImages || [];
-  
-  // Set ordered selection directly from state array
-  p.selectedImages = [...state.currentSelected];
-  
-  p.reviewStatus = status;
-  p.reviewedAt = new Date().toISOString();
+  source.size_guide = state.currentSizeGuide;
+  source.selectedImages = [...state.currentSelected];
+  source.reviewStatus = status;
   
   try {
-    const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx, prodIdx: idx, product: p };
+    const body = { 
+      docId: state.current._id, 
+      fileIdx: state.current.fileIdx, 
+      frameIdx: state.current.frameIdx, 
+      prodIdx: pIdx, 
+      sourceIdx: sIdx, 
+      source 
+    };
+    
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
     
-    // Clear persisted draft + remember which card to scroll back to
     clearFormPersist(state.formPersistKey);
-    state.justEditedProdIdx = idx;
-    
+    state.justEditedSId = \`\${pIdx}-\${sIdx}\`;
     toast(status === "rejected" ? "REJECTED" : "SAVED");
     renderItem();
     closeEditor();
@@ -1130,29 +1269,48 @@ async function saveProduct(status = "completed") {
   }
 }
 
-function rejectProduct() {
-  const idx = state.editingIdx;
-  const p = state.current.response.products[idx];
-  state.currentSelected = [];
-  saveProduct("rejected");
+function rejectSource() { saveSource("rejected"); }
+
+async function deleteSource() {
+  if (!confirm("DELETE THIS SOURCE ENTIRELY?")) return;
+  try {
+    const body = { 
+      docId: state.current._id, 
+      fileIdx: state.current.fileIdx, 
+      frameIdx: state.current.frameIdx, 
+      prodIdx: state.editingPIdx, 
+      sourceIdx: state.editingSIdx 
+    };
+    const r = await fetch("/api/delete-source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error("Delete failed");
+    
+    clearFormPersist(state.formPersistKey);
+    state.current.response.products[state.editingPIdx].sources.splice(state.editingSIdx, 1);
+    
+    toast("SOURCE DELETED");
+    renderItem();
+    closeEditor();
+  } catch(e) {
+    toast("ERROR: " + e.message);
+  }
 }
 
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
-  state.formPersistKey = null;
   showScreen("review"); 
 }
 
 async function commitItem() {
-  const prods = state.current.response && state.current.response.products ? state.current.response.products : [];
-  const pending = prods.filter(p => p.reviewStatus !== "completed" && p.reviewStatus !== "rejected");
-  if (pending.length) {
-    if (!confirm(pending.length + " PENDING. COMMIT ANYWAY?")) return;
-  }
   try {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
     const r = await fetch("/api/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    
+    if (r.status === 409) {
+      toast("NOT ALL SOURCES REVIEWED");
+      return;
+    }
     if (!r.ok) throw new Error("Commit failed");
+    
     toast("COMMITTED");
     showQueue();
     await loadQueue();
@@ -1162,12 +1320,12 @@ async function commitItem() {
 }
 
 async function deleteItem() {
-  if (!confirm("DELETE ITEM?")) return;
+  if (!confirm("DISCARD ENTIRE ITEM?")) return;
   try {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
     const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error("Delete failed");
-    toast("DELETED");
+    if (!r.ok) throw new Error("Discard failed");
+    toast("ITEM DISCARDED");
     showQueue();
     await loadQueue();
   } catch(e) {
@@ -1177,21 +1335,15 @@ async function deleteItem() {
 
 function showQueue() { showScreen("queue"); }
 
-// Keyboard shortcuts (Escape closes modals, power user friendly)
 function initKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const videoModal = document.getElementById('videoModal');
       const editorModal = document.getElementById('editor');
-      if (videoModal.classList.contains('active')) {
-        closeVideo();
-      } else if (editorModal.classList.contains('active')) {
-        closeEditor();
-      } else if (document.getElementById('review').classList.contains('active')) {
-        showQueue();
-      }
+      if (videoModal.classList.contains('active')) closeVideo();
+      else if (editorModal.classList.contains('active')) closeEditor();
+      else if (document.getElementById('review').classList.contains('active')) showQueue();
     }
-    // Future: could add 's' for save when in editor, etc.
   });
 }
 
@@ -1202,192 +1354,43 @@ initKeyboard();
 </html>`;
 
 /* -------------------------------------------------------------------------- */
-/* MONGODB HELPERS & AUTO-MIGRATION (FLATTENING)                              */
+/* MONGODB HELPERS                                                            */
 /* -------------------------------------------------------------------------- */
-
-function resolvePrice(basePriceObj, sourcePriceStr) {
-    if (!sourcePriceStr) return basePriceObj;
-    return {
-        current: String(sourcePriceStr),
-        original: basePriceObj?.original || null,
-        currency: basePriceObj?.currency || 'USD'
-    };
-}
-
-/**
- * Flattens the old AI schema (1 product -> many sources/alternatives)
- * into a 1-to-1 array (1 product = 1 source/url).
- * Strictly deduplicates by URL across the entire product list to prevent redundant review cards.
- */
-function flattenProducts(products) {
-    let modified = false;
-    const flattened = [];
-    
-    // Track URLs globally for this item to merge duplicates seamlessly
-    const seenUrls = new Map();
-
-    // Helper to safely merge image arrays without introducing duplicates
-    const mergeArrays = (existingItem, newItem, field, isObjectArray = false) => {
-        if (!newItem[field] || !Array.isArray(newItem[field]) || newItem[field].length === 0) return;
-        const existingArr = Array.isArray(existingItem[field]) ? existingItem[field] : [];
-        
-        const seen = new Set(existingArr.map(i => isObjectArray ? (typeof i === 'object' && i !== null ? i.url : i) : i));
-        let changed = false;
-
-        newItem[field].forEach(item => {
-            const checkVal = isObjectArray ? (typeof item === 'object' && item !== null ? item.url : item) : item;
-            if (checkVal && !seen.has(checkVal)) {
-                seen.add(checkVal);
-                existingArr.push(item);
-                changed = true;
-            }
-        });
-
-        if (changed || (!existingItem[field] && existingArr.length > 0)) {
-            existingItem[field] = existingArr;
-        }
-    };
-
-    for (const p of products) {
-        if (p.isFlattened) {
-            // Deduplicate if already flattened items have overlapping URLs
-            if (p.url) {
-                if (seenUrls.has(p.url)) {
-                    const existing = seenUrls.get(p.url);
-                    mergeArrays(existing, p, 'images', true);
-                    mergeArrays(existing, p, 'customImages', false);
-                    mergeArrays(existing, p, 'selectedImages', false);
-                    modified = true;
-                    continue; // Skip adding duplicate card
-                }
-                seenUrls.set(p.url, p);
-            }
-            flattened.push(p);
-            continue;
-        }
-        
-        modified = true;
-
-        const base = { ...p, isFlattened: true, reviewStatus: p.reviewStatus || 'pending' };
-        delete base.sources;
-        delete base.customSources;
-        delete base.alternatives;
-
-        const allSources = [
-            ...(Array.isArray(p.sources) ? p.sources : []),
-            ...(Array.isArray(p.customSources) ? p.customSources : [])
-        ];
-        
-        // Track total to know if we need to emit a blank fallback
-        const totalOriginalVariants = allSources.length + (Array.isArray(p.alternatives) ? p.alternatives.length : 0);
-
-        const addVariant = (variant) => {
-            if (variant.url) {
-                if (seenUrls.has(variant.url)) {
-                    const existing = seenUrls.get(variant.url);
-                    mergeArrays(existing, variant, 'images', true);
-                    mergeArrays(existing, variant, 'customImages', false);
-                    mergeArrays(existing, variant, 'selectedImages', false);
-                    return; // Skip adding duplicate card
-                }
-                seenUrls.set(variant.url, variant);
-            }
-            flattened.push(variant);
-        };
-
-        allSources.forEach(s => {
-            // Merge enriched fields from source (new orchestrator schema) 
-            const enrichedFromS = {
-                features: Array.isArray(s.features) && s.features.length ? s.features : (base.features || []),
-                dropship_advisory: s.dropship_advisory || base.dropship_advisory || '',
-                description: s.description || base.description || '',
-                shippingAndReturns: s.shippingAndReturns || base.shippingAndReturns || '',
-                variants: Array.isArray(s.variants) && s.variants.length ? s.variants : (base.variants || []),
-                size_guide: s.size_guide || base.size_guide || null,
-                reviews: Array.isArray(s.reviews) && s.reviews.length ? s.reviews : (base.reviews || []),
-                rating: (typeof s.rating === 'number' ? s.rating : (typeof base.rating === 'number' ? base.rating : null)),
-                review_count: (typeof s.review_count === 'number' ? s.review_count : (typeof base.review_count === 'number' ? base.review_count : null)),
-            };
-            let finalPrice = base.price;
-            if (s.price && typeof s.price === 'object' && s.price.current !== undefined) {
-                finalPrice = s.price;
-            } else if (s.price) {
-                finalPrice = resolvePrice(base.price, s.price);
-            }
-            addVariant({
-                ...base,
-                ...enrichedFromS,
-                store: s.store || base.store || '',
-                url: s.url || '',
-                price: finalPrice,
-                availability: s.availability || base.availability || '',
-                images: (Array.isArray(s.images) && s.images.length ? s.images : (base.images || [])),
-                title: s.title || base.title,
-                brand: s.brand || base.brand,
-                category: s.category || base.category,
-            });
-        });
-
-        if (Array.isArray(p.alternatives)) {
-            p.alternatives.forEach(a => {
-                addVariant({
-                    ...base,
-                    title: a.title || base.title,
-                    brand: a.brand || base.brand,
-                    store: a.store || 'Alternative',
-                    url: a.url || '',
-                    price: a.price ? { current: String(a.price), currency: base.price?.currency || 'USD' } : base.price,
-                    images: []
-                });
-            });
-        }
-
-        // Only add an empty fallback if there were absolutely no sources/alternatives provided
-        if (totalOriginalVariants === 0) {
-            addVariant({ ...base, store: '', url: '', images: [] });
-        }
-    }
-    return { flattened, modified };
-}
 
 function normalizeResponse(item) {
     let resp = item.response;
     let rawText = null;
     
     if (typeof resp === 'string') {
-        try { 
-            resp = JSON.parse(resp); 
-        } catch { 
-            rawText = resp;
-            resp = { products: [] }; 
-        }
+        try { resp = JSON.parse(resp); } catch { rawText = resp; resp = { products: [] }; }
     }
-    
     if (!resp || typeof resp !== 'object') resp = { products: [] };
     if (!Array.isArray(resp.products)) resp.products = [];
 
-    resp.products = resp.products.map(p => ({
-        ...p,
-        reviewStatus: p.reviewStatus || 'pending',
-        selectedImages: p.selectedImages || [],
-        customImages: p.customImages || [],
-        images: p.images || [],
-        price: p.price || { current: '', original: null, currency: 'USD' },
-        sizing: Array.isArray(p.sizing) ? p.sizing : (p.sizes ? String(p.sizes).split(',').map(s => s.trim()).filter(Boolean) : []),
-        sizes: p.sizes || p.sizing || [],
-        recommendedMarkup: p.recommendedMarkup || null,
-        recommendedShippingRate: p.recommendedShippingRate || null,
-        dropshipViability: p.dropshipViability || null,
-        // NEW enriched schema support (orchestrator text extraction)
-        features: Array.isArray(p.features) ? p.features : [],
-        dropship_advisory: p.dropship_advisory || '',
-        variants: Array.isArray(p.variants) ? p.variants : [],
-        size_guide: p.size_guide || null,
-        reviews: Array.isArray(p.reviews) ? p.reviews : [],
-        rating: (typeof p.rating === 'number' ? p.rating : null),
-        review_count: (typeof p.review_count === 'number' ? p.review_count : null),
-        textExtraction: p.textExtraction || null,
-    }));
+    resp.products.forEach(p => {
+        if (!Array.isArray(p.sources)) p.sources = [];
+        p.sources.forEach(s => {
+            s.reviewStatus = s.reviewStatus || 'pending';
+            s.selectedImages = s.selectedImages || [];
+            s.customImages = s.customImages || [];
+            s.variants = s.variants || [];
+            s.images = s.images || [];
+
+            // Robust price normalization to handle raw python extractor numbers
+            if (typeof s.price === 'number' || typeof s.price === 'string') {
+                s.price = {
+                    current: s.price,
+                    original: s.compare_at_price || null,
+                    currency: s.currency || 'USD'
+                };
+            } else if (!s.price || typeof s.price !== 'object') {
+                s.price = { current: '', original: s.compare_at_price || null, currency: s.currency || 'USD' };
+            }
+            if (s.price.original != null && s.compare_at_price == null) {
+                s.compare_at_price = s.price.original;
+            }
+        });
+    });
 
     if (rawText) resp.rawText = rawText;
     return resp;
@@ -1395,15 +1398,19 @@ function normalizeResponse(item) {
 
 function getItemStatus(item) {
     const resp = normalizeResponse(item);
-    
-    // Auto-flatten purely in memory for status calculation so the queue reflects the correct state
-    const { flattened } = flattenProducts(resp.products);
-    
-    if (!flattened.length) return 'pending';
-    const allDone = flattened.every(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
-    const someDone = flattened.some(p => p.reviewStatus === 'completed' || p.reviewStatus === 'rejected');
-    if (allDone) return 'done';
-    if (someDone) return 'partial';
+    let totalSources = 0;
+    let reviewedSources = 0;
+
+    resp.products.forEach(p => {
+        p.sources.forEach(s => {
+            totalSources++;
+            if (s.reviewStatus === 'completed' || s.reviewStatus === 'rejected') reviewedSources++;
+        });
+    });
+
+    if (totalSources === 0) return 'done'; // Empty arrays can be committed safely to clear from queue
+    if (reviewedSources === totalSources) return 'done';
+    if (reviewedSources > 0) return 'partial';
     return 'pending';
 }
 
@@ -1416,9 +1423,12 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
-                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
-                        discarded: { $ne: true }
+                        discarded: { $ne: true },
+                        $or: [
+                            { auditStatus: 'audited' },
+                            { auditedAt: { $exists: true } }
+                        ]
                     }
                 }
             },
@@ -1427,9 +1437,12 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
-                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
-                        discarded: { $ne: true }
+                        discarded: { $ne: true },
+                        $or: [
+                            { auditStatus: 'audited' },
+                            { auditedAt: { $exists: true } }
+                        ]
                     }
                 }
             }
@@ -1444,18 +1457,16 @@ async function buildQueue(collection) {
             const f = post.file_urls[i];
             if (!f || f.discarded) continue;
 
-            if (f.type === 'image') {
-                if (f.reviewed && !f.humanReviewed) {
-                    postItems.push({
-                        _id: post._id.toString(),
-                        postId: post.post_id,
-                        fileIdx: i,
-                        frameIdx: null,
-                        thumb: f.url,
-                        status: getItemStatus(f),
-                        type: 'image'
-                    });
-                }
+            if (f.type === 'image' && f.reviewed && !f.humanReviewed) {
+                postItems.push({
+                    _id: post._id.toString(),
+                    postId: post.post_id,
+                    fileIdx: i,
+                    frameIdx: null,
+                    thumb: f.url,
+                    status: getItemStatus(f),
+                    type: 'image'
+                });
             } else if (f.type === 'video' && Array.isArray(f.frames)) {
                 for (let j = 0; j < f.frames.length; j++) {
                     const frame = f.frames[j];
@@ -1474,11 +1485,7 @@ async function buildQueue(collection) {
             }
         }
         if (postItems.length > 0) {
-            grouped[post.post_id] = {
-                postId: post.post_id,
-                _id: post._id.toString(),
-                items: postItems
-            };
+            grouped[post.post_id] = { postId: post.post_id, _id: post._id.toString(), items: postItems };
         }
     }
 
@@ -1487,150 +1494,88 @@ async function buildQueue(collection) {
 }
 
 async function checkDone(collection) {
-    const remaining = await collection.countDocuments({
+    return collection.countDocuments({
         discarded: { $ne: true },
         $or: [
-            {
-                file_urls: {
-                    $elemMatch: {
-                        type: 'image',
-                        reviewed: true,
-                        auditStatus: 'audited',
-                        humanReviewed: { $ne: true },
-                        discarded: { $ne: true }
-                    }
-                }
-            },
-            {
-                'file_urls.frames': {
-                    $elemMatch: {
-                        type: 'image',
-                        reviewed: true,
-                        auditStatus: 'audited',
-                        humanReviewed: { $ne: true },
-                        discarded: { $ne: true }
-                    }
-                }
-            }
+            { file_urls: { $elemMatch: { type: 'image', reviewed: true, humanReviewed: { $ne: true }, discarded: { $ne: true }, $or: [ { auditStatus: 'audited' }, { auditedAt: { $exists: true } } ] } } },
+            { 'file_urls.frames': { $elemMatch: { type: 'image', reviewed: true, humanReviewed: { $ne: true }, discarded: { $ne: true }, $or: [ { auditStatus: 'audited' }, { auditedAt: { $exists: true } } ] } } }
         ]
     });
-
-    log('info', `Queue: ${remaining} item(s) remaining`);
-    return remaining;
 }
 
 async function maybeDiscardEmptyPost(collection, docId) {
-    const post = await collection.findOne(
-        { _id: new ObjectId(docId) },
-        { projection: { file_urls: 1, post_id: 1 } }
-    );
+    const post = await collection.findOne({ _id: new ObjectId(docId) }, { projection: { file_urls: 1, post_id: 1 } });
     if (!post || !post.file_urls) return;
 
     const hasRemaining = post.file_urls.some(f => {
         if (f.discarded) return false;
         if (f.type === 'image') return true;
-        if (f.type === 'video' && Array.isArray(f.frames)) {
-            return f.frames.some(fr => !fr.discarded);
-        }
+        if (f.type === 'video' && Array.isArray(f.frames)) return f.frames.some(fr => !fr.discarded);
         return false;
     });
 
     if (!hasRemaining) {
-        await collection.updateOne(
-            { _id: new ObjectId(docId) },
-            { $set: { discarded: true, discardedAt: new Date(), discardReason: 'all file_urls removed' } }
-        );
+        await collection.updateOne({ _id: new ObjectId(docId) }, { $set: { discarded: true, discardedAt: new Date(), discardReason: 'all file_urls removed' } });
         log('info', `Auto-discarded empty post ${post.post_id}`);
     }
 }
 
-/**
- * When a product is reviewed, propagate the human review decisions (status, selected images,
- * overrides) to any *other* items/frames in the SAME post that have a product with the exact
- * same supplier URL. This prevents the reviewer from having to do duplicate work.
- */
-async function propagateReviewToSameSources(collection, docId, sourceUrl, updatedProduct, currentFileIdx, currentFrameIdx) {
-  if (!sourceUrl) return 0; // nothing to propagate without a URL to match on
+async function propagateReviewToSameSources(collection, docId, url, updatedSource) {
+    if (!url) return 0;
+    try {
+        const post = await collection.findOne({ _id: new ObjectId(docId) }, { projection: { file_urls: 1 } });
+        if (!post || !Array.isArray(post.file_urls)) return 0;
 
-  try {
-    const post = await collection.findOne(
-      { _id: new ObjectId(docId) },
-      { projection: { file_urls: 1 } }
-    );
-    if (!post || !Array.isArray(post.file_urls)) return 0;
+        let updatedCount = 0;
 
-    let updatedCount = 0;
+        for (let fi = 0; fi < post.file_urls.length; fi++) {
+            const f = post.file_urls[fi];
+            if (!f || f.discarded) continue;
 
-    for (let fi = 0; fi < post.file_urls.length; fi++) {
-      const f = post.file_urls[fi];
-      if (!f || f.discarded) continue;
+            const updateItem = async (item, basePath) => {
+                if (!item.response || !Array.isArray(item.response.products)) return;
+                for (let pi = 0; pi < item.response.products.length; pi++) {
+                    const prod = item.response.products[pi];
+                    if (!Array.isArray(prod.sources)) continue;
+                    for (let si = 0; si < prod.sources.length; si++) {
+                        const src = prod.sources[si];
+                        if (src.url === url) {
+                            const setObj = {};
+                            const pth = `${basePath}.products.${pi}.sources.${si}`;
+                            setObj[`${pth}.reviewStatus`] = updatedSource.reviewStatus;
+                            setObj[`${pth}.reviewedAt`] = new Date();
+                            setObj[`${pth}.selectedImages`] = updatedSource.selectedImages;
+                            setObj[`${pth}.price`] = updatedSource.price;
+                            setObj[`${pth}.compare_at_price`] = updatedSource.compare_at_price;
+                            setObj[`${pth}.is_on_sale`] = updatedSource.is_on_sale;
+                            setObj[`${pth}.currency`] = updatedSource.currency;
+                            setObj[`${pth}.availability`] = updatedSource.availability;
+                            setObj[`${pth}.vendor`] = updatedSource.vendor;
+                            await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
+                            updatedCount++;
+                        }
+                    }
+                }
+            };
 
-      // Check main image item
-      if (f.type === 'image' && f.response && Array.isArray(f.response.products)) {
-        for (let pi = 0; pi < f.response.products.length; pi++) {
-          const prod = f.response.products[pi];
-          if (prod.url === sourceUrl) {
-            // Found a match in another (or same) item — apply review fields
-            const setObj = {};
-            const base = `file_urls.${fi}.response.products.${pi}`;
-
-            // Propagate key human decisions
-            setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
-            setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
-            setObj[`${base}.reviewedAt`] = new Date();
-            setObj[`${base}.price`] = updatedProduct.price;
-            setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
-            setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
-            setObj[`${base}.availability`] = updatedProduct.availability;
-
-            await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
-            updatedCount++;
-          }
-        }
-      }
-
-      // Check frames inside video
-      if (f.type === 'video' && Array.isArray(f.frames)) {
-        for (let fr = 0; fr < f.frames.length; fr++) {
-          const frame = f.frames[fr];
-          if (!frame || frame.discarded || !frame.response || !Array.isArray(frame.response.products)) continue;
-
-          for (let pi = 0; pi < frame.response.products.length; pi++) {
-            const prod = frame.response.products[pi];
-            if (prod.url === sourceUrl) {
-              const setObj = {};
-              const base = `file_urls.${fi}.frames.${fr}.response.products.${pi}`;
-
-              setObj[`${base}.reviewStatus`] = updatedProduct.reviewStatus;
-              setObj[`${base}.selectedImages`] = updatedProduct.selectedImages || [];
-              setObj[`${base}.reviewedAt`] = new Date();
-              setObj[`${base}.price`] = updatedProduct.price;
-              setObj[`${base}.recommendedMarkup`] = updatedProduct.recommendedMarkup;
-              setObj[`${base}.recommendedShippingRate`] = updatedProduct.recommendedShippingRate;
-              setObj[`${base}.availability`] = updatedProduct.availability;
-
-              await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
-              updatedCount++;
+            if (f.type === 'image') await updateItem(f, `file_urls.${fi}.response`);
+            if (f.type === 'video' && Array.isArray(f.frames)) {
+                for (let fr = 0; fr < f.frames.length; fr++) {
+                    if (!f.frames[fr].discarded) await updateItem(f.frames[fr], `file_urls.${fi}.frames.${fr}.response`);
+                }
             }
-          }
         }
-      }
+        if (updatedCount > 0) log('info', `Propagated review to ${updatedCount} matching source(s) in post`);
+        return updatedCount;
+    } catch (err) {
+        log('warn', 'Propagation failed:', err.message);
+        return 0;
     }
-
-    if (updatedCount > 0) {
-      log('info', `Propagated review to ${updatedCount} duplicate source(s) in same post (url: ${sourceUrl})`);
-    }
-    return updatedCount;
-  } catch (err) {
-    log('warn', 'Propagation failed:', err.message);
-    return 0;
-  }
 }
 
 /* -------------------------------------------------------------------------- */
-/* EXTERNAL API HELPERS (Catbox Upload & Python Extract)                      */
+/* EXTERNAL API HELPERS                                                       */
 /* -------------------------------------------------------------------------- */
-
 async function uploadToCatbox(base64Data, filename) {
     const base64Content = base64Data.split(',')[1];
     const buffer = Buffer.from(base64Content, 'base64');
@@ -1652,49 +1597,33 @@ async function runPythonExtractor(targetUrl, mode) {
         const outFile = path.join(os.tmpdir(), `out_${runId}.json`);
         
         fs.writeFileSync(inFile, JSON.stringify([targetUrl]));
-
-        // Ensure we point precisely to the script in the workspace root
         const scriptPath = path.resolve(process.cwd(), 'ecom-image-extractor.py');
         
         if (!fs.existsSync(scriptPath)) {
             try { fs.unlinkSync(inFile); } catch(e){}
-            return reject(new Error('ecom-image-extractor.py NOT FOUND in current working directory. Please place the Python extractor script next to review-server.js'));
+            return reject(new Error('ecom-image-extractor.py NOT FOUND.'));
         }
 
         const args = [scriptPath, '-u', inFile, '-o', outFile];
-        
-        if (mode === 'lazy') {
-            args.push('--lazy-extraction');
-        } else {
-            args.push('--no-lazy-extraction');
-            args.push('--adaptive-cutoff');
-        }
+        if (mode === 'lazy') args.push('--lazy-extraction');
+        else { args.push('--no-lazy-extraction'); args.push('--adaptive-cutoff'); }
 
-        log('info', `Running extractor (${mode}): python3 ${args.join(' ')}`);
         const proc = spawn('python3', args);
-        
         let stderr = '';
-        proc.stdout.on('data', d => log('debug', `[PYTHON] ${d.toString().trim()}`));
-        proc.stderr.on('data', d => {
-            const out = d.toString();
-            stderr += out;
-            log('warn', `[PYTHON ERR] ${out.trim()}`);
-        });
+        proc.stderr.on('data', d => stderr += d.toString());
 
         proc.on('close', code => {
             if (code !== 0) {
                 try { fs.unlinkSync(inFile); fs.unlinkSync(outFile); } catch(e){}
-                return reject(new Error(`Extractor crashed (code ${code}). Check logs. Stderr: ${stderr.slice(0,200)}`));
+                return reject(new Error(`Extractor crashed (code ${code}). Stderr: ${stderr.slice(0,200)}`));
             }
             try {
-                if (!fs.existsSync(outFile)) throw new Error("No output generated by python script.");
+                if (!fs.existsSync(outFile)) throw new Error("No output generated.");
                 const resultData = JSON.parse(fs.readFileSync(outFile, 'utf8'));
                 fs.unlinkSync(inFile); fs.unlinkSync(outFile);
                 
                 const images = resultData[targetUrl] || [];
                 if (images.error) throw new Error(images.error);
-                
-                log('info', `Extraction success: ${images.length} images found.`);
                 resolve(images.map(i => i.url));
             } catch (err) {
                 reject(err);
@@ -1709,7 +1638,6 @@ async function runPythonExtractor(targetUrl, mode) {
 async function startNgrok(port) {
     try {
         const { spawn } = await import('child_process');
-        
         const ngrok = spawn('ngrok', ['http', String(port)], { stdio: 'pipe' });
 
         let url = null;
@@ -1725,33 +1653,20 @@ async function startNgrok(port) {
 
         ngrok.stdout.on('data', onData);
         ngrok.stderr.on('data', onData);
-
         await new Promise(r => setTimeout(r, 12000));
 
-        if (url) {
-            log('info', `ngrok tunnel: ${url}`);
-            return { url, process: ngrok };
-        }
+        if (url) return { url, process: ngrok };
 
-        log('warn', 'ngrok URL not found in logs, trying API fallback...');
         try {
             const apiRes = await fetch('http://127.0.0.1:4040/api/tunnels');
             const apiData = await apiRes.json();
             const tunnel = apiData.tunnels?.find(t => t.public_url?.startsWith('https'));
-            if (tunnel) {
-                url = tunnel.public_url;
-                log('info', `ngrok tunnel (via API): ${url}`);
-                return { url, process: ngrok };
-            }
-        } catch (e) {
-            log('warn', 'ngrok API fallback failed:', e.message);
-        }
+            if (tunnel) return { url: tunnel.public_url, process: ngrok };
+        } catch (e) {}
 
-        log('warn', 'ngrok started but no URL captured');
         ngrok.kill();
         return null;
     } catch (err) {
-        log('error', 'ngrok failed:', err.message);
         return null;
     }
 }
@@ -1761,24 +1676,16 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v1.1');
+    log('info', '  REVIEW SERVER — Production Human Review v2.1.0 (New Schema)');
     log('info', '===============================================================');
 
-    if (!CONFIG.mongodb.uri) {
-        log('error', 'ORCH_MONGODB_URI is required');
-        process.exit(1);
-    }
+    if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
 
-    log('info', 'Connecting to MongoDB...');
-    const client = new MongoClient(CONFIG.mongodb.uri, { 
-        serverSelectionTimeoutMS: 15000,
-        maxPoolSize: 10 
-    });
+    const client = new MongoClient(CONFIG.mongodb.uri, { serverSelectionTimeoutMS: 15000, maxPoolSize: 10 });
     await client.connect();
     const db = client.db(CONFIG.mongodb.db);
     const collection = db.collection(CONFIG.mongodb.collection);
     log('info', `Connected: ${CONFIG.mongodb.db}.${CONFIG.mongodb.collection}`);
-    log('info', `HF Token for video proxy: ${CONFIG.hfToken ? 'PRESENT' : 'MISSING (private videos may fail)'}`);
 
     let serverResolve;
     const donePromise = new Promise(r => serverResolve = r);
@@ -1786,7 +1693,6 @@ async function main() {
 
     const server = http.createServer(async (req, res) => {
         const parsed = new URL(req.url, `http://localhost:${CONFIG.port}`);
-
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -1801,28 +1707,16 @@ async function main() {
         if (parsed.pathname === '/api/video' && req.method === 'GET') {
             try {
                 const vidUrl = parsed.searchParams.get('url');
-                if (!vidUrl) { res.writeHead(400); res.end('No video url specified'); return; }
-                
+                if (!vidUrl) return res.writeHead(400), res.end('No video url');
                 const fetchHeaders = {};
                 if (req.headers.range) fetchHeaders.range = req.headers.range;
                 if (CONFIG.hfToken) fetchHeaders['Authorization'] = `Bearer ${CONFIG.hfToken}`;
-                
                 const fRes = await fetch(vidUrl, { headers: fetchHeaders });
                 const resHeaders = {};
-                fRes.headers.forEach((v, k) => {
-                    // Filter out content-encoding because we are streaming the raw bytes
-                    if (k.toLowerCase() !== 'content-encoding') resHeaders[k] = v;
-                });
-                
+                fRes.headers.forEach((v, k) => { if (k.toLowerCase() !== 'content-encoding') resHeaders[k] = v; });
                 res.writeHead(fRes.status, resHeaders);
-                if (fRes.body) {
-                    Readable.fromWeb(fRes.body).pipe(res);
-                } else {
-                    res.end();
-                }
-            } catch (e) {
-                res.writeHead(500); res.end(e.message);
-            }
+                if (fRes.body) Readable.fromWeb(fRes.body).pipe(res); else res.end();
+            } catch (e) { res.writeHead(500); res.end(e.message); }
             return;
         }
 
@@ -1831,10 +1725,7 @@ async function main() {
                 const q = await buildQueue(collection);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(q));
-            } catch (e) {
-                res.writeHead(500);
-                res.end(JSON.stringify({ error: e.message }));
-            }
+            } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             return;
         }
 
@@ -1844,306 +1735,193 @@ async function main() {
                 const docId = itemMatch[1];
                 const fileIdx = parseInt(itemMatch[2], 10);
                 const frameIdx = itemMatch[3] !== undefined ? parseInt(itemMatch[3], 10) : null;
+                const objectId = new ObjectId(docId);
 
-                let objectId;
-                try {
-                    objectId = new ObjectId(docId);
-                } catch {
-                    res.writeHead(400);
-                    res.end(JSON.stringify({ error: 'Invalid document ID' }));
-                    return;
-                }
-
-                const post = await collection.findOne(
-                    { _id: objectId },
-                    { projection: { post_id: 1, file_urls: 1 } }
-                );
-                if (!post || !post.file_urls || !post.file_urls[fileIdx]) {
-                    res.writeHead(404);
-                    res.end(JSON.stringify({ error: 'Not found' }));
-                    return;
-                }
+                const post = await collection.findOne({ _id: objectId }, { projection: { post_id: 1, file_urls: 1 } });
+                if (!post || !post.file_urls || !post.file_urls[fileIdx]) return res.writeHead(404), res.end('Not found');
 
                 const file = post.file_urls[fileIdx];
                 let item;
                 if (frameIdx !== null) {
-                    if (!file.frames || !file.frames[frameIdx]) {
-                        res.writeHead(404);
-                        res.end(JSON.stringify({ error: 'Frame not found' }));
-                        return;
-                    }
+                    if (!file.frames || !file.frames[frameIdx]) return res.writeHead(404), res.end('Frame not found');
                     item = file.frames[frameIdx];
-                    item.type = 'frame';
-                    item.parentUrl = file.url;
+                    item.type = 'frame'; item.parentUrl = file.url;
                 } else {
-                    item = file;
-                    item.type = 'image';
+                    item = file; item.type = 'image';
                 }
 
                 const response = normalizeResponse(item);
-                
-                // BACKWARD COMPATIBILITY: Auto-flatten if necessary and write immediately to DB so indices lock in place.
-                const { flattened, modified } = flattenProducts(response.products);
-                if (modified) {
-                    log('info', `Auto-flattening legacy schema for doc ${docId}`);
-                    response.products = flattened;
-                    
-                    const updatePath = frameIdx !== null 
-                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products` 
-                        : `file_urls.${fileIdx}.response.products`;
-                    
-                    await collection.updateOne(
-                        { _id: objectId },
-                        { $set: { [updatePath]: flattened } }
-                    );
-                }
-
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                    _id: post._id.toString(),
-                    postId: post.post_id,
-                    fileIdx,
-                    frameIdx,
-                    url: item.url,
-                    parentUrl: item.parentUrl || null,
-                    type: item.type,
-                    response
-                }));
-            } catch (e) {
-                res.writeHead(500);
-                res.end(JSON.stringify({ error: e.message }));
-            }
+                res.end(JSON.stringify({ _id: docId, postId: post.post_id, fileIdx, frameIdx, url: item.url, parentUrl: item.parentUrl || null, type: item.type, response }));
+            } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             return;
         }
 
         if (parsed.pathname === '/api/upload' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
+            let body = ''; req.on('data', d => body += d);
             req.on('end', async () => {
                 try {
                     const data = JSON.parse(body);
-                    if (!data.image) throw new Error("No image data");
-                    const url = await uploadToCatbox(data.image, data.filename || 'paste.jpg');
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ url }));
-                } catch (e) {
-                    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
-                }
+                    const url = await uploadToCatbox(data.image, data.filename);
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ url }));
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             });
             return;
         }
 
         if (parsed.pathname === '/api/extract' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
+            let body = ''; req.on('data', d => body += d);
             req.on('end', async () => {
                 try {
                     const { url, mode } = JSON.parse(body);
-                    if (!url) throw new Error("No URL provided");
                     const images = await runPythonExtractor(url, mode);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ images }));
-                } catch (e) {
-                    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
-                }
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ images }));
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             });
             return;
         }
 
         if (parsed.pathname === '/api/product' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
+            let body = ''; req.on('data', d => body += d);
             req.on('end', async () => {
                 try {
-                    const data = JSON.parse(body);
-                    const { docId, fileIdx, frameIdx, prodIdx, product } = data;
-
-                    let objectId;
-                    try {
-                        objectId = new ObjectId(docId);
-                    } catch {
-                        res.writeHead(400);
-                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
-                        return;
-                    }
-
-                    const basePath = frameIdx !== null && frameIdx !== undefined
-                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}`
-                        : `file_urls.${fileIdx}.response.products.${prodIdx}`;
+                    const { docId, fileIdx, frameIdx, prodIdx, sourceIdx, source } = JSON.parse(body);
+                    const basePath = frameIdx !== null
+                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}.sources.${sourceIdx}`
+                        : `file_urls.${fileIdx}.response.products.${prodIdx}.sources.${sourceIdx}`;
 
                     await collection.updateOne(
-                        { _id: objectId },
+                        { _id: new ObjectId(docId) },
                         { $set: {
-                            [`${basePath}.title`]: product.title,
-                            [`${basePath}.store`]: product.store,
-                            [`${basePath}.url`]: product.url,
-                            [`${basePath}.brand`]: product.brand,
-                            [`${basePath}.category`]: product.category,
-                            [`${basePath}.description`]: product.description,
-                            [`${basePath}.price`]: product.price,
-                            [`${basePath}.basePrice`]: product.basePrice,
-                            [`${basePath}.availability`]: product.availability,
-                            [`${basePath}.sizing`]: product.sizing,
-                            [`${basePath}.sizes`]: product.sizes,
-                            [`${basePath}.sizingGuide`]: product.sizingGuide,
-                            [`${basePath}.shippingAndReturns`]: product.shippingAndReturns,
-                            [`${basePath}.recommendedMarkup`]: product.recommendedMarkup,
-                            [`${basePath}.recommendedShippingRate`]: product.recommendedShippingRate,
-                            [`${basePath}.images`]: product.images,
-                            [`${basePath}.selectedImages`]: product.selectedImages,
-                            [`${basePath}.customImages`]: product.customImages,
-                            [`${basePath}.reviewStatus`]: product.reviewStatus,
-                            [`${basePath}.isFlattened`]: product.isFlattened,
-                            [`${basePath}.reviewedAt`]: new Date(),
-                            // NEW enriched fields
-                            [`${basePath}.features`]: product.features,
-                            [`${basePath}.dropship_advisory`]: product.dropship_advisory,
-                            [`${basePath}.variants`]: product.variants,
-                            [`${basePath}.size_guide`]: product.size_guide,
-                            [`${basePath}.reviews`]: product.reviews,
-                            [`${basePath}.rating`]: product.rating,
-                            [`${basePath}.review_count`]: product.review_count
+                            [`${basePath}.name`]: source.name,
+                            [`${basePath}.brand`]: source.brand,
+                            [`${basePath}.vendor`]: source.vendor,
+                            [`${basePath}.url`]: source.url,
+                            [`${basePath}.primary_category`]: source.primary_category,
+                            [`${basePath}.price`]: source.price,
+                            [`${basePath}.compare_at_price`]: source.compare_at_price,
+                            [`${basePath}.is_on_sale`]: source.is_on_sale,
+                            [`${basePath}.currency`]: source.currency,
+                            [`${basePath}.availability`]: source.availability,
+                            [`${basePath}.description`]: source.description,
+                            [`${basePath}.features`]: source.features,
+                            [`${basePath}.variants`]: source.variants,
+                            [`${basePath}.size_guide`]: source.size_guide,
+                            [`${basePath}.shipping_info`]: source.shipping_info,
+                            [`${basePath}.return_policy`]: source.return_policy,
+                            [`${basePath}.images`]: source.images,
+                            [`${basePath}.selectedImages`]: source.selectedImages,
+                            [`${basePath}.customImages`]: source.customImages,
+                            [`${basePath}.reviewStatus`]: source.reviewStatus,
+                            [`${basePath}.reviewedAt`]: new Date()
                         }}
                     );
 
-                    // === SMART DUPLICATE PROPAGATION ===
-                    // If this product has a supplier URL, apply the same review decisions to any other
-                    // items/frames in this same post that reference the exact same source URL.
-                    // This dramatically reduces duplicate review work across frames of a reel/post.
-                    if (product.url) {
-                      propagateReviewToSameSources(
-                        collection,
-                        docId,
-                        product.url,
-                        product,
-                        fileIdx,
-                        frameIdx
-                      ).catch(e => log('warn', 'Propagation error (non-fatal):', e.message));
+                    if (source.url) {
+                        propagateReviewToSameSources(collection, docId, source.url, source)
+                            .catch(e => log('warn', 'Propagation err:', e.message));
                     }
 
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true }));
-                } catch (e) {
-                    res.writeHead(500);
-                    res.end(JSON.stringify({ error: e.message }));
-                }
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+            });
+            return;
+        }
+
+        if (parsed.pathname === '/api/delete-source' && req.method === 'POST') {
+            let body = ''; req.on('data', d => body += d);
+            req.on('end', async () => {
+                try {
+                    const { docId, fileIdx, frameIdx, prodIdx, sourceIdx } = JSON.parse(body);
+                    const parentPath = frameIdx !== null
+                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}`
+                        : `file_urls.${fileIdx}.response.products.${prodIdx}`;
+
+                    const post = await collection.findOne({ _id: new ObjectId(docId) });
+                    const targetProduct = frameIdx !== null
+                        ? post.file_urls[fileIdx].frames[frameIdx].response.products[prodIdx]
+                        : post.file_urls[fileIdx].response.products[prodIdx];
+
+                    if (targetProduct && targetProduct.sources && targetProduct.sources.length > sourceIdx) {
+                        targetProduct.sources.splice(sourceIdx, 1);
+                        await collection.updateOne(
+                            { _id: new ObjectId(docId) },
+                            { $set: { [`${parentPath}.sources`]: targetProduct.sources } }
+                        );
+                    }
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             });
             return;
         }
 
         if (parsed.pathname === '/api/commit' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
+            let body = ''; req.on('data', d => body += d);
             req.on('end', async () => {
                 try {
-                    const data = JSON.parse(body);
-                    const { docId, fileIdx, frameIdx } = data;
-
-                    let objectId;
-                    try {
-                        objectId = new ObjectId(docId);
-                    } catch {
-                        res.writeHead(400);
-                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
-                        return;
-                    }
-
-                    const path = frameIdx !== null && frameIdx !== undefined
-                        ? `file_urls.${fileIdx}.frames.${frameIdx}`
-                        : `file_urls.${fileIdx}`;
-
-                    await collection.updateOne(
-                        { _id: objectId },
-                        { $set: { [`${path}.humanReviewed`]: true, [`${path}.humanReviewedAt`]: new Date() } }
+                    const { docId, fileIdx, frameIdx } = JSON.parse(body);
+                    const objectId = new ObjectId(docId);
+                    
+                    const post = await collection.findOne({ _id: objectId });
+                    const item = frameIdx !== null ? post.file_urls[fileIdx].frames[frameIdx] : post.file_urls[fileIdx];
+                    
+                    const allSourcesReviewed = item.response.products.every(p => 
+                        !p.sources || p.sources.length === 0 || p.sources.every(s => s.reviewStatus === 'completed' || s.reviewStatus === 'rejected')
                     );
 
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true }));
+                    if (!allSourcesReviewed) {
+                        return res.writeHead(409), res.end(JSON.stringify({ error: 'Not all sources reviewed' }));
+                    }
 
-                    const remaining = await checkDone(collection);
-                    if (remaining === 0) serverResolve();
-                } catch (e) {
-                    res.writeHead(500);
-                    res.end(JSON.stringify({ error: e.message }));
-                }
+                    const path = frameIdx !== null ? `file_urls.${fileIdx}.frames.${frameIdx}` : `file_urls.${fileIdx}`;
+                    await collection.updateOne({ _id: objectId }, { $set: { [`${path}.humanReviewed`]: true, [`${path}.humanReviewedAt`]: new Date() } });
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+                    if (await checkDone(collection) === 0) serverResolve();
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             });
             return;
         }
 
         if (parsed.pathname === '/api/delete' && req.method === 'POST') {
-            let body = '';
-            req.on('data', d => body += d);
+            let body = ''; req.on('data', d => body += d);
             req.on('end', async () => {
                 try {
-                    const data = JSON.parse(body);
-                    const { docId, fileIdx, frameIdx } = data;
-
-                    let objectId;
-                    try {
-                        objectId = new ObjectId(docId);
-                    } catch {
-                        res.writeHead(400);
-                        res.end(JSON.stringify({ error: 'Invalid document ID' }));
-                        return;
-                    }
-
-                    const path = frameIdx !== null && frameIdx !== undefined
-                        ? `file_urls.${fileIdx}.frames.${frameIdx}`
-                        : `file_urls.${fileIdx}`;
-
-                    await collection.updateOne(
-                        { _id: objectId },
-                        { $set: { [`${path}.discarded`]: true } }
-                    );
-
+                    const { docId, fileIdx, frameIdx } = JSON.parse(body);
+                    const path = frameIdx !== null ? `file_urls.${fileIdx}.frames.${frameIdx}` : `file_urls.${fileIdx}`;
+                    await collection.updateOne({ _id: new ObjectId(docId) }, { $set: { [`${path}.discarded`]: true } });
                     await maybeDiscardEmptyPost(collection, docId);
-
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true }));
-
-                    const remaining = await checkDone(collection);
-                    if (remaining === 0) serverResolve();
-                } catch (e) {
-                    res.writeHead(500);
-                    res.end(JSON.stringify({ error: e.message }));
-                }
+                    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+                    if (await checkDone(collection) === 0) serverResolve();
+                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
             });
             return;
         }
 
-        res.writeHead(404);
-        res.end('Not found');
+        res.writeHead(404); res.end('Not found');
     });
 
     server.listen(CONFIG.port, '0.0.0.0', async () => {
         log('info', '===============================================================');
         log('info', `  Server: http://0.0.0.0:${CONFIG.port}`);
-
         const ngrok = await startNgrok(CONFIG.port);
         if (ngrok) {
-            log('info', '===============================================================');
-            log('info', `  OPEN ON YOUR BROWSER: ${ngrok.url}`);
-            log('info', '===============================================================');
+            log('info', `  OPEN BROWSER: ${ngrok.url}`);
             ngrokProc = ngrok.process;
         }
-
-        const initial = await checkDone(collection);
-        if (initial === 0) {
+        if (await checkDone(collection) === 0) {
             log('info', 'Nothing to review. Exiting.');
             serverResolve();
         }
     });
 
     await donePromise;
-
     log('info', 'Shutting down...');
-    server.close(() => {});
+    server.close();
     if (ngrokProc) ngrokProc.kill();
     await client.close();
     log('info', 'Done.');
 }
 
-main().catch(err => {
-    log('error', 'Fatal:', err.message);
-    process.exit(1);
-});
+main().catch(err => { log('error', 'Fatal:', err.message); process.exit(1); });
