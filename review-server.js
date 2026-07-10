@@ -714,13 +714,9 @@ function renderItem() {
       totalSources += sources.length;
       
       if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px; font-size:12px; color:var(--text-2);">No purchase sources found by GLENS</div>';
+        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
       } else {
-        const seenUrls = new Set();
         sources.forEach((s, sIdx) => {
-          if (s.url && seenUrls.has(s.url)) return; // dedupe by URL
-          if (s.url) seenUrls.add(s.url);
-          
           if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
           
           let statusColor = "var(--text)";
@@ -883,7 +879,8 @@ function openSource(pIdx, sIdx) {
             \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
           </div>
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
           </div>
         </div>
 
@@ -1056,9 +1053,12 @@ async function extractImages(mode) {
   if (!url) return toast("NO URL PROVIDED");
   
   const carousel = document.getElementById("eImgGrid");
-  const btn = document.getElementById("btnExtractLazy");
+  const btnLazy = document.getElementById("btnExtractLazy");
+  const btnFull = document.getElementById("btnExtractFull");
+
   if (carousel) carousel.classList.add("extracting");
-  if (btn) { btn.disabled = true; btn.innerText = "EXTRACTING..."; }
+  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "EXTRACTING..."; }
+  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "EXTRACTING..."; }
   
   try {
     const r = await fetch("/api/extract", {
@@ -1093,23 +1093,18 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btn) { btn.disabled = false; btn.innerText = "EXTRACT IMAGES"; }
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
   }
 }
 
 /* --- Variants Table Logic --- */
 function renderVariantsTable() {
   const container = document.getElementById("variantsContainer");
-  if (!container) return;
-
-  const variants = Array.isArray(state.currentVariants) ? state.currentVariants : [];
-  if (!variants.length) { 
-    container.innerHTML = ''; 
-    return; 
-  }
+  if (!state.currentVariants.length) { container.innerHTML = ''; return; }
   
   let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>STOCK</th><th style="width:48px;"></th></tr></thead><tbody>';
-  variants.forEach((v, i) => {
+  state.currentVariants.forEach((v, i) => {
     let rawAvail = String(v.availability || "").toLowerCase().replace(/[^a-z]/g, '');
     let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
     
@@ -1156,9 +1151,7 @@ function delVariantRow(idx) {
 /* --- Size Guide Table Logic --- */
 function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
-  if (!container) return;
-
-  const sg = state.currentSizeGuide || { headers: [], rows: [] };
+  const sg = state.currentSizeGuide;
   if (!sg.headers.length) { container.innerHTML = ''; return; }
   
   let html = '<table class="simple-table"><thead><tr>';
