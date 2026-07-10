@@ -64,6 +64,19 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends ffmpeg libnss3 libxss1 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon-x11-0 libxcomposite1 libxrandr2 libpango-1.0-0 libcairo2 libxdamage1
 
+    - name: Install CloakBrowser anti-detection fonts
+      run: |
+        sudo apt-get update -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-color-emoji \
+            fonts-freefont-ttf \
+            fonts-unifont \
+            fonts-ipafont-gothic \
+            fonts-wqy-zenhei \
+            fonts-tlwg-loma-otf \
+            fontconfig
+        fc-cache -f -v
+
     - name: Install npm dependencies
       run: npm install cloakbrowser puppeteer puppeteer-core mmdb-lib formdata-node sharp mongodb jsonrepair
 
