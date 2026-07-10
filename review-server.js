@@ -347,20 +347,6 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
 .lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
-
-/* Mobile-friendly tables (primary device) */
-@media (max-width: 768px) {
-  .simple-table {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    font-size: 12px;
-  }
-  .simple-table th, .simple-table td {
-    white-space: nowrap;
-    min-width: 90px;
-  }
-}
 </style>
 </head>
 <body>
@@ -827,6 +813,11 @@ function getAllImages(source) {
 }
 
 function openSource(pIdx, sIdx) {
+  if (!state.current?.response?.products?.[pIdx]?.sources?.[sIdx]) {
+    toast("Cannot open source: data missing");
+    return;
+  }
+  
   state.editingPIdx = pIdx;
   state.editingSIdx = sIdx;
   
@@ -930,24 +921,20 @@ function openSource(pIdx, sIdx) {
       </div>
     </div>
     
-    <details class="card" open>
-      <summary>VARIANTS (SIZE & STOCK)</summary>
-      <div class="details-content">
-        <div id="variantsContainer"></div>
-        <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; min-height:48px; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
-      </div>
-    </details>
+    <div class="card">
+      <h3>VARIANTS (SIZE & STOCK)</h3>
+      <div id="variantsContainer"></div>
+      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
+    </div>
 
-    <details class="card">
-      <summary>SIZE GUIDE</summary>
-      <div class="details-content">
-        <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
-        <div style="display:flex; gap:8px; margin-top:8px;">
-          <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD ROW</button>
-          <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD COL</button>
-        </div>
+    <div class="card">
+      <h3>SIZE GUIDE</h3>
+      <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border);">+ ADD ROW</button>
+        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border);">+ ADD COL</button>
       </div>
-    </details>
+    </div>
 
     <details class="card">
       <summary>DETAILS & POLICIES</summary>
@@ -962,7 +949,7 @@ function openSource(pIdx, sIdx) {
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
       <div style="display:flex; gap:12px; margin-bottom:12px;">
-        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; min-height:48px; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
+        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
       </div>
       <div style="display:flex; gap:12px">
         <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
@@ -1321,7 +1308,7 @@ async function deleteSource() {
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
   
-  // Support auto-scroll back to the source on both Save and Cancel
+  // Make auto-scroll work when user clicks Cancel too
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
     state.justEditedSId = state.editingPIdx + "-" + state.editingSIdx;
   }
@@ -1840,7 +1827,7 @@ async function main() {
                         }}
                     );
 
-                    // Only propagate normal updates. Rejections stay local to this image/frame.
+                    // Only propagate updates. Rejections are local to this specific image/frame.
                     if (source.url && source.reviewStatus !== 'rejected') {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
