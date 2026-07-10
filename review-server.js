@@ -7,8 +7,8 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.1.0 - Price Normalization, Vendor & Compare-At Price 
- * write-backs, robust schema alignment, and zero-data-loss updating.
+ * FINAL PRODUCTION v2.2.0 - Mobile Table overflow, Collapsible sections,
+ * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
  */
 
 import http from 'http';
@@ -56,7 +56,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v2.1</title>
+<title>DropShip Review • v2.2</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -149,12 +149,13 @@ select {
 }
 
 /* Tables */
-.simple-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-.simple-table th, .simple-table td { border: 1px solid var(--border); padding: 0; }
-.simple-table th { background: var(--surface-2); padding: 8px; font-size: 11px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
-.simple-table input, .simple-table select { border: none; min-height: 36px; padding: 8px; font-size: 13px; }
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 8px; }
+.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 14px; }
+.simple-table th { background: var(--surface-2); padding: 12px 8px; font-size: 12px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
+.simple-table td { border: 1px solid var(--border); padding: 0; }
+.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; font-size: 14px; width: 100%; }
 .simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text); }
-.table-btn { width: 36px; min-height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; }
+.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; font-size: 18px; }
 
 img { max-width: 100%; display: block; }
 a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
@@ -189,8 +190,7 @@ a:active { opacity: 0.7; }
   letter-spacing: 0.03em;
 }
 .badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.badge.success { color: var(--success); background: var(--bg); border-color: var(--success); }
-.badge.failed { color: var(--danger); background: var(--bg); border-color: var(--danger); }
+.badge.src-status { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 .badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
 
 .theme-toggle {
@@ -591,55 +591,24 @@ function clearFormPersist(key) {
 }
 
 /* --- Core Loading & Display --- */
-async function loadQueue(isRetry = false) {
-  const loadingEl = document.getElementById("loading");
-  
+async function loadQueue() {
   try {
-    const r = await fetch("/api/queue", { 
-      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined 
-    });
-    
-    if (!r.ok) {
-      throw new Error(`Server error ${r.status}`);
-    }
-    
+    const r = await fetch("/api/queue");
     const resText = await r.text();
     let data;
-    try { 
-      data = JSON.parse(resText); 
-    } catch(e) { 
-      throw new Error("Invalid response from server"); 
-    }
+    try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
     
     state.posts = data.posts || {};
     state.queue = data.items || [];
-    
-    if (loadingEl) loadingEl.classList.remove("active");
-    showScreen("queue");
-    initLazyImages();
-    renderQueue();
-    
   } catch(e) {
-    console.error("Queue load failed:", e);
-    
-    if (loadingEl) {
-      loadingEl.innerHTML = `
-        <div class="loading" style="padding: 40px 20px; text-align: center;">
-          <p style="color: var(--danger); font-weight: 700; margin-bottom: 12px;">
-            FAILED TO LOAD QUEUE
-          </p>
-          <p style="color: var(--text-2); font-size: 13px; margin-bottom: 24px; line-height: 1.4;">
-            ${e.message || "Unknown error"}<br>
-            <small>Check your MongoDB connection or try again</small>
-          </p>
-          <button onclick="loadQueue(true)" 
-                  style="min-height: 52px; padding: 0 32px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
-            RETRY
-          </button>
-        </div>
-      `;
-    }
+    state.posts = {};
+    state.queue = [];
+    toast("ERR: " + e.message);
   }
+  document.getElementById("loading").classList.remove("active");
+  showScreen("queue");
+  initLazyImages();
+  renderQueue();
 }
 
 function renderQueue() {
@@ -754,17 +723,18 @@ function renderItem() {
           let rejectedClass = "";
           let statusBadge = "";
 
+          // All indicator badges on the listing page remain a uniform grey color for a clean UI
           if (s.reviewStatus === "rejected") {
             statusColor = "var(--text-2)";
             rejectedClass = "rejected";
-            statusBadge = '<span class="badge" style="background:transparent; color:var(--text-2); border-color:var(--text-2);">REJECTED</span>';
+            statusBadge = '<span class="badge src-status">REJECTED</span>';
           } else if (s.reviewStatus === "completed") {
-            statusBadge = '<span class="badge success" style="color:var(--success); border-color:var(--success);">REVIEWED</span>';
+            statusBadge = '<span class="badge src-status">REVIEWED</span>';
           } else {
             const extStatus = s.textExtraction?.status;
-            if (extStatus === 'completed') statusBadge = '<span class="badge success">EXTRACTED</span>';
-            else if (extStatus === 'failed') statusBadge = '<span class="badge failed">FAILED</span>';
-            else statusBadge = '<span class="badge pending">PENDING EXTRACT</span>';
+            if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
+            else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
+            else statusBadge = '<span class="badge src-status">PENDING EXTRACT</span>';
           }
 
           const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
@@ -844,166 +814,174 @@ function getAllImages(source) {
 }
 
 function openSource(pIdx, sIdx) {
-  state.editingPIdx = pIdx;
-  state.editingSIdx = sIdx;
-  
-  const product = state.current.response.products[pIdx];
-  const s = product.sources[sIdx];
-  
-  document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
-
-  const allImages = getAllImages(s);
-  state.currentSelected = [...(s.selectedImages || [])];
-  
-  const sortedUrls = [...state.currentSelected];
-  allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
-  state.currentGridUrls = sortedUrls;
-
-  state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
-  state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
-    ? JSON.parse(JSON.stringify(s.size_guide)) 
-    : { headers: ["US", "EU", "UK"], rows: [] };
-
-  const extStatus = s.textExtraction?.status;
-  let statusBadge = "";
-  if (extStatus === 'completed') statusBadge = '<span class="badge success" style="margin-bottom:12px;">✅ EXTRACTED</span>';
-  else if (extStatus === 'failed') statusBadge = '<span class="badge failed" style="margin-bottom:12px;">⚠️ EXTRACTION FAILED (MANUAL ENTRY)</span>';
-  else statusBadge = '<span class="badge pending" style="margin-bottom:12px;">⏳ PENDING PIPELINE</span>';
-
-  const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
-  const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
-
-  let html = \`
-    <div style="padding: 16px 16px 0;">\${statusBadge}</div>
+  try {
+    state.editingPIdx = pIdx;
+    state.editingSIdx = sIdx;
     
-    <div class="card" style="padding-bottom: 0;">
-      <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-        IMAGES 
-        <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
-          <span id="selCount">\${state.currentSelected.length}</span> SELECTED
-        </span>
-      </h3>
-      <div class="carousel" id="eImgGrid"></div>
-      <div style="display:flex; gap:8px; margin-bottom:16px;">
-        <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
-        <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
-      </div>
-    </div>
+    const product = state.current.response.products[pIdx];
+    const s = product.sources[sIdx];
+    if (!s) return toast('Source data missing');
     
-    <div class="card">
-      <h3>BASIC INFO</h3>
-      <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
-      
-      <div class="field-row">
-        <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
-        <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
-      </div>
-      
-      <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
+    document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
 
-      <div class="field" style="margin-bottom:24px;">
-        <label>Supplier URL</label>
-        <div style="display:flex; gap:8px;">
-          <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-          \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
-        </div>
-        <div style="display:flex; gap:8px; margin-top:8px;">
-          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
+    const allImages = getAllImages(s);
+    state.currentSelected = [...(s.selectedImages || [])];
+    
+    const sortedUrls = [...state.currentSelected];
+    allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
+    state.currentGridUrls = sortedUrls;
+
+    state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
+    state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
+      ? JSON.parse(JSON.stringify(s.size_guide)) 
+      : { headers: ["US", "EU", "UK"], rows: [] };
+
+    const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
+    const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
+    
+    // Robust availability parser
+    let rawAvail = String(s.availability || "").toLowerCase().replace(/[^a-z]/g, '');
+    let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
+    
+    // Robust features string parser to prevent crash
+    const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
+
+    let html = \`
+      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
+        <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
+          IMAGES 
+          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+            <span id="selCount">\${state.currentSelected.length}</span> SELECTED
+          </span>
+        </h3>
+        <div class="carousel" id="eImgGrid"></div>
+        <div style="display:flex; gap:8px; margin-bottom:16px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
         </div>
       </div>
+      
+      <div class="card">
+        <h3>BASIC INFO</h3>
+        <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
+        
+        <div class="field-row">
+          <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
+          <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
+        </div>
+        
+        <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
-      <div class="field-row">
-        <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
-        <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
-        <div class="field" style="width:100px">
-          <label>Currency</label>
-          <select id="eCurrency">
-            <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
-            <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
-            <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
-            <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
-            <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
+        <div class="field" style="margin-bottom:24px;">
+          <label>Supplier URL</label>
+          <div style="display:flex; gap:8px;">
+            <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+          </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
+          <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
+          <div class="field" style="width:100px">
+            <label>Currency</label>
+            <select id="eCurrency">
+              <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
+              <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
+              <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
+              <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
+              <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Availability</label>
+          <select id="eAvail">
+            <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
+            <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
+            <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
         </div>
       </div>
-      <div class="field">
-        <label>Availability</label>
-        <select id="eAvail">
-          <option \${s.availability === "InStock" ? "selected" : ""}>InStock</option>
-          <option \${s.availability === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
-          <option \${s.availability === "PreOrder" ? "selected" : ""}>PreOrder</option>
-        </select>
+      
+      <div class="card" style="background:var(--surface-2);">
+        <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
+        <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+        <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+          <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+          <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+          <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+          <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+        </div>
       </div>
-    </div>
+      
+      <details class="card">
+        <summary>VARIANTS (SIZE & STOCK)</summary>
+        <div class="details-content">
+          <div id="variantsContainer" class="simple-table-wrapper"></div>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
+        </div>
+      </details>
+
+      <details class="card">
+        <summary>SIZE GUIDE</summary>
+        <div class="details-content">
+          <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="card">
+        <summary>DETAILS & POLICIES</summary>
+        <div class="details-content">
+          <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
+          <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
+          <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
+          <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
+        </div>
+      </details>
+
+      <div class="card" style="border-bottom:none;">
+        <h3>ACTIONS</h3>
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
+        </div>
+        <div style="display:flex; gap:12px">
+          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
+          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
+        </div>
+      </div>
+    \`;
     
-    <div class="card" style="background:var(--surface-2);">
-      <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
-      <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-      <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-        <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-        <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-        <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-        <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
-      </div>
-    </div>
+    document.getElementById("eBody").innerHTML = html;
     
-    <div class="card">
-      <h3>VARIANTS (SIZE & STOCK)</h3>
-      <div id="variantsContainer"></div>
-      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
-    </div>
+    renderImgGrid(state.currentGridUrls);
+    updateSelCount();
+    renderVariantsTable();
+    renderSizeGuideTable();
+    
+    state.formPersistKey = getFormPersistKey();
+    restoreFormFromLocalStorage();
 
-    <div class="card">
-      <h3>SIZE GUIDE</h3>
-      <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border);">+ ADD ROW</button>
-        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border);">+ ADD COL</button>
-      </div>
-    </div>
+    const eBody = document.getElementById("eBody");
+    if (eBody) {
+      eBody.removeEventListener('input', saveFormToLocalStorage);
+      eBody.removeEventListener('change', saveFormToLocalStorage);
+      eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
+      eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
+    }
 
-    <details class="card">
-      <summary>DETAILS & POLICIES</summary>
-      <div class="details-content">
-        <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
-        <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml((s.features || []).join("\\n"))}</textarea></div>
-        <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
-        <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
-      </div>
-    </details>
-
-    <div class="card" style="border-bottom:none;">
-      <h3>ACTIONS</h3>
-      <div style="display:flex; gap:12px; margin-bottom:12px;">
-        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
-      </div>
-      <div style="display:flex; gap:12px">
-        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT (KEEP)</button>
-        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE & APPROVE</button>
-      </div>
-    </div>
-  \`;
-  
-  document.getElementById("eBody").innerHTML = html;
-  
-  renderImgGrid(state.currentGridUrls);
-  updateSelCount();
-  renderVariantsTable();
-  renderSizeGuideTable();
-  
-  state.formPersistKey = getFormPersistKey();
-  restoreFormFromLocalStorage();
-
-  const eBody = document.getElementById("eBody");
-  if (eBody) {
-    eBody.removeEventListener('input', saveFormToLocalStorage);
-    eBody.removeEventListener('change', saveFormToLocalStorage);
-    eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
-    eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
+    showScreen("editor");
+    document.getElementById("eBody").scrollTop = 0;
+  } catch (err) {
+    toast("ERROR OPENING SOURCE: " + err.message);
   }
-
-  showScreen("editor");
-  document.getElementById("eBody").scrollTop = 0;
 }
 
 function updateSelCount() {
@@ -1045,24 +1023,28 @@ function renderImgGrid(urls) {
 }
 
 async function addImage() {
-  let url = prompt("PASTE IMAGE URL:");
-  if (!url) return;
-  url = url.trim();
-  if (!/^https?:\\/\\//i.test(url)) return toast("INVALID URL");
-  
-  const product = state.current.response.products[state.editingPIdx];
-  const s = product.sources[state.editingSIdx];
-  
-  s.customImages = s.customImages || [];
-  if (!s.customImages.includes(url)) s.customImages.push(url);
-  
-  if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
-  if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
-  
-  renderImgGrid(state.currentGridUrls);
-  updateSelCount();
-  saveFormToLocalStorage();
-  toast("IMAGE ADDED + SELECTED");
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) { toast("CLIPBOARD EMPTY"); return; }
+    let url = text.trim();
+    if (!/^https?:\\/\\//i.test(url)) { toast("NO VALID URL IN CLIPBOARD"); return; }
+    
+    const product = state.current.response.products[state.editingPIdx];
+    const s = product.sources[state.editingSIdx];
+    
+    s.customImages = s.customImages || [];
+    if (!s.customImages.includes(url)) s.customImages.push(url);
+    
+    if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
+    if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
+    
+    renderImgGrid(state.currentGridUrls);
+    updateSelCount();
+    saveFormToLocalStorage();
+    toast("IMAGE PASTED FROM CLIPBOARD");
+  } catch (err) {
+    toast("CLIPBOARD PERMISSION DENIED");
+  }
 }
 
 async function extractImages(mode) {
@@ -1116,16 +1098,19 @@ function renderVariantsTable() {
   const container = document.getElementById("variantsContainer");
   if (!state.currentVariants.length) { container.innerHTML = ''; return; }
   
-  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>STOCK</th><th style="width:36px;"></th></tr></thead><tbody>';
+  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>STOCK</th><th style="width:48px;"></th></tr></thead><tbody>';
   state.currentVariants.forEach((v, i) => {
+    let rawAvail = String(v.availability || "").toLowerCase().replace(/[^a-z]/g, '');
+    let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
+    
     html += \`
       <tr class="v-row" data-idx="\${i}">
         <td><input type="text" class="v-size" value="\${escapeHtml(v.size || '')}"></td>
         <td>
           <select class="v-avail">
-            <option \${v.availability === "InStock" ? "selected" : ""}>InStock</option>
-            <option \${v.availability === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
-            <option \${v.availability === "PreOrder" ? "selected" : ""}>PreOrder</option>
+            <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
+            <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
+            <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
         </td>
         <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
@@ -1169,11 +1154,11 @@ function renderSizeGuideTable() {
     html += \`<th>
       <div style="display:flex; align-items:center;">
         <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
-        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:14px; min-height:0;">&times;</button>
+        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:18px; min-height:0;">&times;</button>
       </div>
     </th>\`;
   });
-  html += '<th style="width:36px;"></th></tr></thead><tbody>';
+  html += '<th style="width:48px;"></th></tr></thead><tbody>';
   
   sg.rows.forEach((row, rIdx) => {
     html += \`<tr class="sg-row" data-ridx="\${rIdx}">\`;
@@ -1328,7 +1313,17 @@ async function deleteSource() {
 
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
-  showScreen("review"); 
+  showScreen("review");
+  
+  // Re-scroll back to source card context instantly upon pressing cancel
+  if (state.editingPIdx !== null && state.editingSIdx !== null) {
+    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
+    if (targetCard) {
+      requestAnimationFrame(() => {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }
 }
 
 async function commitItem() {
@@ -1701,7 +1696,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v2.1.0 (New Schema)');
+    log('info', '  REVIEW SERVER — Production Human Review v2.2.0 (New Schema)');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
@@ -1842,7 +1837,8 @@ async function main() {
                         }}
                     );
 
-                    if (source.url) {
+                    // Rejections strictly scoped to this item only. ONLY propagate successful approvals.
+                    if (source.url && source.reviewStatus !== 'rejected') {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
                     }
