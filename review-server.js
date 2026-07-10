@@ -7,8 +7,8 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.2.0 - Mobile Table overflow, Collapsible sections,
- * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
+ * FINAL PRODUCTION v2.2.1 - Table horizontal scrolling, Clipboard URL pasting,
+ * Auto-scroll on Cancel, Scoped rejections, In-memory URL deduplication & DB Sync.
  */
 
 import http from 'http';
@@ -708,51 +708,48 @@ function renderItem() {
     listHtml = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
   } else {
     prods.forEach((p, pIdx) => {
-      listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
-      
       const sources = p.sources || [];
+      if (sources.length === 0) return; // Skip products with 0 sources to keep the page completely clean
+
+      listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
       totalSources += sources.length;
       
-      if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
-      } else {
-        sources.forEach((s, sIdx) => {
-          if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
-          
-          let statusColor = "var(--text)";
-          let rejectedClass = "";
-          let statusBadge = "";
+      sources.forEach((s, sIdx) => {
+        if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
+        
+        let statusColor = "var(--text)";
+        let rejectedClass = "";
+        let statusBadge = "";
 
-          // All indicator badges on the listing page remain a uniform grey color for a clean UI
-          if (s.reviewStatus === "rejected") {
-            statusColor = "var(--text-2)";
-            rejectedClass = "rejected";
-            statusBadge = '<span class="badge src-status">REJECTED</span>';
-          } else if (s.reviewStatus === "completed") {
-            statusBadge = '<span class="badge src-status">REVIEWED</span>';
-          } else {
-            const extStatus = s.textExtraction?.status;
-            if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
-            else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
-            else statusBadge = '<span class="badge src-status">PENDING EXTRACT</span>';
-          }
+        // All status badges on listing page remain uniform grey color to eliminate visual clutter
+        if (s.reviewStatus === "rejected") {
+          statusColor = "var(--text-2)";
+          rejectedClass = "rejected";
+          statusBadge = '<span class="badge src-status">REJECTED</span>';
+        } else if (s.reviewStatus === "completed") {
+          statusBadge = '<span class="badge src-status">REVIEWED</span>';
+        } else {
+          const extStatus = s.textExtraction?.status;
+          if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
+          else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
+          else statusBadge = '<span class="badge src-status">PENDING</span>';
+        }
 
-          const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
-          const nameLabel = s.name || p.title || "UNTITLED";
-          const storeLabel = s.brand || s.vendor || s.store || "Unknown Store";
+        const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
+        const nameLabel = s.name || p.title || "UNTITLED";
+        const storeLabel = s.brand || s.vendor || s.store || "Unknown Store";
 
-          listHtml += \`
-            <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
-              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
-              <div class="p-info">
-                <div class="p-title">\${escapeHtml(nameLabel)}</div>
-                <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
-                <div class="p-status" style="color:\${statusColor}">\${statusBadge}</div>
-              </div>
+        listHtml += \`
+          <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\dots)">
+            <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+            <div class="p-info">
+              <div class="p-title">\${escapeHtml(nameLabel)}</div>
+              <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
+              <div class="p-status" style="color:\${statusColor}">\${statusBadge}</div>
             </div>
-          \`;
-        });
-      }
+          </div>
+        \`;
+      });
     });
   }
 
@@ -785,203 +782,184 @@ function renderItem() {
   }
 }
 
-function openVideo(url) {
-  const v = document.getElementById('vPlayer');
-  v.src = url;
-  document.getElementById('videoModal').classList.add('active');
-  v.play().catch(e => console.error(e));
-}
-function closeVideo() {
-  const v = document.getElementById('vPlayer');
-  v.pause();
-  v.src = '';
-  document.getElementById('videoModal').classList.remove('active');
-}
-
-function getAllImages(source) {
-  const allUrls = new Set();
-  if (state.current && state.current.url) allUrls.add(state.current.url);
-
-  (source.images || []).forEach(u => {
-    const url = getImageUrl(u);
-    if (url) allUrls.add(url);
-  });
-  
-  (source.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  (source.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  
-  return { urls: Array.from(allUrls) };
-}
-
+// Global openSource helper to wrap errors safely
 function openSource(pIdx, sIdx) {
   try {
-    state.editingPIdx = pIdx;
-    state.editingSIdx = sIdx;
-    
-    const product = state.current.response.products[pIdx];
-    const s = product.sources[sIdx];
-    if (!s) return toast('Source data missing');
-    
-    document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
+    openSourceUnsafe(pIdx, sIdx);
+  } catch (err) {
+    toast("ERROR OPENING SOURCE: " + err.message.toUpperCase());
+  }
+}
 
-    const allImages = getAllImages(s);
-    state.currentSelected = [...(s.selectedImages || [])];
-    
-    const sortedUrls = [...state.currentSelected];
-    allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
-    state.currentGridUrls = sortedUrls;
+function openSourceUnsafe(pIdx, sIdx) {
+  state.editingPIdx = pIdx;
+  state.editingSIdx = sIdx;
+  
+  const product = state.current.response.products[pIdx];
+  const s = product.sources[sIdx];
+  if (!s) return toast('Source data missing');
+  
+  document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
 
-    state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
-    state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
-      ? JSON.parse(JSON.stringify(s.size_guide)) 
-      : { headers: ["US", "EU", "UK"], rows: [] };
+  const allImages = getAllImages(s);
+  state.currentSelected = [...(s.selectedImages || [])];
+  
+  const sortedUrls = [...state.currentSelected];
+  allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
+  state.currentGridUrls = sortedUrls;
 
-    const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
-    const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
-    
-    // Robust availability parser
-    let rawAvail = String(s.availability || "").toLowerCase().replace(/[^a-z]/g, '');
-    let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
-    
-    // Robust features string parser to prevent crash
-    const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
+  // Extremely safe type checking on arrays to avoid .forEach of null issues
+  state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
+  
+  let rawSg = s.size_guide;
+  state.currentSizeGuide = {
+    headers: (rawSg && Array.isArray(rawSg.headers)) ? [...rawSg.headers] : ["US", "EU", "UK"],
+    rows: (rawSg && Array.isArray(rawSg.rows)) ? JSON.parse(JSON.stringify(rawSg.rows)) : []
+  };
 
-    let html = \`
-      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
-        <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-          IMAGES 
-          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
-            <span id="selCount">\${state.currentSelected.length}</span> SELECTED
-          </span>
-        </h3>
-        <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:8px; margin-bottom:16px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
-        </div>
+  const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
+  const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
+  
+  // Robust availability normalization matching out-of-stock variations
+  let rawAvail = String(s.availability || "").toLowerCase().replace(/[^a-z]/g, '');
+  let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
+  
+  // Safe parsing for string vs array features
+  const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
+
+  let html = \`
+    <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
+      <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
+        IMAGES 
+        <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+          <span id="selCount">\${state.currentSelected.length}</span> SELECTED
+        </span>
+      </h3>
+      <div class="carousel" id="eImgGrid"></div>
+      <div style="display:flex; gap:8px; margin-bottom:16px;">
+        <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
+        <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>BASIC INFO</h3>
+      <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
+      
+      <div class="field-row">
+        <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
+        <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
       </div>
       
-      <div class="card">
-        <h3>BASIC INFO</h3>
-        <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
-        
-        <div class="field-row">
-          <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
-          <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
-        </div>
-        
-        <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
+      <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
-        <div class="field" style="margin-bottom:24px;">
-          <label>Supplier URL</label>
-          <div style="display:flex; gap:8px;">
-            <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
-          </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
-          </div>
+      <div class="field" style="margin-bottom:24px;">
+        <label>Supplier URL</label>
+        <div style="display:flex; gap:8px;">
+          <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
+          \--s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
         </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT IMAGES</button>
+        </div>
+      </div>
 
-        <div class="field-row">
-          <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
-          <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
-          <div class="field" style="width:100px">
-            <label>Currency</label>
-            <select id="eCurrency">
-              <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
-              <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
-              <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
-              <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
-              <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
-          <label>Availability</label>
-          <select id="eAvail">
-            <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
-            <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
-            <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
+      <div class="field-row">
+        <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
+        <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
+        <div class="field" style="width:100px">
+          <label>Currency</label>
+          <select id="eCurrency">
+            <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
+            <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
+            <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
+            <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
+            <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
           </select>
         </div>
       </div>
-      
-      <div class="card" style="background:var(--surface-2);">
-        <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
-        <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-        <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-          <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-          <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-          <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-          <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+      <div class="field">
+        <label>Availability</label>
+        <select id="eAvail">
+          <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
+          <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
+          <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="card" style="background:var(--surface-2);">
+      <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
+      <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+      <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+        <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+        <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+        <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+        <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+      </div>
+    </div>
+    
+    <details class="card">
+      <summary>VARIANTS (SIZE & STOCK)</summary>
+      <div class="details-content">
+        <div id="variantsContainer" class="simple-table-wrapper"></div>
+        <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary>SIZE GUIDE</summary>
+      <div class="details-content">
+        <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
+          <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
         </div>
       </div>
-      
-      <details class="card">
-        <summary>VARIANTS (SIZE & STOCK)</summary>
-        <div class="details-content">
-          <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
-        </div>
-      </details>
+    </details>
 
-      <details class="card">
-        <summary>SIZE GUIDE</summary>
-        <div class="details-content">
-          <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
-          </div>
-        </div>
-      </details>
-
-      <details class="card">
-        <summary>DETAILS & POLICIES</summary>
-        <div class="details-content">
-          <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
-          <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
-          <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
-          <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
-        </div>
-      </details>
-
-      <div class="card" style="border-bottom:none;">
-        <h3>ACTIONS</h3>
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
-        </div>
-        <div style="display:flex; gap:12px">
-          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
-          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
-        </div>
+    <details class="card">
+      <summary>DETAILS & POLICIES</summary>
+      <div class="details-content">
+        <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
+        <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
+        <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
+        <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
       </div>
-    \`;
-    
-    document.getElementById("eBody").innerHTML = html;
-    
-    renderImgGrid(state.currentGridUrls);
-    updateSelCount();
-    renderVariantsTable();
-    renderSizeGuideTable();
-    
-    state.formPersistKey = getFormPersistKey();
-    restoreFormFromLocalStorage();
+    </details>
 
-    const eBody = document.getElementById("eBody");
-    if (eBody) {
-      eBody.removeEventListener('input', saveFormToLocalStorage);
-      eBody.removeEventListener('change', saveFormToLocalStorage);
-      eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
-      eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
-    }
+    <div class="card" style="border-bottom:none;">
+      <h3>ACTIONS</h3>
+      <div style="display:flex; gap:12px; margin-bottom:12px;">
+        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
+      </div>
+      <div style="display:flex; gap:12px">
+        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
+        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
+      </div>
+    </div>
+  \`;
+  
+  document.getElementById("eBody").innerHTML = html;
+  
+  renderImgGrid(state.currentGridUrls);
+  updateSelCount();
+  renderVariantsTable();
+  renderSizeGuideTable();
+  
+  state.formPersistKey = getFormPersistKey();
+  restoreFormFromLocalStorage();
 
-    showScreen("editor");
-    document.getElementById("eBody").scrollTop = 0;
-  } catch (err) {
-    toast("ERROR OPENING SOURCE: " + err.message);
+  const eBody = document.getElementById("eBody");
+  if (eBody) {
+    eBody.removeEventListener('input', saveFormToLocalStorage);
+    eBody.removeEventListener('change', saveFormToLocalStorage);
+    eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
+    eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
   }
+
+  showScreen("editor");
+  document.getElementById("eBody").scrollTop = 0;
 }
 
 function updateSelCount() {
@@ -1113,7 +1091,7 @@ function renderVariantsTable() {
             <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
         </td>
-        <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
+        <td><button class="table-btn" onclick="delVariantRow(\dots)">&times;</button></td>
       </tr>
     \`;
   });
@@ -1147,7 +1125,7 @@ function delVariantRow(idx) {
 function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
   const sg = state.currentSizeGuide;
-  if (!sg.headers.length) { container.innerHTML = ''; return; }
+  if (!sg || !Array.isArray(sg.headers) || !sg.headers.length) { container.innerHTML = ''; return; }
   
   let html = '<table class="simple-table"><thead><tr>';
   sg.headers.forEach((h, cIdx) => {
@@ -1160,10 +1138,11 @@ function renderSizeGuideTable() {
   });
   html += '<th style="width:48px;"></th></tr></thead><tbody>';
   
-  sg.rows.forEach((row, rIdx) => {
+  const rows = Array.isArray(sg.rows) ? sg.rows : [];
+  rows.forEach((row, rIdx) => {
     html += \`<tr class="sg-row" data-ridx="\${rIdx}">\`;
     sg.headers.forEach((_, cIdx) => {
-      const val = row[cIdx] || "";
+      const val = (Array.isArray(row) && row[cIdx] != null) ? row[cIdx] : "";
       html += \`<td><input type="text" class="sg-cell" data-ridx="\${rIdx}" data-cidx="\${cIdx}" value="\${escapeHtml(val)}"></td>\`;
     });
     html += \`<td><button class="table-btn" onclick="delSizeGuideRow(\${rIdx})">&times;</button></td></tr>\`;
@@ -1174,12 +1153,16 @@ function renderSizeGuideTable() {
 
 function syncSizeGuideFromDOM() {
   const sg = state.currentSizeGuide;
+  if (!sg || !Array.isArray(sg.headers)) return;
+  
   document.querySelectorAll(".sg-header").forEach(inp => {
     sg.headers[inp.dataset.cidx] = inp.value;
   });
+  
+  if (!Array.isArray(sg.rows)) sg.rows = [];
   document.querySelectorAll(".sg-cell").forEach(inp => {
-    const r = inp.dataset.ridx;
-    const c = inp.dataset.cidx;
+    const r = parseInt(inp.dataset.ridx, 10);
+    const c = parseInt(inp.dataset.cidx, 10);
     if (!sg.rows[r]) sg.rows[r] = [];
     sg.rows[r][c] = inp.value;
   });
@@ -1196,7 +1179,9 @@ function addSizeGuideRow() {
 function addSizeGuideCol() {
   syncSizeGuideFromDOM();
   state.currentSizeGuide.headers.push("NEW");
-  state.currentSizeGuide.rows.forEach(r => r.push(""));
+  if (Array.isArray(state.currentSizeGuide.rows)) {
+    state.currentSizeGuide.rows.forEach(r => { if (Array.isArray(r)) r.push(""); });
+  }
   renderSizeGuideTable();
   saveFormToLocalStorage();
 }
@@ -1211,7 +1196,9 @@ function delSizeGuideRow(rIdx) {
 function delSizeGuideCol(cIdx) {
   syncSizeGuideFromDOM();
   state.currentSizeGuide.headers.splice(cIdx, 1);
-  state.currentSizeGuide.rows.forEach(r => r.splice(cIdx, 1));
+  if (Array.isArray(state.currentSizeGuide.rows)) {
+    state.currentSizeGuide.rows.forEach(r => { if (Array.isArray(r)) r.splice(cIdx, 1); });
+  }
   renderSizeGuideTable();
   saveFormToLocalStorage();
 }
@@ -1317,7 +1304,7 @@ function closeEditor() {
   
   // Re-scroll back to source card context instantly upon pressing cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
+    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\\${state.editingSIdx}"]\`);
     if (targetCard) {
       requestAnimationFrame(() => {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1386,15 +1373,24 @@ initKeyboard();
 function normalizeResponse(item) {
     let resp = item.response;
     let rawText = null;
+    let modified = false;
     
     if (typeof resp === 'string') {
-        try { resp = JSON.parse(resp); } catch { rawText = resp; resp = { products: [] }; }
+        try { resp = JSON.parse(resp); modified = true; } catch { rawText = resp; resp = { products: [] }; }
     }
     if (!resp || typeof resp !== 'object') resp = { products: [] };
     if (!Array.isArray(resp.products)) resp.products = [];
 
     resp.products.forEach(p => {
-        if (!Array.isArray(p.sources)) p.sources = [];
+        if (!Array.isArray(p.sources)) {
+            p.sources = [];
+            modified = true;
+        }
+        
+        // Strict in-memory URL-based deduplicator protecting sibling indices in DB
+        const seenUrls = new Set();
+        const uniqueSources = [];
+        
         p.sources.forEach(s => {
             s.reviewStatus = s.reviewStatus || 'pending';
             s.selectedImages = s.selectedImages || [];
@@ -1409,16 +1405,48 @@ function normalizeResponse(item) {
                     original: s.compare_at_price || null,
                     currency: s.currency || 'USD'
                 };
+                modified = true;
             } else if (!s.price || typeof s.price !== 'object') {
                 s.price = { current: '', original: s.compare_at_price || null, currency: s.currency || 'USD' };
+                modified = true;
             }
             if (s.price.original != null && s.compare_at_price == null) {
                 s.compare_at_price = s.price.original;
+                modified = true;
+            }
+
+            if (!s.url) {
+                uniqueSources.push(s);
+                return;
+            }
+
+            let normUrl = s.url.trim().toLowerCase().replace(/\/$/, '');
+            try {
+                const u = new URL(normUrl);
+                u.searchParams.delete('utm_source');
+                u.searchParams.delete('utm_medium');
+                u.searchParams.delete('utm_campaign');
+                u.searchParams.delete('fbclid');
+                u.searchParams.delete('gclid');
+                normUrl = u.toString().replace(/\/$/, '');
+            } catch(e) {}
+
+            if (!seenUrls.has(normUrl)) {
+                seenUrls.add(normUrl);
+                uniqueSources.push(s);
+            } else {
+                modified = true; // Duplicates purged immediately on load
             }
         });
+
+        if (p.sources.length !== uniqueSources.length) {
+            p.sources = uniqueSources;
+            modified = true;
+        }
     });
 
     if (rawText) resp.rawText = rawText;
+    if (modified) resp._wasDbModified = true;
     return resp;
 }
 
@@ -1770,7 +1798,21 @@ async function main() {
                     item = file; item.type = 'image';
                 }
 
+                // Normalization ensures sources arrays and reviewStatus exist. Deduplicates duplicate entries synchronously.
                 const response = normalizeResponse(item);
+                
+                if (response._wasDbModified) {
+                    const updatePath = frameIdx !== null 
+                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response` 
+                        : `file_urls.${fileIdx}.response`;
+                    
+                    await collection.updateOne(
+                        { _id: objectId },
+                        { $set: { [updatePath]: response } }
+                    );
+                    delete response._wasDbModified;
+                }
+
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ _id: docId, postId: post.post_id, fileIdx, frameIdx, url: item.url, parentUrl: item.parentUrl || null, type: item.type, response }));
             } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
