@@ -591,24 +591,55 @@ function clearFormPersist(key) {
 }
 
 /* --- Core Loading & Display --- */
-async function loadQueue() {
+async function loadQueue(isRetry = false) {
+  const loadingEl = document.getElementById("loading");
+  
   try {
-    const r = await fetch("/api/queue");
+    const r = await fetch("/api/queue", { 
+      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined 
+    });
+    
+    if (!r.ok) {
+      throw new Error(`Server error ${r.status}`);
+    }
+    
     const resText = await r.text();
     let data;
-    try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
+    try { 
+      data = JSON.parse(resText); 
+    } catch(e) { 
+      throw new Error("Invalid response from server"); 
+    }
     
     state.posts = data.posts || {};
     state.queue = data.items || [];
+    
+    if (loadingEl) loadingEl.classList.remove("active");
+    showScreen("queue");
+    initLazyImages();
+    renderQueue();
+    
   } catch(e) {
-    state.posts = {};
-    state.queue = [];
-    toast("ERR: " + e.message);
+    console.error("Queue load failed:", e);
+    
+    if (loadingEl) {
+      loadingEl.innerHTML = `
+        <div class="loading" style="padding: 40px 20px; text-align: center;">
+          <p style="color: var(--danger); font-weight: 700; margin-bottom: 12px;">
+            FAILED TO LOAD QUEUE
+          </p>
+          <p style="color: var(--text-2); font-size: 13px; margin-bottom: 24px; line-height: 1.4;">
+            ${e.message || "Unknown error"}<br>
+            <small>Check your MongoDB connection or try again</small>
+          </p>
+          <button onclick="loadQueue(true)" 
+                  style="min-height: 52px; padding: 0 32px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+            RETRY
+          </button>
+        </div>
+      `;
+    }
   }
-  document.getElementById("loading").classList.remove("active");
-  showScreen("queue");
-  initLazyImages();
-  renderQueue();
 }
 
 function renderQueue() {
@@ -813,11 +844,6 @@ function getAllImages(source) {
 }
 
 function openSource(pIdx, sIdx) {
-  if (!state.current?.response?.products?.[pIdx]?.sources?.[sIdx]) {
-    toast("Cannot open source: data missing");
-    return;
-  }
-  
   state.editingPIdx = pIdx;
   state.editingSIdx = sIdx;
   
@@ -952,8 +978,8 @@ function openSource(pIdx, sIdx) {
         <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
       </div>
       <div style="display:flex; gap:12px">
-        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
-        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
+        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT (KEEP)</button>
+        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE & APPROVE</button>
       </div>
     </div>
   \`;
@@ -1019,29 +1045,24 @@ function renderImgGrid(urls) {
 }
 
 async function addImage() {
-  try {
-    const text = await navigator.clipboard.readText();
-    const url = text.trim();
-    if (!url || !/^https?:\/\//i.test(url)) {
-      return toast("NO VALID URL IN CLIPBOARD");
-    }
-    
-    const product = state.current.response.products[state.editingPIdx];
-    const s = product.sources[state.editingSIdx];
-    
-    s.customImages = s.customImages || [];
-    if (!s.customImages.includes(url)) s.customImages.push(url);
-    
-    if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
-    if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
-    
-    renderImgGrid(state.currentGridUrls);
-    updateSelCount();
-    saveFormToLocalStorage();
-    toast("IMAGE ADDED FROM CLIPBOARD");
-  } catch (e) {
-    toast("CLIPBOARD ACCESS FAILED");
-  }
+  let url = prompt("PASTE IMAGE URL:");
+  if (!url) return;
+  url = url.trim();
+  if (!/^https?:\\/\\//i.test(url)) return toast("INVALID URL");
+  
+  const product = state.current.response.products[state.editingPIdx];
+  const s = product.sources[state.editingSIdx];
+  
+  s.customImages = s.customImages || [];
+  if (!s.customImages.includes(url)) s.customImages.push(url);
+  
+  if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
+  if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
+  
+  renderImgGrid(state.currentGridUrls);
+  updateSelCount();
+  saveFormToLocalStorage();
+  toast("IMAGE ADDED + SELECTED");
 }
 
 async function extractImages(mode) {
@@ -1307,12 +1328,6 @@ async function deleteSource() {
 
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
-  
-  // Make auto-scroll work when user clicks Cancel too
-  if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    state.justEditedSId = state.editingPIdx + "-" + state.editingSIdx;
-  }
-  
   showScreen("review"); 
 }
 
@@ -1827,8 +1842,7 @@ async function main() {
                         }}
                     );
 
-                    // Only propagate updates. Rejections are local to this specific image/frame.
-                    if (source.url && source.reviewStatus !== 'rejected') {
+                    if (source.url) {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
                     }
