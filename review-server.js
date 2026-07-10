@@ -348,7 +348,7 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
 
-/* Mobile table improvements */
+/* Mobile-friendly tables (primary device) */
 @media (max-width: 768px) {
   .simple-table {
     display: block;
@@ -356,15 +356,9 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
     -webkit-overflow-scrolling: touch;
     font-size: 12px;
   }
-  .simple-table th,
-  .simple-table td {
+  .simple-table th, .simple-table td {
     white-space: nowrap;
-    min-width: 80px;
-  }
-  .simple-table input,
-  .simple-table select {
-    min-height: 40px;
-    font-size: 13px;
+    min-width: 90px;
   }
 }
 </style>
@@ -833,19 +827,13 @@ function getAllImages(source) {
 }
 
 function openSource(pIdx, sIdx) {
-  try {
-    if (!state.current?.response?.products?.[pIdx]?.sources?.[sIdx]) {
-      toast("ERROR: Source data missing or invalid");
-      return;
-    }
-    
-    state.editingPIdx = pIdx;
-    state.editingSIdx = sIdx;
-    
-    const product = state.current.response.products[pIdx];
-    const s = product.sources[sIdx];
-    
-    document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
+  state.editingPIdx = pIdx;
+  state.editingSIdx = sIdx;
+  
+  const product = state.current.response.products[pIdx];
+  const s = product.sources[sIdx];
+  
+  document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
 
   const allImages = getAllImages(s);
   state.currentSelected = [...(s.selectedImages || [])];
@@ -942,20 +930,24 @@ function openSource(pIdx, sIdx) {
       </div>
     </div>
     
-    <div class="card">
-      <h3>VARIANTS (SIZE & STOCK)</h3>
-      <div id="variantsContainer"></div>
-      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; min-height:48px; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
-    </div>
-
-    <div class="card">
-      <h3>SIZE GUIDE</h3>
-      <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD ROW</button>
-        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD COL</button>
+    <details class="card" open>
+      <summary>VARIANTS (SIZE & STOCK)</summary>
+      <div class="details-content">
+        <div id="variantsContainer"></div>
+        <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; min-height:48px; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
       </div>
-    </div>
+    </details>
+
+    <details class="card">
+      <summary>SIZE GUIDE</summary>
+      <div class="details-content">
+        <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD ROW</button>
+          <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD COL</button>
+        </div>
+      </div>
+    </details>
 
     <details class="card">
       <summary>DETAILS & POLICIES</summary>
@@ -973,8 +965,8 @@ function openSource(pIdx, sIdx) {
         <button class="btn-ghost" onclick="deleteSource()" style="flex:1; min-height:48px; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
       </div>
       <div style="display:flex; gap:12px">
-        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT (KEEP)</button>
-        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE & APPROVE</button>
+        <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
+        <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
       </div>
     </div>
   \`;
@@ -1040,24 +1032,29 @@ function renderImgGrid(urls) {
 }
 
 async function addImage() {
-  let url = prompt("PASTE IMAGE URL:");
-  if (!url) return;
-  url = url.trim();
-  if (!/^https?:\\/\\//i.test(url)) return toast("INVALID URL");
-  
-  const product = state.current.response.products[state.editingPIdx];
-  const s = product.sources[state.editingSIdx];
-  
-  s.customImages = s.customImages || [];
-  if (!s.customImages.includes(url)) s.customImages.push(url);
-  
-  if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
-  if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
-  
-  renderImgGrid(state.currentGridUrls);
-  updateSelCount();
-  saveFormToLocalStorage();
-  toast("IMAGE ADDED + SELECTED");
+  try {
+    const text = await navigator.clipboard.readText();
+    const url = text.trim();
+    if (!url || !/^https?:\/\//i.test(url)) {
+      return toast("NO VALID URL IN CLIPBOARD");
+    }
+    
+    const product = state.current.response.products[state.editingPIdx];
+    const s = product.sources[state.editingSIdx];
+    
+    s.customImages = s.customImages || [];
+    if (!s.customImages.includes(url)) s.customImages.push(url);
+    
+    if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
+    if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
+    
+    renderImgGrid(state.currentGridUrls);
+    updateSelCount();
+    saveFormToLocalStorage();
+    toast("IMAGE ADDED FROM CLIPBOARD");
+  } catch (e) {
+    toast("CLIPBOARD ACCESS FAILED");
+  }
 }
 
 async function extractImages(mode) {
@@ -1324,9 +1321,9 @@ async function deleteSource() {
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
   
-  // Support auto-scroll on Cancel as well as Save
+  // Support auto-scroll back to the source on both Save and Cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    state.justEditedSId = `${state.editingPIdx}-${state.editingSIdx}`;
+    state.justEditedSId = state.editingPIdx + "-" + state.editingSIdx;
   }
   
   showScreen("review"); 
@@ -1843,7 +1840,8 @@ async function main() {
                         }}
                     );
 
-                    if (source.url) {
+                    // Only propagate normal updates. Rejections stay local to this image/frame.
+                    if (source.url && source.reviewStatus !== 'rejected') {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
                     }
