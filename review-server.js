@@ -347,6 +347,26 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
 .lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
+
+/* Mobile table improvements */
+@media (max-width: 768px) {
+  .simple-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 12px;
+  }
+  .simple-table th,
+  .simple-table td {
+    white-space: nowrap;
+    min-width: 80px;
+  }
+  .simple-table input,
+  .simple-table select {
+    min-height: 40px;
+    font-size: 13px;
+  }
+}
 </style>
 </head>
 <body>
@@ -813,13 +833,19 @@ function getAllImages(source) {
 }
 
 function openSource(pIdx, sIdx) {
-  state.editingPIdx = pIdx;
-  state.editingSIdx = sIdx;
-  
-  const product = state.current.response.products[pIdx];
-  const s = product.sources[sIdx];
-  
-  document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
+  try {
+    if (!state.current?.response?.products?.[pIdx]?.sources?.[sIdx]) {
+      toast("ERROR: Source data missing or invalid");
+      return;
+    }
+    
+    state.editingPIdx = pIdx;
+    state.editingSIdx = sIdx;
+    
+    const product = state.current.response.products[pIdx];
+    const s = product.sources[sIdx];
+    
+    document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
 
   const allImages = getAllImages(s);
   state.currentSelected = [...(s.selectedImages || [])];
@@ -919,15 +945,15 @@ function openSource(pIdx, sIdx) {
     <div class="card">
       <h3>VARIANTS (SIZE & STOCK)</h3>
       <div id="variantsContainer"></div>
-      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
+      <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; min-height:48px; border:1px dashed var(--border); margin-top:8px;">+ ADD SIZE</button>
     </div>
 
     <div class="card">
       <h3>SIZE GUIDE</h3>
       <div id="sizeGuideContainer" style="overflow-x:auto;"></div>
       <div style="display:flex; gap:8px; margin-top:8px;">
-        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border);">+ ADD ROW</button>
-        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border);">+ ADD COL</button>
+        <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD ROW</button>
+        <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; min-height:48px; border:1px dashed var(--border);">+ ADD COL</button>
       </div>
     </div>
 
@@ -944,7 +970,7 @@ function openSource(pIdx, sIdx) {
     <div class="card" style="border-bottom:none;">
       <h3>ACTIONS</h3>
       <div style="display:flex; gap:12px; margin-bottom:12px;">
-        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
+        <button class="btn-ghost" onclick="deleteSource()" style="flex:1; min-height:48px; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
       </div>
       <div style="display:flex; gap:12px">
         <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT (KEEP)</button>
@@ -1297,6 +1323,12 @@ async function deleteSource() {
 
 function closeEditor() { 
   clearFormPersist(state.formPersistKey);
+  
+  // Support auto-scroll on Cancel as well as Save
+  if (state.editingPIdx !== null && state.editingSIdx !== null) {
+    state.justEditedSId = `${state.editingPIdx}-${state.editingSIdx}`;
+  }
+  
   showScreen("review"); 
 }
 
@@ -1423,12 +1455,9 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
-                        discarded: { $ne: true },
-                        $or: [
-                            { auditStatus: 'audited' },
-                            { auditedAt: { $exists: true } }
-                        ]
+                        discarded: { $ne: true }
                     }
                 }
             },
@@ -1437,12 +1466,9 @@ async function buildQueue(collection) {
                     $elemMatch: {
                         type: 'image',
                         reviewed: true,
+                        auditStatus: 'audited',
                         humanReviewed: { $ne: true },
-                        discarded: { $ne: true },
-                        $or: [
-                            { auditStatus: 'audited' },
-                            { auditedAt: { $exists: true } }
-                        ]
+                        discarded: { $ne: true }
                     }
                 }
             }
@@ -1497,8 +1523,8 @@ async function checkDone(collection) {
     return collection.countDocuments({
         discarded: { $ne: true },
         $or: [
-            { file_urls: { $elemMatch: { type: 'image', reviewed: true, humanReviewed: { $ne: true }, discarded: { $ne: true }, $or: [ { auditStatus: 'audited' }, { auditedAt: { $exists: true } } ] } } },
-            { 'file_urls.frames': { $elemMatch: { type: 'image', reviewed: true, humanReviewed: { $ne: true }, discarded: { $ne: true }, $or: [ { auditStatus: 'audited' }, { auditedAt: { $exists: true } } ] } } }
+            { file_urls: { $elemMatch: { type: 'image', reviewed: true, auditStatus: 'audited', humanReviewed: { $ne: true }, discarded: { $ne: true } } } },
+            { 'file_urls.frames': { $elemMatch: { type: 'image', reviewed: true, auditStatus: 'audited', humanReviewed: { $ne: true }, discarded: { $ne: true } } } }
         ]
     });
 }
