@@ -527,6 +527,8 @@ function saveFormToLocalStorage() {
       name: document.getElementById("eTitle")?.value || "",
       brand: document.getElementById("eBrand")?.value || "",
       vendor: document.getElementById("eVendor")?.value || "",
+      color: document.getElementById("eColor")?.value || "",
+      material: document.getElementById("eMaterial")?.value || "",
       url: document.getElementById("eUrl")?.value || "",
       category: document.getElementById("eCategory")?.value || "",
       price: document.getElementById("ePrice")?.value || "",
@@ -541,6 +543,7 @@ function saveFormToLocalStorage() {
       sizeGuide: state.currentSizeGuide,
       selectedImages: state.currentSelected
     };
+
     localStorage.setItem(key, JSON.stringify(data));
   } catch(e) {}
 }
@@ -558,6 +561,8 @@ function restoreFormFromLocalStorage() {
     setVal("eTitle", data.name);
     setVal("eBrand", data.brand);
     setVal("eVendor", data.vendor);
+    setVal("eColor", data.color);
+    setVal("eMaterial", data.material);
     setVal("eUrl", data.url);
     setVal("eCategory", data.category);
     setVal("ePrice", data.price);
@@ -698,7 +703,8 @@ function renderItem() {
 
   document.getElementById("rImage").src = item.url;
   
-  const prods = item.response && item.response.products ? item.response.products : [];
+  const resp = dedupeSourcesAcrossProducts(normalizeResponse(item));
+  const prods = resp.products || [];
   
   let totalSources = 0;
   let pendingSources = 0;
@@ -870,6 +876,11 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
         </div>
         
+        <div class="field-row">
+          <div class="field"><label>Color</label><input id="eColor" value="\${escapeHtml(s.color || "")}"></div>
+          <div class="field"><label>Material</label><input id="eMaterial" value="\${escapeHtml(s.material || "")}"></div>
+        </div>
+        
         <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
         <div class="field" style="margin-bottom:24px;">
@@ -909,7 +920,7 @@ function openSource(pIdx, sIdx) {
       </div>
       
       <div class="card" style="background:var(--surface-2);">
-        <h3>DROPSHIP CONTEXT (READ-ONLY)</h3>
+        <h3>DROPSHIP CONTEXT</h3>
         <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
         <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
           <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
@@ -920,7 +931,7 @@ function openSource(pIdx, sIdx) {
       </div>
       
       <details class="card">
-        <summary>VARIANTS (SIZE & STOCK)</summary>
+        <summary>VARIANTS</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
           <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
@@ -1103,7 +1114,7 @@ function renderVariantsTable() {
   const container = document.getElementById("variantsContainer");
   if (!state.currentVariants.length) { container.innerHTML = ''; return; }
   
-  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>STOCK</th><th style="width:48px;"></th></tr></thead><tbody>';
+  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>COLOR</th><th>STOCK</th><th>QTY</th><th>PRICE</th><th style="width:48px;"></th></tr></thead><tbody>';
   state.currentVariants.forEach((v, i) => {
     let rawAvail = String(v.availability || "").toLowerCase().replace(/[^a-z]/g, '');
     let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
@@ -1111,6 +1122,7 @@ function renderVariantsTable() {
     html += \`
       <tr class="v-row" data-idx="\${i}">
         <td><input type="text" class="v-size" value="\${escapeHtml(v.size || '')}"></td>
+        <td><input type="text" class="v-color" value="\${escapeHtml(v.color || '')}"></td>
         <td>
           <select class="v-avail">
             <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
@@ -1118,6 +1130,8 @@ function renderVariantsTable() {
             <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
         </td>
+        <td><input type="number" class="v-qty" inputmode="numeric" value="\${escapeHtml(v.inventory_quantity != null ? String(v.inventory_quantity) : '')}"></td>
+        <td><input type="number" class="v-price" step="0.01" inputmode="decimal" value="\${escapeHtml(v.price != null ? getSafeNumber(v.price) : '')}"></td>
         <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
       </tr>
     \`;
@@ -1128,15 +1142,22 @@ function renderVariantsTable() {
 
 function syncVariantsFromDOM() {
   const rows = document.querySelectorAll(".v-row");
-  state.currentVariants = Array.from(rows).map(row => ({
-    size: row.querySelector(".v-size").value,
-    availability: row.querySelector(".v-avail").value
-  }));
+  state.currentVariants = Array.from(rows).map(row => {
+    const qtyVal = row.querySelector(".v-qty").value;
+    const priceVal = row.querySelector(".v-price").value;
+    return {
+      size: row.querySelector(".v-size").value,
+      color: row.querySelector(".v-color").value,
+      availability: row.querySelector(".v-avail").value,
+      inventory_quantity: qtyVal !== '' ? parseInt(qtyVal, 10) : null,
+      price: priceVal !== '' ? parseFloat(priceVal) : null
+    };
+  });
 }
 
 function addVariantRow() {
   syncVariantsFromDOM();
-  state.currentVariants.push({ size: "", availability: "InStock" });
+  state.currentVariants.push({ size: "", color: "", availability: "InStock", inventory_quantity: null, price: null });
   renderVariantsTable();
   saveFormToLocalStorage();
 }
@@ -1233,6 +1254,8 @@ async function saveSource(status = "completed") {
   source.name = document.getElementById("eTitle").value;
   source.brand = document.getElementById("eBrand").value;
   source.vendor = document.getElementById("eVendor").value;
+  source.color = document.getElementById("eColor").value;
+  source.material = document.getElementById("eMaterial").value;
   source.url = document.getElementById("eUrl").value;
   source.primary_category = document.getElementById("eCategory").value;
   
@@ -1259,8 +1282,8 @@ async function saveSource(status = "completed") {
   
   const oldVariants = source.variants || [];
   source.variants = state.currentVariants.map(v => {
-    const existing = oldVariants.find(ov => ov.size === v.size) || {};
-    return { ...existing, size: v.size, availability: v.availability };
+    const existing = oldVariants.find(ov => ov.size === v.size && ov.color === v.color) || {};
+    return { ...existing, size: v.size, color: v.color, availability: v.availability, inventory_quantity: v.inventory_quantity, price: v.price };
   });
   
   source.size_guide = state.currentSizeGuide;
@@ -1406,6 +1429,8 @@ function normalizeResponse(item) {
             s.customImages = s.customImages || [];
             s.variants = s.variants || [];
             s.images = s.images || [];
+            s.color = s.color || "";
+            s.material = s.material || "";
 
             // Robust price normalization to handle raw python extractor numbers
             if (typeof s.price === 'number' || typeof s.price === 'string') {
@@ -1427,8 +1452,32 @@ function normalizeResponse(item) {
     return resp;
 }
 
+function dedupeSourcesAcrossProducts(resp) {
+    if (!resp || !Array.isArray(resp.products)) return resp;
+    const seen = new Map();
+    resp.products.forEach(p => {
+        if (!Array.isArray(p.sources)) return;
+        const keep = [];
+        p.sources.forEach(s => {
+            const url = String(s.url || '').toLowerCase().trim();
+            if (!url || url === 'null') { keep.push(s); return; }
+            if (seen.has(url)) {
+                const best = seen.get(url);
+                const sScore = s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1;
+                const bScore = best.reviewStatus === 'completed' ? 3 : best.reviewStatus === 'rejected' ? 2 : 1;
+                if (sScore > bScore) seen.set(url, s);
+            } else {
+                seen.set(url, s);
+                keep.push(s);
+            }
+        });
+        p.sources = keep;
+    });
+    return resp;
+}
+
 function getItemStatus(item) {
-    const resp = normalizeResponse(item);
+    const resp = dedupeSourcesAcrossProducts(normalizeResponse(item));
     let totalSources = 0;
     let reviewedSources = 0;
 
@@ -1576,6 +1625,8 @@ async function propagateReviewToSameSources(collection, docId, url, updatedSourc
                             setObj[`${pth}.currency`] = updatedSource.currency;
                             setObj[`${pth}.availability`] = updatedSource.availability;
                             setObj[`${pth}.vendor`] = updatedSource.vendor;
+                            setObj[`${pth}.color`] = updatedSource.color;
+                            setObj[`${pth}.material`] = updatedSource.material;
                             await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
                             updatedCount++;
                         }
@@ -1821,6 +1872,8 @@ async function main() {
                             [`${basePath}.name`]: source.name,
                             [`${basePath}.brand`]: source.brand,
                             [`${basePath}.vendor`]: source.vendor,
+                            [`${basePath}.color`]: source.color,
+                            [`${basePath}.material`]: source.material,
                             [`${basePath}.url`]: source.url,
                             [`${basePath}.primary_category`]: source.primary_category,
                             [`${basePath}.price`]: source.price,
@@ -1842,8 +1895,42 @@ async function main() {
                         }}
                     );
 
-                    // Rejections strictly scoped to this item only. ONLY propagate successful approvals.
-                    if (source.url && source.reviewStatus !== 'rejected') {
+                    // Deduplicate sources by URL within the same product in DB
+                    const post = await collection.findOne({ _id: new ObjectId(docId) });
+                    const targetPath = frameIdx !== null
+                        ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}`
+                        : `file_urls.${fileIdx}.response.products.${prodIdx}`;
+                    const product = frameIdx !== null
+                        ? post.file_urls[fileIdx].frames[frameIdx].response.products[prodIdx]
+                        : post.file_urls[fileIdx].response.products[prodIdx];
+                    
+                    if (product && Array.isArray(product.sources)) {
+                        const seen = new Map();
+                        const deduped = [];
+                        product.sources.forEach(s => {
+                            const url = String(s.url || '').toLowerCase().trim();
+                            if (!url || url === 'null') { deduped.push(s); return; }
+                            if (seen.has(url)) {
+                                const best = seen.get(url);
+                                const sScore = s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1;
+                                const bScore = best.reviewStatus === 'completed' ? 3 : best.reviewStatus === 'rejected' ? 2 : 1;
+                                if (sScore > bScore) {
+                                    deduped[deduped.indexOf(best)] = s;
+                                    seen.set(url, s);
+                                }
+                            } else {
+                                seen.set(url, s);
+                                deduped.push(s);
+                            }
+                        });
+                        await collection.updateOne(
+                            { _id: new ObjectId(docId) },
+                            { $set: { [`${targetPath}.sources`]: deduped } }
+                        );
+                    }
+
+                    // Propagate ALL review statuses to matching URLs across items
+                    if (source.url) {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
                     }
