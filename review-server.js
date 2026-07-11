@@ -703,8 +703,7 @@ function renderItem() {
 
   document.getElementById("rImage").src = item.url;
   
-  const resp = dedupeSourcesAcrossProducts(normalizeResponse(item));
-  const prods = resp.products || [];
+  const prods = item.response && item.response.products ? item.response.products : [];
   
   let totalSources = 0;
   let pendingSources = 0;
@@ -1826,7 +1825,7 @@ async function main() {
                     item = file; item.type = 'image';
                 }
 
-                const response = normalizeResponse(item);
+                const response = dedupeSourcesAcrossProducts(normalizeResponse(item));
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ _id: docId, postId: post.post_id, fileIdx, frameIdx, url: item.url, parentUrl: item.parentUrl || null, type: item.type, response }));
             } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
