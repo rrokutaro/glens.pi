@@ -2412,10 +2412,15 @@ function parseGlensPrice(priceStr) {
     return match ? parseFloat(match[0].replace(/,/g, '')) : null;
 }
 
-function createFallbackSource(oldSource, errorMsg) {
-    const glensPriceString = oldSource.price ? String(oldSource.price) : null;
-    const parsedPriceNum = parseGlensPrice(glensPriceString);
+function createFallbackSource(oldSource, errorMsg, rawData) {
+    // Prefer extracted raw data price over GLens price
+    const rawPrice = rawData?.price?.current || rawData?.price || rawData?.schema_org?.price || null;
+    const rawCurrency = rawData?.price?.currency || rawData?.currency || rawData?.schema_org?.priceCurrency || null;
     
+    const glensPriceString = oldSource.price ? String(oldSource.price) : null;
+    const fallbackPriceStr = rawPrice ? String(rawPrice) : glensPriceString;
+    const parsedPriceNum = parseGlensPrice(fallbackPriceStr);
+        
     return {
         source_id: oldSource.source_id || "",
         url: oldSource.url,
@@ -2432,9 +2437,9 @@ function createFallbackSource(oldSource, errorMsg) {
         description: null,
         features: [],
         price: {
-            current: glensPriceString ? glensPriceString.replace(/[^0-9.]/g, '') : "",
+            current: fallbackPriceStr ? fallbackPriceStr.replace(/[^0-9.]/g, '') : "",
             original: null,
-            currency: "USD" // Assumed default fallback
+            currency: rawCurrency || oldSource.currency || "USD"
         },
         availability: oldSource.availability || "Unknown",
         sku: null,
@@ -2676,7 +2681,7 @@ async function runDataEnrichmentStage(db, collection) {
             bulkOps.push({
                 updateOne: {
                     filter: { _id: item.docId },
-                    update: { $set: { [dbPath]: createFallbackSource(item.oldSource, rawData?.error || 'Unknown error') } }
+                    update: { $set: { [dbPath]: createFallbackSource(item.oldSource, rawData?.error || 'Unknown error', rawData) } }
                 }
             });
             failed++;
@@ -2741,20 +2746,27 @@ async function runDataEnrichmentStage(db, collection) {
                         const mappedAvailability = availabilityMap[rawAvail] || rawAvail;
                         cleanJson.availability = mappedAvailability || item.oldSource.availability || "Unknown";
     
-                        // 4. Fallback Price structure to GLENS
+                        // 4. Price: trust LLM-extracted data; only fall back to GLens if LLM found nothing at all
                         const oldGlensPriceStr = item.oldSource.price ? String(item.oldSource.price).replace(/[^0-9.]/g, '') : "";
+                        const oldGlensCurrency = item.oldSource.currency || item.oldSource.price?.currency || "USD";
+                        
                         if (!cleanJson.price || typeof cleanJson.price !== 'object') {
+                            // LLM returned no price object at all — use GLens as last resort
                             cleanJson.price = {
-                                current: oldGlensPriceStr,
+                                current: oldGlensPriceStr || null,
                                 original: null,
-                                currency: cleanJson.currency || "USD"
+                                currency: cleanJson.currency || oldGlensCurrency
                             };
                         } else {
-                            cleanJson.price.current = cleanJson.price.current != null && String(cleanJson.price.current).trim() !== "" 
-                                ? String(cleanJson.price.current) 
-                                : oldGlensPriceStr;
+                            // LLM returned a price object: trust it, only fill in missing pieces from GLens
+                            const llmCurrent = cleanJson.price.current;
+                            const hasLlmPrice = llmCurrent != null && String(llmCurrent).trim() !== "" && String(llmCurrent).trim() !== "0" && String(llmCurrent).trim() !== "0.00";
+                            
+                            cleanJson.price.current = hasLlmPrice 
+                                ? String(llmCurrent) 
+                                : (oldGlensPriceStr || null);
                             cleanJson.price.original = cleanJson.price.original != null ? String(cleanJson.price.original) : null;
-                            cleanJson.price.currency = cleanJson.price.currency || cleanJson.currency || "USD";
+                            cleanJson.price.currency = cleanJson.price.currency || cleanJson.currency || oldGlensCurrency;
                         }
     
                         // 5. Fallback markup properties to GLENS price if LLM failed math
@@ -2796,7 +2808,7 @@ async function runDataEnrichmentStage(db, collection) {
                         bulkOps.push({
                             updateOne: {
                                 filter: { _id: item.docId },
-                                update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed') } }
+                                update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed', null) } }
                             }
                         });
                         failed++;
