@@ -1403,7 +1403,7 @@ async def _extract_full_browser_core(
     run_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         stream=False,
-        js_code=JS_LAZY_LOAD,
+        js_code="window.scrollTo(0, document.body.scrollHeight);",
         excluded_tags=EXCLUDED_TAGS,
         screenshot=False,
         remove_overlay_elements=True,
