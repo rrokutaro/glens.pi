@@ -633,7 +633,9 @@ function clearFormPersist(key) {
 /* --- Core Loading & Display --- */
 async function loadQueue() {
   try {
-    const r = await fetch("/api/queue");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const r = await fetch("/api/queue", { signal: controller.signal }).finally(() => clearTimeout(timeout));
     const resText = await r.text();
     let data;
     try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
