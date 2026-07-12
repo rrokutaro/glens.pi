@@ -7,7 +7,7 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.2.0 - Mobile Table overflow, Collapsible sections,
+ * FINAL PRODUCTION v2.3.0 - Mobile Table overflow, Collapsible sections,
  * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
  */
 
@@ -56,7 +56,7 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v2.2</title>
+<title>DropShip Review • v2.3</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root {
@@ -217,7 +217,7 @@ a:active { opacity: 0.7; }
   width: 48px; height: 48px;
   background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
 }
-.post-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
 .post-info { flex: 1; min-width: 0; }
 .post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .post-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 600; }
@@ -235,13 +235,13 @@ a:active { opacity: 0.7; }
 .item-row:active { transform: scale(0.98); }
 .item-row:last-child { border-bottom: none; padding-bottom: 0; }
 .item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
-.item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
 .item-info { flex: 1; min-width: 0; }
 .item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
 
 /* Hero (Review Main Image) */
 .hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
-.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; }
+.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; background: #fff; }
 .hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
 
 /* Section & Cards */
@@ -258,7 +258,7 @@ a:active { opacity: 0.7; }
 .p-card:active { background: var(--surface-2); transform: scale(0.98); }
 .p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
 .p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
-.p-img img { width: 100%; height: 100%; object-fit: cover; }
+.p-img img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
 .p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .p-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -304,7 +304,7 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
   transition: border-color 0.15s ease, transform 0.1s ease;
 }
 .img-cell:active { transform: scale(0.98); }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; background: #fff; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
@@ -347,6 +347,13 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
 .lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
+
+/* Performance: isolate off-screen cards from layout/paint */
+.post-group, .p-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
 </style>
 </head>
 <body>
@@ -374,7 +381,7 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
       <div id="rTopRight" style="width:70px; text-align:right;"></div>
     </div>
     <div class="hero">
-      <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
+      <img id="rImage" src="" alt="" loading="lazy" decoding="async" fetchpriority="high" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
@@ -423,6 +430,7 @@ const state = {
   currentSizeGuide: { headers: [], rows: [] },
   io: null,
   justEditedSId: null,
+  lastViewedItemId: null,
   formPersistKey: null
 };
 
@@ -486,6 +494,25 @@ function formatPrice(p, fallbackCurrency = "USD") {
   return num !== '' ? num + (curr ? " " + curr : "") : "TBD";
 }
 
+function computeFinalPriceDisplay(source) {
+    const base = source.price?.current != null ? parseFloat(source.price.current) : null;
+    if (base == null || isNaN(base)) return "N/A";
+    
+    const type = source.markup_type || "percentage";
+    let final = base;
+    
+    if (type === "fixed" && source.markup_fixed != null) {
+        const fixed = parseFloat(source.markup_fixed);
+        if (!isNaN(fixed)) final = base + fixed;
+    } else if (type === "percentage" && source.markup_percentage != null) {
+        const pct = parseFloat(source.markup_percentage);
+        if (!isNaN(pct)) final = base * (1 + pct / 100);
+    }
+    
+    const curr = source.price?.currency || source.currency || "";
+    return final.toFixed(2) + (curr ? " " + curr : "");
+}
+
 function initLazyImages() {
   if (state.io) return;
   state.io = new IntersectionObserver(entries => {
@@ -529,6 +556,7 @@ function saveFormToLocalStorage() {
       vendor: document.getElementById("eVendor")?.value || "",
       color: document.getElementById("eColor")?.value || "",
       material: document.getElementById("eMaterial")?.value || "",
+      condition: document.getElementById("eCondition")?.value || "",
       url: document.getElementById("eUrl")?.value || "",
       category: document.getElementById("eCategory")?.value || "",
       price: document.getElementById("ePrice")?.value || "",
@@ -539,6 +567,9 @@ function saveFormToLocalStorage() {
       features: document.getElementById("eFeatures")?.value || "",
       shipping: document.getElementById("eShippingInfo")?.value || "",
       returns: document.getElementById("eReturnPolicy")?.value || "",
+      markupType: document.getElementById("eMarkupType")?.value || "percentage",
+      markupFixed: document.getElementById("eMarkupFixed")?.value || "",
+      markupPct: document.getElementById("eMarkupPct")?.value || "",
       variants: state.currentVariants,
       sizeGuide: state.currentSizeGuide,
       selectedImages: state.currentSelected
@@ -563,6 +594,7 @@ function restoreFormFromLocalStorage() {
     setVal("eVendor", data.vendor);
     setVal("eColor", data.color);
     setVal("eMaterial", data.material);
+    setVal("eCondition", data.condition);
     setVal("eUrl", data.url);
     setVal("eCategory", data.category);
     setVal("ePrice", data.price);
@@ -573,6 +605,9 @@ function restoreFormFromLocalStorage() {
     setVal("eFeatures", data.features);
     setVal("eShippingInfo", data.shipping);
     setVal("eReturnPolicy", data.returns);
+    setVal("eMarkupType", data.markupType);
+    setVal("eMarkupFixed", data.markupFixed);
+    setVal("eMarkupPct", data.markupPct);
 
     if (data.variants && Array.isArray(data.variants)) {
       state.currentVariants = data.variants;
@@ -621,7 +656,7 @@ function renderQueue() {
   const postIds = Object.keys(state.posts);
   
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">EMPTY QUEUE</div>';
+    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; opacity:0.5; display:block; margin-top:8px;">All items have been reviewed</span></div>';
     document.getElementById("qCount").textContent = "0";
     return;
   }
@@ -638,7 +673,7 @@ function renderQueue() {
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
-          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" loading="lazy" decoding="async" fetchpriority="low" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
           <div class="post-info">
             <div class="post-id">\${escapeHtml(pid)}</div>
             <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
@@ -647,8 +682,8 @@ function renderQueue() {
         </div>
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
-            <div class="item-row" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
-              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+            <div class="item-row" data-item-id="\${it._id}-\${it.fileIdx}-\${it.frameIdx !== null ? it.frameIdx : 'img'}" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
+              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" loading="lazy" decoding="async" fetchpriority="low" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
               <div class="item-info">
                 <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
                 <div class="item-status">\${escapeHtml(it.status)}</div>
@@ -663,6 +698,16 @@ function renderQueue() {
   
   document.getElementById("qCount").textContent = totalItems;
   document.querySelectorAll(".lazy-img[data-src]").forEach(observeImage);
+  
+  if (state.lastViewedItemId) {
+    requestAnimationFrame(() => {
+      const targetRow = document.querySelector(\`.item-row[data-item-id="\${state.lastViewedItemId}"]\`);
+      if (targetRow) {
+        targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      state.lastViewedItemId = null;
+    });
+  }
 }
 
 function toggleGroup(ev, pid) {
@@ -677,31 +722,47 @@ async function openItem(_id, fileIdx, frameIdx) {
     const r = await fetch(url);
     if (!r.ok) throw new Error("Fetch failed");
     state.current = await r.json();
+    state.lastViewedItemId = \`\${_id}-\${fileIdx}-\${frameIdx !== null ? frameIdx : 'img'}\`;
   } catch(e) {
     toast("ERR: " + e.message);
     return;
   }
   renderItem();
   showScreen("review");
+  window.scrollTo(0,0);
 }
 
 function renderItem() {
   const item = state.current;
+  const rTitle = document.getElementById("rTitle");
+  const rTopRight = document.getElementById("rTopRight");
+  const rImage = document.getElementById("rImage");
+  const rMeta = document.getElementById("rMeta");
+  const pList = document.getElementById("pList");
+  const pCount = document.getElementById("pCount");
+  const btnCommit = document.getElementById("btnCommitItem");
   
   let igLink = 'https://www.instagram.com/' + item.postId + '/';
   if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
-  document.getElementById("rTitle").innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
+  
+  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
   
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
-    document.getElementById('rTopRight').innerHTML = \`<button class="btn-ghost" onclick="openVideo('\${proxyUrl}')" style="border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);">WATCH</button>\`;
+    const watchBtn = document.createElement('button');
+    watchBtn.className = 'btn-ghost';
+    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);');
+    watchBtn.textContent = 'WATCH';
+    watchBtn.onclick = () => openVideo(proxyUrl);
+    rTopRight.innerHTML = '';
+    rTopRight.appendChild(watchBtn);
   } else {
-    document.getElementById('rTopRight').innerHTML = '';
+    rTopRight.innerHTML  = '';
   }
 
-  document.getElementById("rImage").src = item.url;
+  rImage.src = item.url;
   
   const prods = item.response && item.response.products ? item.response.products : [];
   
@@ -748,7 +809,7 @@ function renderItem() {
 
           listHtml += \`
             <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
-              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
               <div class="p-info">
                 <div class="p-title">\${escapeHtml(nameLabel)}</div>
                 <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
@@ -761,16 +822,15 @@ function renderItem() {
     });
   }
 
-  document.getElementById("pList").innerHTML = listHtml;
-  document.getElementById("pCount").textContent = totalSources;
+  pList.innerHTML = listHtml;
+  pCount.textContent = totalSources;
 
-  document.getElementById("rMeta").innerHTML = \`
+  rMeta.innerHTML = \`
     <span class="badge">\${item.type === "frame" ? "FRAME" : "IMAGE"}</span>
     <span class="badge">\${totalSources} SRC</span>
     \${pendingSources ? \`<span class="badge pending">\${pendingSources} PEND</span>\` : ""}
   \`;
-
-  const btnCommit = document.getElementById("btnCommitItem");
+  
   if (pendingSources > 0) {
     btnCommit.disabled = true;
     btnCommit.title = "Review all sources first";
@@ -796,11 +856,42 @@ function openVideo(url) {
   document.getElementById('videoModal').classList.add('active');
   v.play().catch(e => console.error(e));
 }
+
 function closeVideo() {
   const v = document.getElementById('vPlayer');
   v.pause();
   v.src = '';
   document.getElementById('videoModal').classList.remove('active');
+}
+
+function updateFinalPrice() {
+    const type = document.getElementById("eMarkupType").value;
+    const fixedWrap = document.getElementById("fieldMarkupFixed");
+    const pctWrap = document.getElementById("fieldMarkupPct");
+    
+    if (fixedWrap) fixedWrap.style.display = type === "fixed" ? "block" : "none";
+    if (pctWrap) pctWrap.style.display = type === "percentage" ? "block" : "none";
+    
+    const baseEl = document.getElementById("ePrice");
+    const finalEl = document.getElementById("eFinalPrice");
+    if (!baseEl || !finalEl) return;
+    
+    const base = parseFloat(baseEl.value);
+    if (isNaN(base)) { finalEl.value = "N/A"; return; }
+    
+    const curr = document.getElementById("eCurrency")?.value || "";
+    let final = base;
+    
+    if (type === "fixed") {
+        const fixed = parseFloat(document.getElementById("eMarkupFixed")?.value);
+        if (!isNaN(fixed)) final = base + fixed;
+    } else {
+        const pct = parseFloat(document.getElementById("eMarkupPct")?.value);
+        if (!isNaN(pct)) final = base * (1 + pct / 100);
+    }
+    
+    finalEl.value = final.toFixed(2) + (curr ? " " + curr : "");
+    saveFormToLocalStorage();
 }
 
 function getAllImages(source) {
@@ -879,6 +970,15 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Color</label><input id="eColor" value="\${escapeHtml(s.color || "")}"></div>
           <div class="field"><label>Material</label><input id="eMaterial" value="\${escapeHtml(s.material || "")}"></div>
         </div>
+
+        <div class="field">
+          <label>Condition</label>
+          <select id="eCondition">
+            <option value="" \${escapeHtml(s.condition || "") === "" ? "selected" : ""}>Unknown</option>
+            <option value="New" \${escapeHtml(s.condition || "") === "New" ? "selected" : ""}>New</option>
+            <option value="Used" \${escapeHtml(s.condition || "") === "Used" ? "selected" : ""}>Used</option>
+          </select>
+        </div>
         
         <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
@@ -895,18 +995,37 @@ function openSource(pIdx, sIdx) {
         </div>
 
         <div class="field-row">
-          <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}"></div>
+          <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}" oninput="updateFinalPrice()"></div>
           <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
-          <div class="field" style="width:100px">
+          
+          <div class="field" style="width:120px">
             <label>Currency</label>
-            <select id="eCurrency">
-              <option \${s.price?.currency === "USD" ? "selected" : ""}>USD</option>
-              <option \${s.price?.currency === "EUR" ? "selected" : ""}>EUR</option>
-              <option \${s.price?.currency === "GBP" ? "selected" : ""}>GBP</option>
-              <option \${s.price?.currency === "CAD" ? "selected" : ""}>CAD</option>
-              <option \${s.price?.currency === "AUD" ? "selected" : ""}>AUD</option>
-            </select>
+            <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase;" oninput="updateFinalPrice()">
+            <datalist id="currencyList">
+              <option value="USD">
+              <option value="EUR">
+              <option value="GBP">
+              <option value="CAD">
+              <option value="AUD">
+              <option value="CHF">
+              <option value="JPY">
+              <option value="CNY">
+              <option value="SEK">
+              <option value="NOK">
+              <option value="DKK">
+              <option value="PLN">
+              <option value="SGD">
+              <option value="HKD">
+              <option value="NZD">
+              <option value="MXN">
+              <option value="KRW">
+              <option value="INR">
+              <option value="AED">
+              <option value="SAR">
+              <option value="ZAR">
+            </datalist>
           </div>
+
         </div>
         <div class="field">
           <label>Availability</label>
@@ -915,17 +1034,6 @@ function openSource(pIdx, sIdx) {
             <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
             <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
           </select>
-        </div>
-      </div>
-      
-      <div class="card" style="background:var(--surface-2);">
-        <h3>DROPSHIP CONTEXT</h3>
-        <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-        <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-          <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-          <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-          <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-          <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
         </div>
       </div>
       
@@ -955,6 +1063,49 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
           <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
           <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
+        </div>
+      </details>
+      <div class="card" style="background:var(--surface-2);">
+        <h3>DROPSHIP CONTEXT</h3>
+        <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+        <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+          <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+          <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+          <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+          <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+        </div>
+      </div>
+
+      <details class="card">
+        <summary>DROPSHIP PRICING</summary>
+        <div class="details-content">
+          <div class="field">
+            <label>Markup Type</label>
+            <select id="eMarkupType" onchange="updateFinalPrice()">
+              <option value="percentage" \${(s.markup_type || "percentage") === "percentage" ? "selected" : ""}>Percentage</option>
+              <option value="fixed" \${(s.markup_type || "") === "fixed" ? "selected" : ""}>Fixed Amount</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <div class="field" id="fieldMarkupFixed" style="display:\${(s.markup_type || "percentage") === "fixed" ? "block" : "none"}">
+              <label>Fixed Markup</label>
+              <input id="eMarkupFixed" type="number" step="0.01" inputmode="decimal" 
+                value="\${s.markup_fixed != null ? escapeHtml(getSafeNumber(s.markup_fixed)) : ""}" 
+                oninput="updateFinalPrice()">
+            </div>
+            <div class="field" id="fieldMarkupPct" style="display:\${(s.markup_type || "percentage") === "percentage" ? "block" : "none"}">
+              <label>Markup %</label>
+              <input id="eMarkupPct" type="number" step="0.1" inputmode="decimal" 
+                value="\${s.markup_percentage != null ? escapeHtml(String(s.markup_percentage)) : ""}" 
+                oninput="updateFinalPrice()">
+            </div>
+          </div>
+          <div class="field">
+            <label>Final Price (Auto)</label>
+            <input id="eFinalPrice" type="text" readonly 
+              value="\${escapeHtml(computeFinalPriceDisplay(s))}" 
+              style="background:var(--surface-2); color:var(--text-2);">
+          </div>
         </div>
       </details>
 
@@ -990,6 +1141,7 @@ function openSource(pIdx, sIdx) {
 
     showScreen("editor");
     document.getElementById("eBody").scrollTop = 0;
+    window.scrollTo(0,0);
   } catch (err) {
     toast("ERROR OPENING SOURCE: " + err.message);
   }
@@ -1027,7 +1179,7 @@ function renderImgGrid(urls) {
     const isOn = selIdx > -1;
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
+        <img src="\${escapeHtml(url)}" loading="lazy" decoding="async" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
       </div>\`;
   }).join("");
@@ -1200,11 +1352,11 @@ function renderSizeGuideTable() {
 function syncSizeGuideFromDOM() {
   const sg = state.currentSizeGuide;
   document.querySelectorAll(".sg-header").forEach(inp => {
-    sg.headers[inp.dataset.cidx] = inp.value;
+    sg.headers[parseInt(inp.dataset.cidx, 10)] = inp.value;
   });
   document.querySelectorAll(".sg-cell").forEach(inp => {
-    const r = inp.dataset.ridx;
-    const c = inp.dataset.cidx;
+    const r = parseInt(inp.dataset.ridx, 10);
+    const c = parseInt(inp.dataset.cidx, 10);
     if (!sg.rows[r]) sg.rows[r] = [];
     sg.rows[r][c] = inp.value;
   });
@@ -1245,63 +1397,77 @@ function delSizeGuideCol(cIdx) {
 async function saveSource(status = "completed") {
   syncVariantsFromDOM();
   syncSizeGuideFromDOM();
-  
+
   const pIdx = state.editingPIdx;
   const sIdx = state.editingSIdx;
-  const source = state.current.response.products[pIdx].sources[sIdx];
-  
-  source.name = document.getElementById("eTitle").value;
-  source.brand = document.getElementById("eBrand").value;
-  source.vendor = document.getElementById("eVendor").value;
-  source.color = document.getElementById("eColor").value;
-  source.material = document.getElementById("eMaterial").value;
-  source.url = document.getElementById("eUrl").value;
-  source.primary_category = document.getElementById("eCategory").value;
-  
+  const existing = state.current.response.products[pIdx].sources[sIdx];
+
   const priceVal = parseFloat(document.getElementById("ePrice").value);
   const compareVal = parseFloat(document.getElementById("eComparePrice").value);
-  const oldPrice = source.price || {};
-  
-  source.price = { 
+  const oldPrice = existing.price || {};
+  const newPrice = {
     ...oldPrice,
-    current: isNaN(priceVal) ? null : priceVal, 
+    current: isNaN(priceVal) ? null : priceVal,
     original: isNaN(compareVal) ? null : compareVal,
-    currency: document.getElementById("eCurrency").value 
+    currency: document.getElementById("eCurrency").value
   };
-  
-  source.compare_at_price = source.price.original;
-  source.is_on_sale = (source.compare_at_price != null && source.price.current != null && source.compare_at_price > source.price.current);
-  source.currency = source.price.currency;
-  
-  source.availability = document.getElementById("eAvail").value;
-  source.description = document.getElementById("eDesc").value;
-  source.features = document.getElementById("eFeatures").value.split("\\n").map(s => s.trim()).filter(Boolean);
-  source.shipping_info = document.getElementById("eShippingInfo").value;
-  source.return_policy = document.getElementById("eReturnPolicy").value;
-  
-  const oldVariants = source.variants || [];
-  source.variants = state.currentVariants.map(v => {
-    const existing = oldVariants.find(ov => ov.size === v.size && ov.color === v.color) || {};
-    return { ...existing, size: v.size, color: v.color, availability: v.availability, inventory_quantity: v.inventory_quantity, price: v.price };
+
+  const markupType = document.getElementById("eMarkupType").value;
+  const markupFixed = parseFloat(document.getElementById("eMarkupFixed").value);
+  const markupPct = parseFloat(document.getElementById("eMarkupPct").value);
+
+  const oldVariants = existing.variants || [];
+  const newVariants = state.currentVariants.map(v => {
+    const found = oldVariants.find(ov => ov.size === v.size && ov.color === v.color) || {};
+    return { ...found, size: v.size, color: v.color, availability: v.availability, inventory_quantity: v.inventory_quantity, price: v.price };
   });
-  
-  source.size_guide = state.currentSizeGuide;
-  source.selectedImages = [...state.currentSelected];
-  source.reviewStatus = status;
-  
+
+  const payload = {
+    ...existing,
+    name: document.getElementById("eTitle").value,
+    brand: document.getElementById("eBrand").value,
+    vendor: document.getElementById("eVendor").value,
+    color: document.getElementById("eColor").value,
+    material: document.getElementById("eMaterial").value,
+    condition: document.getElementById("eCondition").value,
+    url: document.getElementById("eUrl").value,
+    primary_category: document.getElementById("eCategory").value,
+    price: newPrice,
+    compare_at_price: newPrice.original,
+    is_on_sale: (newPrice.original != null && newPrice.current != null && newPrice.original > newPrice.current),
+    currency: newPrice.currency,
+    availability: document.getElementById("eAvail").value,
+    description: document.getElementById("eDesc").value,
+    features: document.getElementById("eFeatures").value.split("\n").map(s => s.trim()).filter(Boolean),
+    shipping_info: document.getElementById("eShippingInfo").value,
+    return_policy: document.getElementById("eReturnPolicy").value,
+    markup_type: markupType,
+    markup_fixed: markupType === "fixed" ? (isNaN(markupFixed) ? null : markupFixed) : null,
+    markup_percentage: markupType === "percentage" ? (isNaN(markupPct) ? null : markupPct) : null,
+    variants: newVariants,
+    size_guide: state.currentSizeGuide,
+    selectedImages: [...state.currentSelected],
+    reviewStatus: status
+  };
+
+  const saveBtn = document.querySelector('.modal-header .btn-primary');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
   try {
-    const body = { 
-      docId: state.current._id, 
-      fileIdx: state.current.fileIdx, 
-      frameIdx: state.current.frameIdx, 
-      prodIdx: pIdx, 
-      sourceIdx: sIdx, 
-      source 
+    const body = {
+      docId: state.current._id,
+      fileIdx: state.current.fileIdx,
+      frameIdx: state.current.frameIdx,
+      prodIdx: pIdx,
+      sourceIdx: sIdx,
+      source: payload
     };
-    
+
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
-    
+
+    // Only mutate in-memory state after confirmed server success
+    state.current.response.products[pIdx].sources[sIdx] = payload;
+
     clearFormPersist(state.formPersistKey);
     state.justEditedSId = \`\${pIdx}-\${sIdx}\`;
     toast(status === "rejected" ? "REJECTED" : "SAVED");
@@ -1309,6 +1475,7 @@ async function saveSource(status = "completed") {
     closeEditor();
   } catch(e) {
     toast("ERROR: " + e.message);
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
   }
 }
 
@@ -1339,7 +1506,7 @@ async function deleteSource() {
 }
 
 function closeEditor() { 
-  clearFormPersist(state.formPersistKey);
+  // clearFormPersist(state.formPersistKey);
   showScreen("review");
   
   // Re-scroll back to source card context instantly upon pressing cancel
@@ -1365,8 +1532,17 @@ async function commitItem() {
     if (!r.ok) throw new Error("Commit failed");
     
     toast("COMMITTED");
+    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
+    const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
+    state.queue = state.queue.filter(it => !itemMatch(it));
+    for (const pid in state.posts) {
+      const post = state.posts[pid];
+      post.items = post.items.filter(it => !itemMatch(it));
+      if (post.items.length === 0) delete state.posts[pid];
+    }
+    state.current = null;
     showQueue();
-    await loadQueue();
+    renderQueue();
   } catch(e) {
     toast("ERROR: " + e.message);
   }
@@ -1379,8 +1555,17 @@ async function deleteItem() {
     const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Discard failed");
     toast("ITEM DISCARDED");
+    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
+    const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
+    state.queue = state.queue.filter(it => !itemMatch(it));
+    for (const pid in state.posts) {
+      const post = state.posts[pid];
+      post.items = post.items.filter(it => !itemMatch(it));
+      if (post.items.length === 0) delete state.posts[pid];
+    }
+    state.current = null;
     showQueue();
-    await loadQueue();
+    renderQueue();
   } catch(e) {
     toast("ERROR: " + e.message);
   }
@@ -1395,13 +1580,61 @@ function initKeyboard() {
       const editorModal = document.getElementById('editor');
       if (videoModal.classList.contains('active')) closeVideo();
       else if (editorModal.classList.contains('active')) closeEditor();
-      else if (document.getElementById('review').classList.contains('active')) showQueue();
+      else if (document.getElementById('review').classList.contains('active')) {
+        // Preserve lastViewedItemId so renderQueue scrolls to it
+        showQueue();
+      }
     }
   });
 }
 
+/* --- Swipe Navigation on Hero --- */
+function initSwipeNavigation() {
+  const hero = document.querySelector('.hero');
+  if (!hero) return;
+
+  let startX = 0, startY = 0, startTime = 0;
+  let didSwipe = false;
+  const SWIPE_TIME = 500; // ms
+
+  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150); // 30vw, capped at 150px
+
+  const onStart = (x, y) => { startX = x; startY = y; startTime = Date.now(); didSwipe = false; };
+  const onEnd = (x, y) => {
+    if (!startTime) return;
+    const dx = x - startX, dy = y - startY, dt = Date.now() - startTime;
+    startTime = 0;
+    if (dt > SWIPE_TIME || Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < getThreshold()) return;
+    didSwipe = true;
+
+    const idx = state.queue.findIndex(it =>
+      it._id === state.current?._id &&
+      it.fileIdx === state.current?.fileIdx &&
+      (it.frameIdx === state.current?.frameIdx || (it.frameIdx === null && state.current?.frameIdx === null))
+    );
+    if (idx === -1) return;
+
+    if (dx < 0 && idx + 1 < state.queue.length) {
+      const n = state.queue[idx + 1];
+      openItem(n._id, n.fileIdx, n.frameIdx);
+    } else if (dx > 0 && idx > 0) {
+      const p = state.queue[idx - 1];
+      openItem(p._id, p.fileIdx, p.frameIdx);
+    } else {
+      toast(dx < 0 ? 'LAST ITEM IN QUEUE' : 'FIRST ITEM IN QUEUE');
+    }
+  };
+
+  hero.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  hero.addEventListener('touchend', e => { onEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY); }, { passive: true });
+  hero.addEventListener('mousedown', e => onStart(e.clientX, e.clientY));
+  hero.addEventListener('mouseup', e => onEnd(e.clientX, e.clientY));
+  hero.addEventListener('click', e => { if (didSwipe) { e.preventDefault(); e.stopPropagation(); didSwipe = false; } }, true);
+}
+
 loadQueue();
 initKeyboard();
+initSwipeNavigation();
 </script>
 </body>
 </html>`;
@@ -1430,6 +1663,10 @@ function normalizeResponse(item) {
             s.images = s.images || [];
             s.color = s.color || "";
             s.material = s.material || "";
+            s.condition = s.condition || "";
+            s.markup_type = s.markup_type || "percentage";
+            s.markup_fixed = s.markup_fixed != null ? s.markup_fixed : null;
+            s.markup_percentage = s.markup_percentage != null ? s.markup_percentage : null;
 
             // Robust price normalization to handle raw python extractor numbers
             if (typeof s.price === 'number' || typeof s.price === 'string') {
@@ -1461,12 +1698,14 @@ function dedupeSourcesAcrossProducts(resp) {
             const url = String(s.url || '').toLowerCase().trim();
             if (!url || url === 'null') { keep.push(s); return; }
             if (seen.has(url)) {
-                const best = seen.get(url);
+                const { score: bScore, idx } = seen.get(url);
                 const sScore = s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1;
-                const bScore = best.reviewStatus === 'completed' ? 3 : best.reviewStatus === 'rejected' ? 2 : 1;
-                if (sScore > bScore) seen.set(url, s);
+                if (sScore > bScore) {
+                    keep[idx] = s;
+                    seen.set(url, { score: sScore, idx });
+                }
             } else {
-                seen.set(url, s);
+                seen.set(url, { score: s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1, idx: keep.length });
                 keep.push(s);
             }
         });
@@ -1582,8 +1821,8 @@ async function maybeDiscardEmptyPost(collection, docId) {
 
     const hasRemaining = post.file_urls.some(f => {
         if (f.discarded) return false;
-        if (f.type === 'image') return true;
-        if (f.type === 'video' && Array.isArray(f.frames)) return f.frames.some(fr => !fr.discarded);
+        if (f.type === 'image') return !f.humanReviewed;
+        if (f.type === 'video' && Array.isArray(f.frames)) return f.frames.some(fr => !fr.discarded && !fr.humanReviewed);
         return false;
     });
 
@@ -1626,6 +1865,11 @@ async function propagateReviewToSameSources(collection, docId, url, updatedSourc
                             setObj[`${pth}.vendor`] = updatedSource.vendor;
                             setObj[`${pth}.color`] = updatedSource.color;
                             setObj[`${pth}.material`] = updatedSource.material;
+                            setObj[`${pth}.condition`] = updatedSource.condition;
+                            setObj[`${pth}.markup_type`] = updatedSource.markup_type;
+                            setObj[`${pth}.markup_fixed`] = updatedSource.markup_fixed;
+                            setObj[`${pth}.markup_percentage`] = updatedSource.markup_percentage;
+
                             await collection.updateOne({ _id: new ObjectId(docId) }, { $set: setObj });
                             updatedCount++;
                         }
@@ -1787,9 +2031,13 @@ async function main() {
                 if (req.headers.range) fetchHeaders.range = req.headers.range;
                 if (CONFIG.hfToken) fetchHeaders['Authorization'] = `Bearer ${CONFIG.hfToken}`;
                 const fRes = await fetch(vidUrl, { headers: fetchHeaders });
-                const resHeaders = {};
-                fRes.headers.forEach((v, k) => { if (k.toLowerCase() !== 'content-encoding') resHeaders[k] = v; });
+                const resHeaders = { 'Cache-Control': 'public, max-age=86400' };
+                fRes.headers.forEach((v, k) => { 
+                  const lk = k.toLowerCase();
+                  if (lk !== 'content-encoding' && lk !== 'cache-control') resHeaders[k] = v; 
+                });
                 res.writeHead(fRes.status, resHeaders);
+
                 if (fRes.body) Readable.fromWeb(fRes.body).pipe(res); else res.end();
             } catch (e) { res.writeHead(500); res.end(e.message); }
             return;
@@ -1873,6 +2121,7 @@ async function main() {
                             [`${basePath}.vendor`]: source.vendor,
                             [`${basePath}.color`]: source.color,
                             [`${basePath}.material`]: source.material,
+                            [`${basePath}.condition`]: source.condition,
                             [`${basePath}.url`]: source.url,
                             [`${basePath}.primary_category`]: source.primary_category,
                             [`${basePath}.price`]: source.price,
@@ -1886,6 +2135,9 @@ async function main() {
                             [`${basePath}.size_guide`]: source.size_guide,
                             [`${basePath}.shipping_info`]: source.shipping_info,
                             [`${basePath}.return_policy`]: source.return_policy,
+                            [`${basePath}.markup_type`]: source.markup_type,
+                            [`${basePath}.markup_fixed`]: source.markup_fixed,
+                            [`${basePath}.markup_percentage`]: source.markup_percentage,
                             [`${basePath}.images`]: source.images,
                             [`${basePath}.selectedImages`]: source.selectedImages,
                             [`${basePath}.customImages`]: source.customImages,
@@ -1910,15 +2162,14 @@ async function main() {
                             const url = String(s.url || '').toLowerCase().trim();
                             if (!url || url === 'null') { deduped.push(s); return; }
                             if (seen.has(url)) {
-                                const best = seen.get(url);
+                                const { score: bScore, idx } = seen.get(url);
                                 const sScore = s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1;
-                                const bScore = best.reviewStatus === 'completed' ? 3 : best.reviewStatus === 'rejected' ? 2 : 1;
                                 if (sScore > bScore) {
-                                    deduped[deduped.indexOf(best)] = s;
-                                    seen.set(url, s);
+                                    deduped[idx] = s;
+                                    seen.set(url, { score: sScore, idx });
                                 }
                             } else {
-                                seen.set(url, s);
+                                seen.set(url, { score: s.reviewStatus === 'completed' ? 3 : s.reviewStatus === 'rejected' ? 2 : 1, idx: deduped.length });
                                 deduped.push(s);
                             }
                         });

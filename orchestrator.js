@@ -359,6 +359,7 @@ EXTRACTION RULES
 4. VARIANTS. Include all available options inside the "variants" array. Ensure you capture the specific "size", "color", and variant "image_url" if available. If a product has variants but no specific size, use "One Size" for the "size" field.
 5. SIZE GUIDE. Only extract a size guide into the "size_guide" object if a sizing table explicitly exists on the page. Do not hallucinate or generate a fallback size guide. If none exists, set "size_guide" to null.
 6. POLICIES AND FEATURES. Summarize relevant text for "shipping_info" and "return_policy". Extract bulleted highlights or technical details into the "features" array.
+6.5. CONDITION: Extract the item's condition if stated on the page. Valid values: "New", "Used", or null. Infer from product data, if not mentioned or unclear, use null. Do not hallucinate — only extract if the page explicitly states or strongly implies it
 7. IMAGES. Deduplicate images. Include ALL distinct, high-resolution main product images found across all JSON nodes in the "images" array.
 8. MISSING CURRENCY. If "currency" is missing, attempt to infer it from the domain extension (.co.uk = GBP, .com.au = AUD) or default to USD.
 
@@ -373,7 +374,7 @@ DROPSHIPPING AND MARKUP LOGIC You must reason and determine the optimal markup b
 
 Before responding MAKE SURE JSON IS CORRECTLY FORMATTED to avoid JSON parse errors.
 
-OUTPUT SCHEMA TEMPLATE [ { "source_id": "string (MUST EXACTLY MATCH INPUT)", "url": "string", "canonical_url": "string or null", "success": boolean, "status_code": number, "extracted_at": "ISO 8601 timestamp", "name": "string or null", "brand": "string or null", "primary_category": "string or null", "product_type": "string or null", "color": "string or null", "material": "string or null", "description": "string or null", "features": ["string"], "price": number or null, "compare_at_price": number or null, "is_on_sale": boolean, "currency": "string (3-letter ISO code) or null", "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "handle": "string or null", "product_id": number or null, "vendor": "string or null", "created_at": "ISO timestamp or null", "updated_at": "ISO timestamp or null", "images": ["string"], "rating": number or null, "review_count": number or null, "reviews": [ { "author": "string or null", "rating": number, "text": "string", "date": "ISO timestamp or null", "helpful_count": number or null } ], "variants": [ { "size": "string or null", "color": "string or null", "price": number or null, "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "inventory_quantity": number or null, "weight": "string or null", "barcode": "string or null", "image_url": "string or null", "url": "string or null" } ], "size_guide": { "headers": ["string"], "rows": [["string"]] } or null, "shipping_info": "string or null", "return_policy": "string or null", "coupon_codes": ["string"], "product_tags": ["string"], "breadcrumb": ["string"], "base_price_for_markup": number or null, "recommended_markup_percentage": number or null, "calculated_markup_amount": number or null, "suggested_resell_price": number or null, "dropship_advisory": "string or null" } ]`;
+OUTPUT SCHEMA TEMPLATE [ { "source_id": "string (MUST EXACTLY MATCH INPUT)", "url": "string", "canonical_url": "string or null", "success": boolean, "status_code": number, "extracted_at": "ISO 8601 timestamp", "name": "string or null", "brand": "string or null", "primary_category": "string or null", "product_type": "string or null", "color": "string or null", "material": "string or null", "condition": "string or null", "description": "string or null", "features": ["string"], "price": number or null, "compare_at_price": number or null, "is_on_sale": boolean, "currency": "string (3-letter ISO code) or null", "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "handle": "string or null", "product_id": number or null, "vendor": "string or null", "created_at": "ISO timestamp or null", "updated_at": "ISO timestamp or null", "images": ["string"], "rating": number or null, "review_count": number or null, "reviews": [ { "author": "string or null", "rating": number, "text": "string", "date": "ISO timestamp or null", "helpful_count": number or null } ], "variants": [ { "size": "string or null", "color": "string or null", "price": number or null, "availability": "InStock or OutOfStock or PreOrder or null", "sku": "string or null", "inventory_quantity": number or null, "weight": "string or null", "barcode": "string or null", "image_url": "string or null", "url": "string or null" } ], "size_guide": { "headers": ["string"], "rows": [["string"]] } or null, "shipping_info": "string or null", "return_policy": "string or null", "coupon_codes": ["string"], "product_tags": ["string"], "breadcrumb": ["string"], "base_price_for_markup": number or null, "recommended_markup_percentage": number or null, "calculated_markup_amount": number or null, "suggested_resell_price": number or null, "dropship_advisory": "string or null" } ]`;
 
 const DATA_EXTRACTION_PROMPT_INSTRUCTIONS = [
     {
@@ -402,6 +403,9 @@ const DATA_EXTRACTION_PROMPT_INSTRUCTIONS = [
     },
     {
         text: "EXTRACTION RULE — SIZE GUIDE: Only extract a size_guide object if a sizing table explicitly exists on the page. Do not hallucinate or generate a fallback size guide. If none exists, set size_guide to null."
+    },
+    {
+        text: "EXTRACTION RULE — CONDITION: Extract the condition, 'new' OR 'used'
     },
     {
         text: "EXTRACTION RULE — POLICIES: Summarize relevant text for shipping_info and return_policy. Extract bulleted highlights or technical details into the features array."
@@ -443,6 +447,7 @@ const DATA_EXTRACTION_PROMPT_INSTRUCTIONS = [
     "product_type": "string or null",
     "color": "string or null",
     "material": "string or null",
+    "condition": "string or null",
     "description": "string or null",
     "features": ["string"],
     "price": number or null,
