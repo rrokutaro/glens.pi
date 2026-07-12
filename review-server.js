@@ -1459,7 +1459,7 @@ async function saveSource(status = "completed") {
     currency: newPrice.currency,
     availability: document.getElementById("eAvail").value,
     description: document.getElementById("eDesc").value,
-    features: document.getElementById("eFeatures").value.split("\n").map(s => s.trim()).filter(Boolean),
+    features: document.getElementById("eFeatures").value.split("\\n").map(s => s.trim()).filter(Boolean),
     shipping_info: document.getElementById("eShippingInfo").value,
     return_policy: document.getElementById("eReturnPolicy").value,
     markup_type: markupType,
