@@ -1403,7 +1403,8 @@ async def _extract_full_browser_core(
     run_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         stream=False,
-        js_code="window.scrollTo(0, document.body.scrollHeight);",
+        # NEW: Added a 1.5s delay after scrolling to let dynamic pages (eBay) settle before extracting
+        js_code="(async () => { window.scrollTo(0, document.body.scrollHeight); await new Promise(r => setTimeout(r, 1500)); })();",
         excluded_tags=EXCLUDED_TAGS,
         screenshot=False,
         remove_overlay_elements=True,
@@ -1488,9 +1489,16 @@ async def _extract_full_browser_core(
         result.confidence = confidence.to_dict()
 
     except Exception as exc:
-        logger.exception("Full browser extraction failed for %s", url)
+        err_msg = str(exc)
+        # NEW: Suppress massive stack trace for known Playwright context destruction errors
+        if "navigating and changing the content" in err_msg or "Execution context was destroyed" in err_msg:
+            logger.error("Full browser extraction failed for %s: Page navigated or refreshed automatically.", url)
+            result.error = "Page Navigation/Context Destroyed"
+        else:
+            logger.exception("Full browser extraction failed for %s", url)
+            result.error = f"{type(exc).__name__}: {err_msg}"
+        
         result.success = False
-        result.error = f"{type(exc).__name__}: {str(exc)}"
 
     elapsed = time.time() - start_time
     result.performance = {"total_time_ms": int(elapsed * 1000)}
