@@ -451,7 +451,8 @@ function toggleTheme() {
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
+  var mtc = document.getElementById('metaThemeColor');
+  if (mtc) mtc.setAttribute('content', '#121212');
 }
 
 function showScreen(id) {
@@ -468,7 +469,13 @@ function toast(msg) {
 
 function escapeHtml(str) {
   if (str == null) return "";
-  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/\`/g, "&#96;")
+    .replace(/\$/g, "&#36;");
 }
 
 function getImageUrl(u) {
@@ -501,7 +508,7 @@ function formatPrice(p, fallbackCurrency = "USD") {
 }
 
 function computeFinalPriceDisplay(source) {
-    const base = source.price?.current != null ? parseFloat(source.price.current) : null;
+    const base = (source.price && source.price.current != null) ? parseFloat(source.price.current) : null;
     if (base == null || isNaN(base)) return "N/A";
     
     const type = source.markup_type || "percentage";
@@ -515,7 +522,7 @@ function computeFinalPriceDisplay(source) {
         if (!isNaN(pct)) final = base * (1 + pct / 100);
     }
     
-    const curr = source.price?.currency || source.currency || "";
+    const curr = (source.price && source.price.currency) ? source.price.currency : (source.currency || "");
     return final.toFixed(2) + (curr ? " " + curr : "");
 }
 
@@ -556,26 +563,27 @@ function saveFormToLocalStorage() {
   syncSizeGuideFromDOM();
 
   try {
+    var gv = function(id, fb) { var el = document.getElementById(id); return el ? el.value : (fb || ""); };
     const data = {
-      name: document.getElementById("eTitle")?.value || "",
-      brand: document.getElementById("eBrand")?.value || "",
-      vendor: document.getElementById("eVendor")?.value || "",
-      color: document.getElementById("eColor")?.value || "",
-      material: document.getElementById("eMaterial")?.value || "",
-      condition: document.getElementById("eCondition")?.value || "",
-      url: document.getElementById("eUrl")?.value || "",
-      category: document.getElementById("eCategory")?.value || "",
-      price: document.getElementById("ePrice")?.value || "",
-      comparePrice: document.getElementById("eComparePrice")?.value || "",
-      currency: document.getElementById("eCurrency")?.value || "",
-      availability: document.getElementById("eAvail")?.value || "",
-      desc: document.getElementById("eDesc")?.value || "",
-      features: document.getElementById("eFeatures")?.value || "",
-      shipping: document.getElementById("eShippingInfo")?.value || "",
-      returns: document.getElementById("eReturnPolicy")?.value || "",
-      markupType: document.getElementById("eMarkupType")?.value || "percentage",
-      markupFixed: document.getElementById("eMarkupFixed")?.value || "",
-      markupPct: document.getElementById("eMarkupPct")?.value || "",
+      name: gv("eTitle"),
+      brand: gv("eBrand"),
+      vendor: gv("eVendor"),
+      color: gv("eColor"),
+      material: gv("eMaterial"),
+      condition: gv("eCondition"),
+      url: gv("eUrl"),
+      category: gv("eCategory"),
+      price: gv("ePrice"),
+      comparePrice: gv("eComparePrice"),
+      currency: gv("eCurrency"),
+      availability: gv("eAvail"),
+      desc: gv("eDesc"),
+      features: gv("eFeatures"),
+      shipping: gv("eShippingInfo"),
+      returns: gv("eReturnPolicy"),
+      markupType: gv("eMarkupType") || "percentage",
+      markupFixed: gv("eMarkupFixed"),
+      markupPct: gv("eMarkupPct"),
       variants: state.currentVariants,
       sizeGuide: state.currentSizeGuide,
       selectedImages: state.currentSelected
@@ -651,6 +659,8 @@ async function loadQueue() {
   } catch(e) {
     state.posts = {};
     state.queue = [];
+    document.getElementById("loading").classList.remove("active");
+    showScreen("queue");
     toast("ERR: " + e.message);
   }
   document.getElementById("loading").classList.remove("active");
@@ -887,14 +897,17 @@ function updateFinalPrice() {
     const base = parseFloat(baseEl.value);
     if (isNaN(base)) { finalEl.value = "N/A"; return; }
     
-    const curr = document.getElementById("eCurrency")?.value || "";
+    var currEl = document.getElementById("eCurrency");
+    const curr = currEl ? currEl.value : "";
     let final = base;
     
     if (type === "fixed") {
-        const fixed = parseFloat(document.getElementById("eMarkupFixed")?.value);
+        var fixedEl = document.getElementById("eMarkupFixed");
+        const fixed = parseFloat(fixedEl ? fixedEl.value : "");
         if (!isNaN(fixed)) final = base + fixed;
     } else {
-        const pct = parseFloat(document.getElementById("eMarkupPct")?.value);
+        var pctEl = document.getElementById("eMarkupPct");
+        const pct = parseFloat(pctEl ? pctEl.value : "");
         if (!isNaN(pct)) final = base * (1 + pct / 100);
     }
     
@@ -1008,7 +1021,7 @@ function openSource(pIdx, sIdx) {
           
           <div class="field" style="width:120px">
             <label>Currency</label>
-            <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase;" oninput="updateFinalPrice()">
+            <input id="eCurrency" list="currencyList" value="\${escapeHtml((s.price && s.price.currency) ? s.price.currency : (s.currency || 'USD'))}" style="text-transform:uppercase;" oninput="updateFinalPrice()">
             <datalist id="currencyList">
               <option value="USD">
               <option value="EUR">
@@ -1540,7 +1553,8 @@ async function commitItem() {
     if (!r.ok) throw new Error("Commit failed");
     
     toast("COMMITTED");
-    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
+    var cur = state.current || {};
+    const curId = cur._id, curFileIdx = cur.fileIdx, curFrameIdx = cur.frameIdx != null ? cur.frameIdx : null;
     const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
     state.queue = state.queue.filter(it => !itemMatch(it));
     for (const pid in state.posts) {
@@ -1563,7 +1577,8 @@ async function deleteItem() {
     const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Discard failed");
     toast("ITEM DISCARDED");
-    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
+    var cur = state.current || {};
+    const curId = cur._id, curFileIdx = cur.fileIdx, curFrameIdx = cur.frameIdx != null ? cur.frameIdx : null;
     const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
     state.queue = state.queue.filter(it => !itemMatch(it));
     for (const pid in state.posts) {
@@ -1615,11 +1630,12 @@ function initSwipeNavigation() {
     if (dt > SWIPE_TIME || Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < getThreshold()) return;
     didSwipe = true;
 
-    const idx = state.queue.findIndex(it =>
-      it._id === state.current?._id &&
-      it.fileIdx === state.current?.fileIdx &&
-      (it.frameIdx === state.current?.frameIdx || (it.frameIdx === null && state.current?.frameIdx === null))
-    );
+    var sc = state.current || {};
+    const idx = state.queue.findIndex(function(it) {
+      return it._id === sc._id &&
+        it.fileIdx === sc.fileIdx &&
+        (it.frameIdx === sc.frameIdx || (it.frameIdx === null && sc.frameIdx === null));
+    });
     if (idx === -1) return;
 
     if (dx < 0 && idx + 1 < state.queue.length) {
