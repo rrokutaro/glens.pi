@@ -434,6 +434,12 @@ const state = {
   formPersistKey: null
 };
 
+const _fetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  opts.headers = { 'ngrok-skip-browser-warning': '1', ...(opts.headers || {}) };
+  return _fetch(url, opts);
+};
+
 // Theme Toggle
 function toggleTheme() {
   const root = document.documentElement;
@@ -1997,7 +2003,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v2.2.0 (New Schema)');
+    log('info', '  REVIEW SERVER — Production Human Review v2.3.0');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
