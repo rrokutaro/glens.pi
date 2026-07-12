@@ -405,7 +405,7 @@ const DATA_EXTRACTION_PROMPT_INSTRUCTIONS = [
         text: "EXTRACTION RULE — SIZE GUIDE: Only extract a size_guide object if a sizing table explicitly exists on the page. Do not hallucinate or generate a fallback size guide. If none exists, set size_guide to null."
     },
     {
-        text: "EXTRACTION RULE — CONDITION: Extract the condition, 'new' OR 'used'
+        text: "EXTRACTION RULE — CONDITION: Extract the condition, 'new' OR 'used'"
     },
     {
         text: "EXTRACTION RULE — POLICIES: Summarize relevant text for shipping_info and return_policy. Extract bulleted highlights or technical details into the features array."
