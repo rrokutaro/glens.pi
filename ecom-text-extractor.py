@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """
-E-Commerce Product Text Extractor (Production-Ready v1.6 - Ultra-Fast Fallbacks)
+E-Commerce Product Text Extractor (Production-Ready v2.0.1 - Hardened)
 
 Dual-mode extraction tool for scraping structured product data from
 e-commerce product pages. Designed for integration with the UGC dropship
 pipeline and review server.
 
-Upgrades (v1.6):
-  - SPEED: Removed the 429 sleep delay in Tier 1. 429s now instantly fail fast to trigger the Tier 2 Classic Fallback with zero wait time.
-  - SPEED: Disabled Full Browser retries by default (max_crawl_retries=0). Retrying heavy headless crawls (or 404s) was causing massive snail-paced bottlenecks.
-  - BUGFIX: Bumped crawl_timeout from 45s to 60s to prevent near-miss timeouts on heavy SPAs.
+Upgrades (v2.0.1):
+  - Fixed CrawlerRunConfig crashing due to orphaned screenshot variables.
+  - Fixed CloakBrowser crash by injecting hardcoded window-size fallback.
+  - Fixed Semaphore Starvation lock by prioritizing domain-lock before global-lock.
 
-Upgrades (v1.5):
-  - NEW: Tiered Lazy Fallback. Advanced lazy mode -> Classic lazy mode -> Full browser.
-
-Usage:
-  python ecom-text-extractor.py -u urls.json -o results.json --lazy-extraction
-  python ecom-text-extractor.py -u urls.json -o results.json --no-lazy-extraction --include-screenshots
+Upgrades (v2.0):
+  - Removed screenshot functionality for a leaner, safer extractor.
+  - Fixed critical orphaned-task leak in browser retry logic.
+  - Replaced fragile regex JSON extraction with chompjs for nested objects.
+  - Added Content-Type validation and response size cap (5 MB).
+  - Corrected Classic lazy fallback comparison to preserve Shopify data.
+  - Full-browser path now also fetches Shopify JSON API.
+  - Domain-aware concurrency to avoid IP bans.
+  - Refined variant detection to eliminate false positives.
+  - Separated Product and Offer schema collection to avoid pollution.
 """
 
 import os
@@ -32,19 +36,20 @@ import base64
 import hashlib
 import time
 import random
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Tuple, List, Dict, Any, Union, Set
 from io import BytesIO
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, urljoin
 from datetime import datetime, timezone
+from collections import defaultdict
 
 import httpx
 from bs4 import BeautifulSoup, NavigableString
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, MemoryAdaptiveDispatcher
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from cloakbrowser import launch_async
 
-# Optional TLS Impersonation dependency for 2026 Anti-Bot Bypassing
+# Optional TLS Impersonation dependency for Anti-Bot Bypassing
 try:
     from curl_cffi import requests as cffi_requests
     HAS_CURL_CFFI = True
@@ -57,6 +62,17 @@ try:
     BS4_PARSER = "lxml"
 except ImportError:
     BS4_PARSER = "html.parser"
+
+# Robust JavaScript object literal extraction
+try:
+    import chompjs
+    HAS_CHOMPJS = True
+except ImportError:
+    HAS_CHOMPJS = False
+    logger.warning(
+        "chompjs not installed. Falling back to regex for inline JS (may miss nested data). "
+        "Recommend: pip install chompjs"
+    )
 
 # -- Logging -----------------------------------------------------------
 logging.basicConfig(
@@ -82,7 +98,7 @@ EXCLUDED_TAGS = [
     "nav", "footer", "aside", "header", "form"
 ]
 
-# Advanced 2026 Chrome 124 header fingerprint for httpx advanced lazy path.
+# Advanced Chrome 124 header fingerprint for httpx advanced lazy path.
 CHROME_HEADERS_2026 = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -105,7 +121,6 @@ CHROME_HEADERS_2026 = {
     "Connection": "keep-alive",
 }
 
-# Classic v1.1 Headers (Fallback if Advanced Mode hits a 429/403)
 CLASSIC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -119,152 +134,9 @@ CLASSIC_HEADERS = {
     "Sec-Fetch-Site": "none",
 }
 
-# Modal / popup / cookie banner blocking JS (injected before page load)
-POPUP_BLOCKER_JS = """
-(() => {
-    const KILL_SELECTORS = [
-        '#cookie-banner', '.cookie-banner', '.cookie-consent', '#onetrust-banner-sdk',
-        '.cc-banner', '.js-cookie-banner', '[data-testid="cookie-banner"]',
-        '#CybotCookiebotDialog', '.gdpr-banner', '#gdpr-consent',
-        '.cookie-notice', '#cookie-notice', '.cookies-banner',
-        '#cookies-policy', '.cookie-policy', '.privacy-banner',
-        '#privacy-banner', '.consent-banner', '#consent-banner',
-        '.gdpr-popup', '#gdpr-popup', '.cookie-popup', '#cookie-popup',
-        '.cookie-overlay', '#cookie-overlay', '.cookie-dialog', '#cookie-dialog',
-        '[class*="cookie"][class*="banner"]', '[id*="cookie"][id*="banner"]',
-        '[class*="gdpr"]', '[id*="gdpr"]',
-        '[class*="consent"]', '[id*="consent"]',
-        '[class*="privacy"][class*="banner"]', '[id*="privacy"][id*="banner"]',
-        '[aria-label*="cookie" i]', '[aria-label*="consent" i]',
-        '[aria-label*="privacy" i]', '[aria-label*="gdpr" i]',
+MAX_RESPONSE_SIZE = 5_000_000  # 5 MB cap for HTML responses
 
-        '.newsletter-popup', '.email-capture', '#signup-modal', '.modal-newsletter',
-        '.newsletter-modal', '#newsletter-modal', '.email-modal', '#email-modal',
-        '.subscribe-popup', '#subscribe-popup', '.subscribe-modal', '#subscribe-modal',
-        '.mailing-list', '#mailing-list', '.email-signup', '#email-signup',
-        '[class*="newsletter"]', '[id*="newsletter"]',
-        '[class*="subscribe"]', '[id*="subscribe"]',
-        '[class*="mailing"]', '[id*="mailing"]',
-
-        '.promo-banner', '.sale-banner', '.announcement-bar', '.promo-overlay',
-        '#promo-banner', '#sale-banner', '#announcement-bar',
-        '.promotion-banner', '#promotion-banner', '.discount-banner', '#discount-banner',
-        '.flash-sale', '#flash-sale', '.limited-time', '#limited-time',
-        '[class*="promo"]', '[id*="promo"]',
-        '[class*="sale"][class*="banner"]', '[id*="sale"][id*="banner"]',
-        '[class*="announcement"]', '[id*="announcement"]',
-        '[class*="promotion"]', '[id*="promotion"]',
-
-        '.intercom-lightweight-app', '#drift-widget', '.zendesk-chat',
-        '[class*="chat-widget"]', '[id*="chat-widget"]',
-        '.chat-widget', '#chat-widget', '.live-chat', '#live-chat',
-        '.chat-button', '#chat-button', '.chat-bubble', '#chat-bubble',
-        '.messenger-widget', '#messenger-widget', '.whatsapp-widget', '#whatsapp-widget',
-        '[class*="intercom"]', '[id*="intercom"]',
-        '[class*="drift"]', '[id*="drift"]',
-        '[class*="zendesk"]', '[id*="zendesk"]',
-        '[class*="tawk"]', '[id*="tawk"]',
-        '[class*="crisp"]', '[id*="crisp"]',
-        '[class*="livechat"]', '[id*="livechat"]',
-
-        '.app-download-banner', '.smartbanner', '#smartbanner',
-        '.app-banner', '#app-banner', '.mobile-app-banner', '#mobile-app-banner',
-        '[class*="app-download"]', '[id*="app-download"]',
-        '[class*="smartbanner"]', '[id*="smartbanner"]',
-
-        '.social-widget', '#social-widget', '.share-widget', '#share-widget',
-        '.social-bar', '#social-bar', '.share-bar', '#share-bar',
-
-        '.feedback-widget', '#feedback-widget', '.survey-widget', '#survey-widget',
-        '.nps-survey', '#nps-survey',
-
-        '.back-to-top', '#back-to-top', '.scroll-top', '#scroll-top',
-        '[class*="back-to-top"]', '[id*="back-to-top"]',
-
-        '.sticky-header', '#sticky-header', '.fixed-header', '#fixed-header',
-        '[class*="sticky"][class*="header"]', '[id*="sticky"][id*="header"]',
-    ];
-
-    const removeAll = () => {
-        KILL_SELECTORS.forEach(sel => {
-            try {
-                document.querySelectorAll(sel).forEach(el => {
-                    el.style.display = 'none';
-                    el.remove();
-                });
-            } catch (e) {}
-        });
-
-        try {
-            document.querySelectorAll('*').forEach(el => {
-                const style = getComputedStyle(el);
-                if (style.position === 'fixed' && parseInt(style.zIndex) > 500) {
-                    const rect = el.getBoundingClientRect();
-                    const vpArea = window.innerWidth * window.innerHeight;
-                    const elArea = rect.width * rect.height;
-                    if (elArea > vpArea * 0.25) {
-                        el.style.display = 'none';
-                        el.remove();
-                    }
-                }
-            });
-        } catch (e) {}
-
-        try {
-            document.querySelectorAll('*').forEach(el => {
-                const style = getComputedStyle(el);
-                if (style.backdropFilter && style.backdropFilter !== 'none') {
-                    el.style.display = 'none';
-                    el.remove();
-                }
-            });
-        } catch (e) {}
-    };
-
-    removeAll();
-
-    if (typeof MutationObserver !== 'undefined') {
-        const obs = new MutationObserver((mutations) => {
-            let shouldClean = false;
-            for (const m of mutations) {
-                if (m.addedNodes.length > 0) {
-                    shouldClean = true;
-                    break;
-                }
-            }
-            if (shouldClean) removeAll();
-        });
-        if (document.body) {
-            obs.observe(document.body, { childList: true, subtree: true });
-        } else {
-            document.addEventListener('DOMContentLoaded', () => {
-                obs.observe(document.body, { childList: true, subtree: true });
-            });
-        }
-    }
-
-    setInterval(removeAll, 500);
-})();
-"""
-
-PRE_SCREENSHOT_JS = """
-(() => {
-    window.scrollTo(0, 0);
-    const images = document.querySelectorAll('img');
-    images.forEach(img => {
-        if (img.dataset.src) img.src = img.dataset.src;
-        if (img.dataset.lazySrc) img.src = img.dataset.lazySrc;
-    });
-    window.dispatchEvent(new Event('scroll'));
-    window.dispatchEvent(new Event('resize'));
-    setTimeout(() => window.scrollTo(0, 0), 300);
-})();
-"""
-
-JS_SCREENSHOT_PREP = "(async () => { window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 500)); })();"
-JS_LAZY_LOAD = "window.scrollTo(0, document.body.scrollHeight);"
-
-# -- Font detection (same as image extractor) ---------------------------
+# -- Font detection ---------------------------
 _FONT_SEARCH_PATHS = [
     os.path.expanduser("~/.local/share/fonts/windows"),
     "/usr/share/fonts/truetype/msttcorefonts",
@@ -414,17 +286,7 @@ class ExtractedSources:
     markdown: Optional[str] = None
     shopify_product: Optional[Dict[str, Any]] = None
     preload_data: List[Dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-@dataclass
-class ScreenshotData:
-    base64: Optional[str] = None
-    width: int = 0
-    height: int = 0
-    format: str = "png"
-    path: Optional[str] = None
+    sizing_guide_url: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -449,6 +311,21 @@ class ConfidenceScore:
         return asdict(self)
 
 @dataclass
+class CompletenessAudit:
+    has_title: bool = False
+    has_price: bool = False
+    has_availability: bool = False
+    has_description: bool = False
+    has_images: bool = False
+    has_variants: bool = False
+    has_sizing_guide: bool = False
+    is_complete: bool = False
+    missing: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+@dataclass
 class ExtractionResult:
     url: str = ""
     canonical_url: str = ""
@@ -458,8 +335,8 @@ class ExtractionResult:
     error: Optional[str] = None
     extracted_at: str = ""
     sources: Dict[str, Any] = field(default_factory=dict)
-    screenshot: Dict[str, Any] = field(default_factory=dict)
     confidence: Dict[str, Any] = field(default_factory=dict)
+    completeness: Dict[str, Any] = field(default_factory=dict)
     performance: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -468,12 +345,7 @@ class ExtractionResult:
 @dataclass
 class PipelineConfig:
     min_confidence: float = 0.3
-    include_screenshots: bool = False
-    screenshot_width: int = 1280
-    screenshot_height: int = 800
-    screenshot_format: str = "png"
-    screenshot_quality: int = 85
-    modal_blocking: str = "aggressive"
+    enforce_completeness: bool = True
     include_dom_text: bool = True
     include_tables: bool = True
     include_lists: bool = True
@@ -488,16 +360,12 @@ class PipelineConfig:
     memory_threshold_percent: float = 70.0
     fingerprint_seed: str = "product_scraper_42"
     storage_quota_mb: int = 5000
-    crawl_timeout: float = 60.0  # v1.6: Increased to 60s
-    max_crawl_retries: int = 0   # v1.6: Default to 0 for fast failure instead of snail-paced retries
+    crawl_timeout: float = 60.0
+    max_crawl_retries: int = 0
     retry_base_delay: float = 2.0
     cdp_health_timeout: float = 30.0
-    lazy_screenshot: bool = False
-    lazy_screenshot_width: int = 1280
-    lazy_screenshot_height: int = 800
-    save_screenshots_to_file: bool = False
-    screenshots_dir: str = ""
     fetch_max_retries: int = 2
+    per_domain_concurrency: int = 2  # new: limit parallel requests per domain
 
 # -- Lazy extraction helpers -------------------------------------------
 
@@ -533,38 +401,58 @@ async def _fetch_html(
 
     for attempt in range(max_retries + 1):
         try:
+            # For curl_cffi we cannot stream easily, so we check Content-Type after full download
             if HAS_CURL_CFFI and isinstance(client, cffi_requests.AsyncSession):
                 r = await client.get(
                     url, timeout=timeout, allow_redirects=True, impersonate="chrome124"
                 )
+                ct = r.headers.get("content-type", "")
+                if "text/html" not in ct:
+                    return None, r.status_code, FetchErrorType.HTTP_ERROR
+                content = r.text
+                if len(content) > MAX_RESPONSE_SIZE:
+                    logger.warning("Response too large for %s (%d bytes)", url, len(content))
+                    return None, r.status_code, FetchErrorType.HTTP_ERROR
+                last_status = r.status_code
+                if r.status_code == 200:
+                    return content, r.status_code, None
             else:
-                r = await client.get(
-                    url,
-                    timeout=timeout,
-                    follow_redirects=True,
-                )
+                # httpx streaming with size cap
+                async with client.stream(
+                    "GET", url, timeout=timeout, follow_redirects=True
+                ) as resp:
+                    ct = resp.headers.get("content-type", "")
+                    if "text/html" not in ct:
+                        return None, resp.status_code, FetchErrorType.HTTP_ERROR
+                    body_chunks = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes(chunk_size=8192):
+                        total += len(chunk)
+                        if total > MAX_RESPONSE_SIZE:
+                            logger.warning("Response too large for %s", url)
+                            return None, resp.status_code, FetchErrorType.HTTP_ERROR
+                        body_chunks.append(chunk)
+                    html = b"".join(body_chunks).decode(resp.encoding or "utf-8", errors="replace")
+                    last_status = resp.status_code
+                    if resp.status_code == 200:
+                        return html, resp.status_code, None
 
-            last_status = r.status_code
-
-            if r.status_code in (200, 201, 202):
-                return r.text, r.status_code, None
-
-            # v1.6: 429 Instant Fail. No sleep. Fail fast to trigger Tier 2 Classic Fallback instantly.
-            if r.status_code == 429 and attempt < max_retries:
+            # Handle HTTP errors
+            if last_status == 429 and attempt < max_retries:
                 logger.warning("HTTP 429 for %s - failing fast to trigger Fallback.", url)
-                return None, r.status_code, FetchErrorType.HTTP_ERROR
+                return None, last_status, FetchErrorType.HTTP_ERROR
 
-            if r.status_code in (500, 502, 503, 504) and attempt < max_retries:
+            if last_status in (500, 502, 503, 504) and attempt < max_retries:
                 delay = 2.0 * (2 ** attempt)
                 logger.warning(
                     "HTTP %d for %s — retrying in %.1fs (%d/%d)",
-                    r.status_code, url, delay, attempt + 1, max_retries,
+                    last_status, url, delay, attempt + 1, max_retries,
                 )
                 await asyncio.sleep(delay)
                 continue
 
-            logger.warning("HTTP %d for %s", r.status_code, url)
-            return None, r.status_code, FetchErrorType.HTTP_ERROR
+            logger.warning("HTTP %d for %s", last_status, url)
+            return None, last_status, FetchErrorType.HTTP_ERROR
 
         except Exception as exc:
             last_error_type = _classify_fetch_error(exc)
@@ -593,11 +481,14 @@ def _is_product_schema(obj: Dict[str, Any]) -> bool:
     types = obj.get("@type", "")
     if isinstance(types, str):
         types = [types]
-    product_types = {"Product", "IndividualProduct", "ProductGroup", "ProductModel",
-                     "SomeProducts", "Vehicle", "Offer", "AggregateOffer"}
+    # Only consider Product types, not Offer
+    product_types = {"Product", "IndividualProduct", "ProductGroup", "ProductModel", "SomeProducts", "Vehicle"}
     return any(_normalize_schema_type(t) in product_types for t in types)
 
 def _collect_product_schemas(data: Any) -> List[Dict[str, Any]]:
+    """
+    Recursively collect Product schemas from JSON-LD. Does NOT collect Offer objects separately.
+    """
     results: List[Dict[str, Any]] = []
     if isinstance(data, list):
         for item in data:
@@ -607,9 +498,7 @@ def _collect_product_schemas(data: Any) -> List[Dict[str, Any]]:
             results.append(data)
         if "@graph" in data:
             results.extend(_collect_product_schemas(data["@graph"]))
-        for key in ("offers", "Offer", "aggregateOffer"):
-            if key in data:
-                results.extend(_collect_product_schemas(data[key]))
+        # We no longer recurse into "offers" to avoid polluting with Offer schemas
     return results
 
 def _extract_schema_org(soup: BeautifulSoup) -> List[Dict[str, Any]]:
@@ -636,7 +525,15 @@ def _extract_open_graph(soup: BeautifulSoup) -> Dict[str, str]:
         prop = meta.get("property", "")
         content = meta.get("content", "")
         if prop and content:
-            og[prop] = content
+            if prop not in og:
+                og[prop] = content
+            else:
+                # If multiple values, store as list
+                existing = og[prop]
+                if isinstance(existing, list):
+                    existing.append(content)
+                else:
+                    og[prop] = [existing, content]
     return og
 
 def _extract_twitter_card(soup: BeautifulSoup) -> Dict[str, str]:
@@ -677,14 +574,15 @@ def _extract_meta_tags(soup: BeautifulSoup) -> Dict[str, str]:
             if el and el.get("content"):
                 meta[key] = el["content"]
 
+    # Only collect product-specific meta tags with exact name/prefix
+    product_prefixes = ["product:", "price", "currency", "availability", "sku", "brand"]
     for meta_tag in soup.find_all("meta"):
         name = meta_tag.get("name", "").lower()
         prop = meta_tag.get("property", "").lower()
         content = meta_tag.get("content", "")
-
-        if any(k in name for k in ["product", "price", "currency", "availability", "sku", "brand"]):
+        if any(name.startswith(p) for p in product_prefixes):
             meta[name] = content
-        if any(k in prop for k in ["product", "price", "currency", "availability", "sku", "brand"]):
+        if any(prop.startswith(p) for p in product_prefixes):
             meta[prop] = content
 
     return meta
@@ -746,46 +644,77 @@ def _extract_vue_data(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
                     pass
     return None
 
+# --- Robust JS object extraction using chompjs ---
+def _extract_js_object(text: str, var_name: str) -> Optional[dict]:
+    """
+    Attempts to extract a JavaScript object literal assigned to var_name.
+    Uses chompjs for robust parsing of nested objects.
+    Falls back to JSON if chompjs not available.
+    """
+    idx = text.find(var_name)
+    if idx == -1:
+        return None
+    start = text.find("{", idx)
+    if start == -1:
+        return None
+    brace_count = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == "{":
+            brace_count += 1
+        elif c == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                chunk = text[start:i+1]
+                try:
+                    if HAS_CHOMPJS:
+                        return chompjs.parse_js_object(chunk)
+                    else:
+                        return json.loads(chunk)
+                except Exception:
+                    return None
+    return None
+
 def _extract_inline_js_product_data(soup: BeautifulSoup) -> Dict[str, Any]:
     results = {}
-    patterns = [
-        (r'window\.(product|Product)\s*=\s*(\{.*?\});?', "window.product"),
-        (r'window\.__PRODUCT__\s*=\s*(\{.*?\});?', "window.__PRODUCT__"),
-        (r'window\.__PRODUCT_DATA__\s*=\s*(\{.*?\});?', "window.__PRODUCT_DATA__"),
-        (r'window\.__PRODUCTS__\s*=\s*(\[.*?\]);?', "window.__PRODUCTS__"),
-        (r'var\s+product\s*=\s*(\{.*?\});?', "var product"),
-        (r'const\s+product\s*=\s*(\{.*?\});?', "const product"),
-        (r'window\.__APP_DATA__\s*=\s*(\{.*?\});?', "window.__APP_DATA__"),
-        (r'window\.__BOOTSTRAP__\s*=\s*(\{.*?\});?', "window.__BOOTSTRAP__"),
-        (r'window\.__STATE__\s*=\s*(\{.*?\});?', "window.__STATE__"),
-        (r'window\.__PRELOADED_STATE__\s*=\s*(\{.*?\});?', "window.__PRELOADED_STATE__"),
-        (r'window\.__APOLLO_STATE__\s*=\s*(\{.*?\});?', "window.__APOLLO_STATE__"),
-        (r'window\.__REACT_QUERY_STATE__\s*=\s*(\{.*?\});?', "window.__REACT_QUERY_STATE__"),
-        (r'window\.Shopify\s*=\s*(\{.*?\});?', "window.Shopify"),
-        (r'window\.ShopifyAnalytics\.meta\s*=\s*(\{.*?\});?', "ShopifyAnalytics.meta"),
-        (r'window\.__SHOPIFY__\s*=\s*(\{.*?\});?', "window.__SHOPIFY__"),
-        (r'window\.__remixContext\s*=\s*(\{.*?\});?', "remixContext"),
-        (r'window\.meta\s*=\s*(\{.*?\});?', "window.meta"),
-        (r'window\.__INITIAL_STATE__\.product\s*=\s*(\{.*?\});?', "initial_state.product"),
-        (r'window\.wc_add_to_cart_params\s*=\s*(\{.*?\});?', "wc_add_to_cart_params"),
+    # Ordered list of (variable_name, result_label)
+    # The variable_name is used to find the assignment.
+    var_names = [
+        ("window.product", "window.product"),
+        ("window.Product", "window.product"),
+        ("window.__PRODUCT__", "window.__PRODUCT__"),
+        ("window.__PRODUCT_DATA__", "window.__PRODUCT_DATA__"),
+        ("window.__PRODUCTS__", "window.__PRODUCTS__"),
+        ("var product", "var product"),
+        ("const product", "const product"),
+        ("window.__APP_DATA__", "window.__APP_DATA__"),
+        ("window.__BOOTSTRAP__", "window.__BOOTSTRAP__"),
+        ("window.__STATE__", "window.__STATE__"),
+        ("window.__PRELOADED_STATE__", "window.__PRELOADED_STATE__"),
+        ("window.__APOLLO_STATE__", "window.__APOLLO_STATE__"),
+        ("window.__REACT_QUERY_STATE__", "window.__REACT_QUERY_STATE__"),
+        ("window.Shopify", "window.Shopify"),
+        ("window.ShopifyAnalytics.meta", "ShopifyAnalytics.meta"),
+        ("window.__SHOPIFY__", "window.__SHOPIFY__"),
+        ("window.__remixContext", "remixContext"),
+        ("window.meta", "window.meta"),
+        ("window.__INITIAL_STATE__.product", "initial_state.product"),
+        ("window.wc_add_to_cart_params", "wc_add_to_cart_params"),
     ]
 
     for script in soup.find_all("script"):
         if not script.string:
             continue
-        for pattern, label in patterns:
-            for match in re.finditer(pattern, script.string, re.DOTALL):
-                try:
-                    group_idx = 2 if label == "window.product" else 1
-                    data = json.loads(match.group(group_idx))
-                    results[label] = data
-                    if label == "remixContext" and isinstance(data, dict):
-                        loader = _deep_get(data, "state", "loaderData")
-                        if loader:
-                            results["remixContext.loaderData"] = loader
-                except (json.JSONDecodeError, TypeError, IndexError):
-                    pass
+        for var, label in var_names:
+            obj = _extract_js_object(script.string, var)
+            if obj is not None:
+                results[label] = obj
+                if label == "remixContext" and isinstance(obj, dict):
+                    loader = _deep_get(obj, "state", "loaderData")
+                    if loader:
+                        results["remixContext.loaderData"] = loader
 
+    # Also try the shopify_product_json data-attributes
     for script in soup.find_all("script", type="text/json"):
         if script.get("data-product-json") or script.get("id", "").startswith("ProductJson-"):
             try:
@@ -978,6 +907,20 @@ def _extract_breadcrumb(soup: BeautifulSoup) -> List[str]:
 
     return crumbs
 
+def _extract_sizing_guide_link(soup: BeautifulSoup, base_url: str) -> Optional[str]:
+    """Finds links pointing to standalone size guides."""
+    keywords = ["size chart", "size guide", "sizing guide", "measurement guide", "fit guide"]
+    
+    for a in soup.find_all("a", href=True):
+        text = a.get_text(strip=True).lower()
+        title = a.get("title", "").lower()
+        href = a["href"].strip()
+        if not href or href.startswith("javascript:") or href == "#":
+            continue
+        if any(k in text or k in title for k in keywords):
+            return urljoin(base_url, href)
+    return None
+
 async def _extract_preload_data(
     soup: BeautifulSoup,
     base_url: str,
@@ -1022,6 +965,190 @@ async def _extract_preload_data(
             logger.debug("Preload fetch failed for %s: %s", full_url, exc)
 
     return results
+
+def _audit_completeness(sources: Dict[str, Any]) -> CompletenessAudit:
+    audit = CompletenessAudit()
+    missing: List[str] = []
+
+    schema_org = sources.get("schema_org") or []
+    if not isinstance(schema_org, list):
+        schema_org = [schema_org] if schema_org else []
+    og = sources.get("open_graph") or {}
+    meta = sources.get("meta_tags") or {}
+    dom = sources.get("dom_text") or {}
+    inline = sources.get("inline_js") or {}
+    shopify = sources.get("shopify_product") or {}
+    tables = sources.get("tables") or []
+
+    # --- Title ---
+    audit.has_title = bool(
+        meta.get("title")
+        or (dom.get("h1") and len(dom["h1"]) > 0)
+        or any(isinstance(s, dict) and s.get("name") for s in schema_org)
+    )
+    if not audit.has_title:
+        missing.append("title")
+
+    # --- Price ---
+    price_found = False
+    for s in schema_org:
+        if isinstance(s, dict):
+            offers = s.get("offers")
+            if isinstance(offers, dict) and offers.get("price"):
+                price_found = True
+            elif isinstance(offers, list) and any(isinstance(o, dict) and o.get("price") for o in offers):
+                price_found = True
+    if not price_found:
+        price_found = bool(
+            og.get("og:price:amount") or 
+            meta.get("product:price:amount") or 
+            meta.get("price")
+        )
+    if not price_found and isinstance(shopify, dict):
+        variants = shopify.get("variants") or []
+        if variants and isinstance(variants[0], dict) and variants[0].get("price"):
+            price_found = True
+    if not price_found:
+        for label, data in inline.items():
+            if isinstance(data, dict) and "price" in json.dumps(data, default=str).lower():
+                price_found = True
+                break
+    audit.has_price = price_found
+    if not audit.has_price:
+        missing.append("price")
+
+    # --- Availability ---
+    avail_found = False
+    for s in schema_org:
+        if isinstance(s, dict):
+            offers = s.get("offers")
+            if isinstance(offers, dict) and offers.get("availability"):
+                avail_found = True
+            elif isinstance(offers, list) and any(isinstance(o, dict) and o.get("availability") for o in offers):
+                avail_found = True
+    if not avail_found:
+        avail_found = bool(
+            og.get("og:availability") or 
+            meta.get("product:availability") or 
+            meta.get("availability")
+        )
+    if not avail_found and isinstance(shopify, dict):
+        variants = shopify.get("variants") or []
+        if variants and isinstance(variants[0], dict):
+            if variants[0].get("available") is not None or variants[0].get("inventory_quantity") is not None:
+                avail_found = True
+    if not avail_found:
+        for label, data in inline.items():
+            if isinstance(data, dict):
+                dump = json.dumps(data, default=str).lower()
+                if any(k in dump for k in ["availability", "instock", "in_stock", "outofstock", "out_of_stock", "inventory_quantity"]):
+                    avail_found = True
+                    break
+    audit.has_availability = avail_found
+    if not audit.has_availability:
+        missing.append("availability")
+
+    # --- Description ---
+    desc_found = bool(
+        meta.get("description")
+        or any(isinstance(s, dict) and s.get("description") for s in schema_org)
+    )
+    paragraphs = dom.get("paragraphs") or []
+    if not desc_found and len(paragraphs) > 0:
+        desc_found = True
+    audit.has_description = desc_found
+    if not audit.has_description:
+        missing.append("description")
+
+    # --- Images ---
+    img_found = False
+    for s in schema_org:
+        if isinstance(s, dict) and s.get("image"):
+            img_found = True
+    if not img_found:
+        img_found = bool(og.get("og:image") or meta.get("image"))
+    if not img_found and isinstance(shopify, dict):
+        img_found = bool(shopify.get("images"))
+    audit.has_images = img_found
+    if not audit.has_images:
+        missing.append("images")
+
+    # --- Variants (refined) ---
+    variants_found = False
+
+    # Shopify: check if has multiple variants or one that is not the default placeholder
+    if isinstance(shopify, dict):
+        variants = shopify.get("variants") or []
+        if len(variants) > 1:
+            variants_found = True
+        elif len(variants) == 1:
+            title = variants[0].get("title", "").lower()
+            if title and title not in ("default title", "default"):
+                variants_found = True
+            # also check if product has options array
+            if shopify.get("options") and any(opt.get("values", []) for opt in shopify["options"]):
+                variants_found = True
+
+    # Schema.org: look for hasVariant, size, color, or multiple offers
+    if not variants_found:
+        for s in schema_org:
+            if isinstance(s, dict):
+                if s.get("hasVariant") or s.get("size") or s.get("color"):
+                    variants_found = True
+                offers = s.get("offers")
+                if isinstance(offers, list) and len(offers) > 1:
+                    variants_found = True
+                # No longer treat single offer as variant found.
+
+    # Inline JS: check for top-level keys like "variants", "options", "variantData"
+    if not variants_found:
+        for label, data in inline.items():
+            if isinstance(data, dict):
+                # Look for variant-related keys at the first level
+                if any(key in data for key in ("variants", "variant", "options", "variantData", "productVariants")):
+                    variants_found = True
+                    break
+
+    # Tables: sizing tables indicate variants
+    if not variants_found:
+        for t in tables:
+            if isinstance(t, dict):
+                header_str = " ".join(t.get("headers") or []).lower()
+                rows_str = " ".join(" ".join(r).lower() for r in (t.get("rows") or []) if isinstance(r, list))
+                combined = header_str + " " + rows_str
+                if any(k in combined for k in ["size", "cm", "inch", "chest", "waist", "length", "xs", "s", "m", "l", "xl"]):
+                    variants_found = True
+                    break
+
+    audit.has_variants = variants_found
+    if not audit.has_variants:
+        missing.append("variants")
+
+    # --- Sizing Guide ---
+    sizing_found = False
+    if sources.get("sizing_guide_url"):
+        sizing_found = True
+    if not sizing_found:
+        body_text = (dom.get("body_text") or "").lower()
+        para_text = " ".join(p.lower() for p in paragraphs)
+        combined_text = body_text + " " + para_text
+        if any(k in combined_text for k in ["size chart", "sizing guide", "size guide", "measurement guide", "fit guide"]):
+            sizing_found = True
+    if not sizing_found:
+        for t in tables:
+            if isinstance(t, dict):
+                header_str = " ".join(t.get("headers") or []).lower()
+                if any(k in header_str for k in ["size", "cm", "inch", "chest", "waist", "hip", "length"]):
+                    sizing_found = True
+                    break
+    audit.has_sizing_guide = sizing_found
+    if not audit.has_sizing_guide:
+        missing.append("sizing_guide")
+
+    critical_missing = [m for m in missing if m in ("title", "price", "availability", "description", "images", "variants")]
+    audit.is_complete = len(critical_missing) == 0
+    audit.missing = missing
+    return audit
 
 def _compute_confidence(sources: ExtractedSources) -> ConfidenceScore:
     c = ConfidenceScore()
@@ -1097,49 +1224,11 @@ def _deep_get(d: Any, *keys: str) -> Any:
             return None
     return d
 
-async def _take_lazy_screenshot(
-    url: str,
-    playwright_browser: Any,
-    width: int = 1280,
-    height: int = 800,
-    timeout: float = 15.0
-) -> Optional[ScreenshotData]:
-    if not playwright_browser:
-        return None
-
-    page = None
-    try:
-        page = await playwright_browser.new_page(viewport={"width": width, "height": height})
-        await page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-
-        await page.evaluate(POPUP_BLOCKER_JS)
-        await page.evaluate(PRE_SCREENSHOT_JS)
-        await asyncio.sleep(0.5)
-
-        screenshot = await page.screenshot(type="png", full_page=False)
-
-        return ScreenshotData(
-            base64=base64.b64encode(screenshot).decode(),
-            width=width,
-            height=height,
-            format="png",
-        )
-    except Exception as exc:
-        logger.warning("Lazy screenshot failed for %s: %s", url, exc)
-        return None
-    finally:
-        if page is not None:
-            try:
-                await page.close()
-            except Exception as close_exc:
-                logger.debug("Page close error (non-fatal): %s", close_exc)
-
 # -- Core lazy extraction ----------------------------------------------
 async def extract_lazy(
     client: Any,
     url: str,
     config: PipelineConfig,
-    playwright_browser: Optional[Any] = None,
     use_shopify_api: bool = True
 ) -> ExtractionResult:
     start_time = time.time()
@@ -1201,15 +1290,11 @@ async def extract_lazy(
     if config.include_dom_text:
         sources.dom_text = _extract_dom_text(soup)
 
+    sources.sizing_guide_url = _extract_sizing_guide_link(soup, url)
+
     if use_shopify_api:
         sources.preload_data = await _extract_preload_data(
             soup, url, client, config.fetch_timeout
-        )
-
-    screenshot = None
-    if config.lazy_screenshot and config.include_screenshots and playwright_browser:
-        screenshot = await _take_lazy_screenshot(
-            url, playwright_browser, config.lazy_screenshot_width, config.lazy_screenshot_height
         )
 
     confidence = _compute_confidence(sources)
@@ -1217,8 +1302,6 @@ async def extract_lazy(
     result.success = True
     result.sources = sources.to_dict()
     result.confidence = confidence.to_dict()
-    if screenshot:
-        result.screenshot = screenshot.to_dict()
 
     elapsed = time.time() - start_time
     result.performance = {
@@ -1229,7 +1312,7 @@ async def extract_lazy(
 
     return result
 
-# -- CloakBrowser launch helpers (same as image extractor) -------------
+# -- CloakBrowser launch helpers ---------------------------------------
 def _build_cloak_args(config: PipelineConfig) -> List[str]:
     args = [
         f"--remote-debugging-port={config.cdp_port}",
@@ -1243,7 +1326,7 @@ def _build_cloak_args(config: PipelineConfig) -> List[str]:
         "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-site-isolation-trials",
-        f"--window-size={config.screenshot_width},{config.screenshot_height}",
+        "--window-size=1280,800",
     ]
 
     font_dir = _find_font_dir()
@@ -1269,11 +1352,11 @@ async def _health_check_cdp(port: int, timeout: float = 30.0) -> None:
 async def _crawl_single_with_retry(
     crawler: AsyncWebCrawler, url: str, config: CrawlerRunConfig, pipeline_config: PipelineConfig,
 ) -> Any:
+    last_exc = None
     for attempt in range(pipeline_config.max_crawl_retries + 1):
         try:
-            crawl_task = asyncio.create_task(crawler.arun(url=url, config=config))
             return await asyncio.wait_for(
-                asyncio.shield(crawl_task),
+                crawler.arun(url=url, config=config),
                 timeout=pipeline_config.crawl_timeout,
             )
         except asyncio.TimeoutError:
@@ -1288,11 +1371,14 @@ async def _crawl_single_with_retry(
                 "Error crawling %s (attempt %d/%d): %s",
                 url, attempt + 1, pipeline_config.max_crawl_retries + 1, exc
             )
+            last_exc = exc
             if attempt == pipeline_config.max_crawl_retries:
                 raise
 
         delay = pipeline_config.retry_base_delay * (2 ** attempt)
         await asyncio.sleep(delay)
+    # Fallback (should never reach)
+    raise last_exc if last_exc else RuntimeError("Max retries exceeded")
 
 # -- Full browser extraction -------------------------------------------
 async def _extract_full_browser_core(
@@ -1308,14 +1394,18 @@ async def _extract_full_browser_core(
         extracted_at=datetime.now(timezone.utc).isoformat(),
     )
 
+    # Try Shopify JSON API even in full-browser mode
+    shopify_product = None
+    if _is_shopify_domain(url):
+        async with httpx.AsyncClient(timeout=10) as shopify_client:
+            shopify_product = await _try_shopify_json(shopify_client, url, config.fetch_timeout)
+
     run_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         stream=False,
-        js_code=JS_SCREENSHOT_PREP if config.include_screenshots else JS_LAZY_LOAD,
+        js_code=JS_LAZY_LOAD,
         excluded_tags=EXCLUDED_TAGS,
-        screenshot=config.include_screenshots,
-        screenshot_wait_for=1.0 if config.include_screenshots else None,
-        force_viewport_screenshot=True if config.include_screenshots else False,
+        screenshot=False,
         remove_overlay_elements=True,
         remove_consent_popups=True,
     )
@@ -1336,6 +1426,7 @@ async def _extract_full_browser_core(
         result.canonical_url = page_canonical
 
         sources = ExtractedSources()
+        sources.shopify_product = shopify_product
 
         if crawl_result.metadata and crawl_result.metadata.get("json_ld"):
             try:
@@ -1380,6 +1471,9 @@ async def _extract_full_browser_core(
             sources.breadcrumb = _extract_breadcrumb(soup)
         if config.include_dom_text:
             sources.dom_text = _extract_dom_text(soup)
+
+        sources.sizing_guide_url = _extract_sizing_guide_link(soup, url)
+
         if config.include_markdown and crawl_result.markdown:
             sources.markdown = (
                 crawl_result.markdown.raw_markdown
@@ -1387,41 +1481,11 @@ async def _extract_full_browser_core(
                 else str(crawl_result.markdown)
             )
 
-        screenshot = None
-        if config.include_screenshots:
-            if crawl_result.screenshot:
-                screenshot_data = crawl_result.screenshot
-                if isinstance(screenshot_data, str):
-                    screenshot = ScreenshotData(
-                        base64=screenshot_data,
-                        width=config.screenshot_width,
-                        height=config.screenshot_height,
-                        format="png",
-                    )
-                elif isinstance(screenshot_data, bytes):
-                    screenshot = ScreenshotData(
-                        base64=base64.b64encode(screenshot_data).decode(),
-                        width=config.screenshot_width,
-                        height=config.screenshot_height,
-                        format="png",
-                    )
-
-            if config.save_screenshots_to_file and screenshot and screenshot.base64:
-                os.makedirs(config.screenshots_dir, exist_ok=True)
-                filename = f"{url_hash(url)}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
-                filepath = os.path.join(config.screenshots_dir, filename)
-                with open(filepath, "wb") as f:
-                    f.write(base64.b64decode(screenshot.base64))
-                screenshot.path = filepath
-                screenshot.base64 = None
-
         confidence = _compute_confidence(sources)
 
         result.success = True
         result.sources = sources.to_dict()
         result.confidence = confidence.to_dict()
-        if screenshot:
-            result.screenshot = screenshot.to_dict()
 
     except Exception as exc:
         logger.exception("Full browser extraction failed for %s", url)
@@ -1507,17 +1571,21 @@ async def extract_full_browser(
                         pass
 
 # -- Batch orchestration -----------------------------------------------
+@asynccontextmanager
+async def _per_domain_limit(url: str, semaphores: Dict[str, asyncio.Semaphore], max_concurrency: int):
+    domain = urlsplit(url).netloc
+    sem = semaphores.setdefault(domain, asyncio.Semaphore(max_concurrency))
+    async with sem:
+        yield
+
 async def run_batch(
     urls: List[str],
     lazy_extraction: bool = True,
-    include_screenshots: bool = False,
     include_dom_text: bool = True,
     include_tables: bool = True,
     include_lists: bool = True,
     include_markdown: bool = True,
     include_breadcrumb: bool = True,
-    lazy_screenshot: bool = False,
-    modal_blocking: str = "aggressive",
     min_confidence: float = 0.3,
     cdp_port: int = 9243,
     concurrency: int = 8,
@@ -1525,9 +1593,8 @@ async def run_batch(
     http_timeout: float = 10.0,
     crawl_timeout: float = 60.0,
     max_crawl_retries: int = 0,
-    save_screenshots_to_file: bool = False,
-    screenshots_dir: str = "",
     fetch_max_retries: int = 2,
+    enforce_completeness: bool = True,
 ) -> Dict[str, Any]:
     if not urls:
         return {}
@@ -1554,26 +1621,24 @@ async def run_batch(
 
     config = PipelineConfig(
         min_confidence=min_confidence,
-        include_screenshots=include_screenshots,
-        modal_blocking=modal_blocking,
+        enforce_completeness=enforce_completeness,
         include_dom_text=include_dom_text,
         include_tables=include_tables,
         include_lists=include_lists,
         include_markdown=include_markdown,
         include_breadcrumb=include_breadcrumb,
-        lazy_screenshot=lazy_screenshot,
         cdp_port=cdp_port,
         concurrency=concurrency,
         browser_concurrency=browser_concurrency,
         http_timeout=http_timeout,
         crawl_timeout=crawl_timeout,
         max_crawl_retries=max_crawl_retries,
-        save_screenshots_to_file=save_screenshots_to_file,
-        screenshots_dir=screenshots_dir,
         fetch_max_retries=fetch_max_retries,
     )
 
     results: Dict[str, Any] = {}
+    domain_semaphores: Dict[str, asyncio.Semaphore] = {}
+    MAX_PER_DOMAIN = config.per_domain_concurrency
 
     if lazy_extraction:
         logger.info("=== Phase 1: Tiered Lazy extraction for %d URL(s) ===", len(valid_urls))
@@ -1593,60 +1658,60 @@ async def run_batch(
                 httpx.AsyncClient(limits=limits, timeout=timeout, headers=CLASSIC_HEADERS)
             )
 
-            pw_browser = None
-            if config.lazy_screenshot and config.include_screenshots:
-                try:
-                    from playwright.async_api import async_playwright
-                    playwright = await stack.enter_async_context(async_playwright())
-                    pw_browser = await playwright.chromium.launch(headless=True)
-                except ImportError:
-                    pass
-                except Exception as exc:
-                    logger.warning("Could not launch Playwright browser: %s", exc)
-
-            sem = asyncio.Semaphore(config.concurrency)
+            global_sem = asyncio.Semaphore(config.concurrency)
 
             async def _process_lazy(url: str) -> Tuple[str, ExtractionResult]:
-                async with sem:
-                    try:
-                        res = await extract_lazy(client_advanced, url, config, pw_browser, use_shopify_api=True)
+                # 1. Wait your turn for this specific domain FIRST
+                async with _per_domain_limit(url, domain_semaphores, MAX_PER_DOMAIN):
+                    # 2. THEN grab an active global connection slot
+                    async with global_sem:
+                        try:
+                            res = await extract_lazy(client_advanced, url, config, use_shopify_api=True)
 
-                        needs_fallback = False
-                        if not res.success:
-                            needs_fallback = True
-                        elif res.status_code in (403, 429, 503):
-                            needs_fallback = True
-                        elif res.confidence.get("score", 0) < min_confidence:
-                            needs_fallback = True
+                            needs_fallback = False
+                            if not res.success:
+                                needs_fallback = True
+                            elif res.status_code in (403, 429, 503):
+                                needs_fallback = True
+                            elif res.confidence.get("score", 0) < min_confidence:
+                                needs_fallback = True
 
-                        if needs_fallback:
-                            logger.info(
-                                "Advanced lazy mode insufficient for %s (status=%s, score=%.2f). Falling back to Classic lazy mode...",
-                                url, res.status_code, res.confidence.get("score", 0)
+                            if needs_fallback:
+                                logger.info(
+                                    "Advanced lazy mode insufficient for %s (status=%s, score=%.2f). Falling back to Classic lazy mode...",
+                                    url, res.status_code, res.confidence.get("score", 0)
+                                )
+                                try:
+                                    res_classic = await extract_lazy(client_classic, url, config, use_shopify_api=False)
+
+                                    advanced_score = res.confidence.get("score", 0)
+                                    classic_score = res_classic.confidence.get("score", 0)
+                                    # Use classic only if advanced failed or classic significantly better
+                                    if not res.success or (res_classic.success and classic_score > advanced_score + 0.05):
+                                        logger.info("Classic lazy fallback replacing advanced for %s", url)
+                                        return url, res_classic
+                                    else:
+                                        return url, res
+                                except Exception as fallback_exc:
+                                    logger.warning("Classic lazy fallback crashed for %s: %s", url, fallback_exc)
+
+                            return url, res
+                        except Exception as exc:
+                            logger.exception("Lazy extraction crashed for %s", url)
+                            err = ExtractionResult(
+                                url=url,
+                                extraction_mode="lazy",
+                                success=False,
+                                error=f"{type(exc).__name__}: {str(exc)}",
+                                extracted_at=datetime.now(timezone.utc).isoformat(),
                             )
-                            try:
-                                res_classic = await extract_lazy(client_classic, url, config, pw_browser, use_shopify_api=False)
-
-                                if res_classic.success and (res_classic.confidence.get("score", 0) >= res.confidence.get("score", 0) or not res.success):
-                                    logger.info("Classic lazy fallback succeeded for %s", url)
-                                    return url, res_classic
-                            except Exception as fallback_exc:
-                                logger.warning("Classic lazy fallback crashed for %s: %s", url, fallback_exc)
-
-                        return url, res
-                    except Exception as exc:
-                        logger.exception("Lazy extraction crashed for %s", url)
-                        err = ExtractionResult(
-                            url=url,
-                            extraction_mode="lazy",
-                            success=False,
-                            error=f"{type(exc).__name__}: {str(exc)}",
-                            extracted_at=datetime.now(timezone.utc).isoformat(),
-                        )
-                        return url, err
+                            return url, err
 
             lazy_results = await asyncio.gather(*(_process_lazy(url) for url in valid_urls))
             for url, res in lazy_results:
+                if config.enforce_completeness:
+                    audit = _audit_completeness(res.sources)
+                    res.completeness = audit.to_dict()
                 results[url] = res.to_dict()
                 if res.success:
                     logger.info(
@@ -1658,23 +1723,38 @@ async def run_batch(
 
         failed_urls = []
         for url, res in results.items():
+            # Skip permanent errors
             if res.get("status_code") in (404, 410, 400):
                 logger.info(
                     "Skipping Full Browser Phase for %s due to permanent HTTP %s",
                     url, res.get("status_code")
                 )
                 continue
+            # Also skip if the error indicates SSL/DNS failures
+            if not res["success"] and isinstance(res.get("error"), str):
+                lower_err = res["error"].lower()
+                if any(k in lower_err for k in ("ssl_error", "dns_error", "certificate", "name or service not known")):
+                    logger.info("Skipping Full Browser Phase for %s due to permanent network error", url)
+                    continue
 
             if not res["success"] or res.get("confidence", {}).get("score", 0) < min_confidence:
                 failed_urls.append(url)
+            elif config.enforce_completeness:
+                audit = res.get("completeness", {})
+                if not audit.get("is_complete", True):
+                    logger.info(
+                        "URL %s marked for full browser fallback due to incomplete lazy data (missing dropship criticals: %s)",
+                        url, ", ".join(audit.get("missing", []))
+                    )
+                    failed_urls.append(url)
 
         if failed_urls:
             logger.info(
-                "=== Phase 2: Full browser extraction for %d failed URL(s) ===",
+                "=== Phase 2: Full browser extraction for %d failed/incomplete URL(s) ===",
                 len(failed_urls)
             )
         else:
-            logger.info("All URLs succeeded in lazy mode or permanently failed -- skipping full browser.")
+            logger.info("All URLs succeeded in lazy mode and passed completeness audit -- skipping full browser.")
             return results
     else:
         failed_urls = valid_urls
@@ -1718,23 +1798,29 @@ async def run_batch(
                     sem_browser = asyncio.Semaphore(max(1, config.browser_concurrency))
 
                     async def _process_full(url: str) -> Tuple[str, ExtractionResult]:
-                        async with sem_browser:
-                            try:
-                                res = await extract_full_browser(url, config, client, crawler=crawler)
-                                return url, res
-                            except Exception as exc:
-                                logger.exception("Full browser extraction crashed for %s", url)
-                                err = ExtractionResult(
-                                    url=url,
-                                    extraction_mode="full_browser",
-                                    success=False,
-                                    error=f"{type(exc).__name__}: {str(exc)}",
-                                    extracted_at=datetime.now(timezone.utc).isoformat(),
-                                )
-                                return url, err
+                        # 1. Wait your turn for this specific domain FIRST
+                        async with _per_domain_limit(url, domain_semaphores, MAX_PER_DOMAIN):
+                            # 2. THEN grab an active browser slot
+                            async with sem_browser:
+                                try:
+                                    res = await extract_full_browser(url, config, client, crawler=crawler)
+                                    return url, res
+                                except Exception as exc:
+                                    logger.exception("Full browser extraction crashed for %s", url)
+                                    err = ExtractionResult(
+                                        url=url,
+                                        extraction_mode="full_browser",
+                                        success=False,
+                                        error=f"{type(exc).__name__}: {str(exc)}",
+                                        extracted_at=datetime.now(timezone.utc).isoformat(),
+                                    )
+                                    return url, err
 
                     full_results = await asyncio.gather(*(_process_full(url) for url in failed_urls))
                     for url, res in full_results:
+                        if config.enforce_completeness:
+                            audit = _audit_completeness(res.sources)
+                            res.completeness = audit.to_dict()
                         results[url] = res.to_dict()
                         if res.success:
                             logger.info(
@@ -1773,9 +1859,8 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python ecom-text-extractor.py -u urls.json -o results.json --lazy-extraction
-  python ecom-text-extractor.py -u urls.json -o results.json --no-lazy-extraction --include-screenshots --modal-blocking aggressive
-  python ecom-text-extractor.py -u urls.json -o results.json --lazy-extraction --lazy-screenshot --save-screenshots-to-file --screenshots-dir ./screenshots
+  python ecom-text-extractor.py -u urls.json -o results.json
+  python ecom-text-extractor.py -u urls.json -o results.json --no-enforce-completeness
         """,
     )
     parser.add_argument(
@@ -1795,22 +1880,10 @@ Examples:
         help="Use lightweight HTTP-only extraction first (default: --lazy-extraction)",
     )
     parser.add_argument(
-        "--include-screenshots",
+        "--enforce-completeness",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Capture screenshots (default: --no-include-screenshots)",
-    )
-    parser.add_argument(
-        "--lazy-screenshot",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Capture screenshots even in lazy mode via Playwright (default: --no-lazy-screenshot)",
-    )
-    parser.add_argument(
-        "--modal-blocking",
-        choices=["none", "conservative", "aggressive"],
-        default="aggressive",
-        help="Modal/popup/cookie banner blocking aggressiveness (default: aggressive)",
+        default=True,
+        help="Force full browser fallback if lazy misses critical fields like price, availability, or variants (default: True)",
     )
     parser.add_argument(
         "--min-confidence",
@@ -1859,18 +1932,6 @@ Examples:
         type=int,
         default=2,
         help="Max retries for HTTP fetch (5xx) in lazy mode (default: 2)",
-    )
-    parser.add_argument(
-        "--save-screenshots-to-file",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Save screenshots to files instead of base64 in JSON (default: --no-save-screenshots-to-file)",
-    )
-    parser.add_argument(
-        "--screenshots-dir",
-        type=str,
-        default="",
-        help="Directory to save screenshots (default: current directory)",
     )
     parser.add_argument(
         "--no-dom-text",
@@ -1928,14 +1989,11 @@ Examples:
         run_batch(
             urls=urls,
             lazy_extraction=args.lazy_extraction,
-            include_screenshots=args.include_screenshots,
             include_dom_text=args.include_dom_text,
             include_tables=args.include_tables,
             include_lists=args.include_lists,
             include_markdown=args.include_markdown,
             include_breadcrumb=args.include_breadcrumb,
-            lazy_screenshot=args.lazy_screenshot,
-            modal_blocking=args.modal_blocking,
             min_confidence=args.min_confidence,
             cdp_port=args.cdp_port,
             concurrency=args.concurrency,
@@ -1943,9 +2001,8 @@ Examples:
             http_timeout=args.http_timeout,
             crawl_timeout=args.crawl_timeout,
             max_crawl_retries=args.max_crawl_retries,
-            save_screenshots_to_file=args.save_screenshots_to_file,
-            screenshots_dir=args.screenshots_dir,
             fetch_max_retries=args.fetch_max_retries,
+            enforce_completeness=args.enforce_completeness,
         )
     )
 
