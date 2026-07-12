@@ -1826,17 +1826,32 @@ async def run_batch(
 
                     full_results = await asyncio.gather(*(_process_full(url) for url in failed_urls))
                     for url, res in full_results:
-                        if config.enforce_completeness:
-                            audit = _audit_completeness(res.sources)
-                            res.completeness = audit.to_dict()
-                        results[url] = res.to_dict()
+                        # --- Best-Data-Wins Logic ---
+                        existing_lazy_res = results.get(url)
+                        is_lazy_success = existing_lazy_res and existing_lazy_res.get("success")
+                        
+                        should_overwrite = False
+                        
                         if res.success:
-                            logger.info(
-                                "Full browser success %s (confidence=%.2f)", url,
-                                res.confidence.get("score", 0)
-                            )
-                        else:
+                            # Browser worked! Use this better data.
+                            should_overwrite = True
+                            logger.info("Full browser success %s (confidence=%.2f)", url, res.confidence.get("score", 0))
+                        elif not is_lazy_success:
+                            # Browser failed, but Lazy failed too. Update with latest error.
+                            should_overwrite = True
                             logger.error("Full browser failed %s: %s", url, res.error)
+                        else:
+                            # Browser failed, but Lazy HAD data. PRESERVE LAZY DATA.
+                            logger.warning(
+                                "Full browser failed for %s (%s), but Lazy had partial data. Preserving Lazy result.", 
+                                url, res.error
+                            )
+
+                        if should_overwrite:
+                            if config.enforce_completeness:
+                                audit = _audit_completeness(res.sources)
+                                res.completeness = audit.to_dict()
+                            results[url] = res.to_dict()
 
             finally:
                 if cb_browser is not None:
