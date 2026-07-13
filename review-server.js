@@ -381,7 +381,7 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
       <div id="rTopRight" style="width:70px; text-align:right;"></div>
     </div>
     <div class="hero">
-      <img id="rImage" src="" alt="" loading="lazy" decoding="async" fetchpriority="high" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
+      <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
@@ -688,7 +688,7 @@ function renderQueue() {
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
-          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" loading="lazy" decoding="async" fetchpriority="low" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
           <div class="post-info">
             <div class="post-id">\${escapeHtml(pid)}</div>
             <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
@@ -698,7 +698,7 @@ function renderQueue() {
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
             <div class="item-row" data-item-id="\${it._id}-\${it.fileIdx}-\${it.frameIdx !== null ? it.frameIdx : 'img'}" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
-              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" loading="lazy" decoding="async" fetchpriority="low" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
               <div class="item-info">
                 <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
                 <div class="item-status">\${escapeHtml(it.status)}</div>
@@ -827,7 +827,7 @@ function renderItem() {
 
           listHtml += \`
             <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
-              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
               <div class="p-info">
                 <div class="p-title">\${escapeHtml(nameLabel)}</div>
                 <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
@@ -1174,7 +1174,7 @@ function openSource(pIdx, sIdx) {
             <div class="field" id="fieldMarkupPct" style="display:\${(s.markup_type || "percentage") === "percentage" ? "block" : "none"}">
               <label>Markup %</label>
               <input id="eMarkupPct" type="number" step="0.1" inputmode="decimal" 
-                value="\${s.markup_percentage != null ? escapeHtml(String(s.markup_percentage)) : ""}" 
+                value="\${s.markup_percentage != null ? escapeHtml(String(s.markup_percentage)) : (s.recommended_markup_percentage != null ? escapeHtml(String(s.recommended_markup_percentage)) : '30')}"
                 oninput="updateFinalPrice()">
             </div>
           </div>
@@ -1257,7 +1257,7 @@ function renderImgGrid(urls) {
     const isOn = selIdx > -1;
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" decoding="async" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
       </div>\`;
   }).join("");
