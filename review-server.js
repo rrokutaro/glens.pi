@@ -2,13 +2,14 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Native Apple Aesthetic, lazy loading, Python AI extraction.
+ * lazy loading, Python AI extraction.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.4.0 - Editorial Noir UI refresh. Mobile Table overflow, Collapsible sections,
+ * FINAL PRODUCTION v2.3.0 - Mobile Table overflow, Collapsible sections,
  * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
+ * UI REDESIGN v2.4.0 - Editorial / minimal aesthetic, imagery-driven.
  */
 
 import http from 'http';
@@ -46,7 +47,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
+/* HTML UI (Editorial Minimalist + Imagery-Driven + Dark Mode)                */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -55,434 +56,706 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review — Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#fafaf7" id="metaThemeColor">
+<title>DropShip Review â€¢ v2.4</title>
 <style>
-/* ============================================================
-   EDITORIAL NOIR — refined native-luxury UI
-   Rounded geometry • frosted glass • serif display • soft depth
-   All class names / IDs preserved for zero functional regression
-   ============================================================ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 
-:root{
-  /* Light — warm editorial paper */
-  --bg:#f6f5f1;
-  --surface:#ffffff;
-  --surface-2:#f0eee8;
-  --surface-3:#e8e5dd;
-  --border:rgba(22,20,16,0.10);
-  --border-strong:rgba(22,20,16,0.20);
-  --text:#171613;
-  --text-2:#6d6a61;
-  --text-3:#9b978d;
-  --focus:#171613;
-  --focus-ring:rgba(22,20,16,0.12);
-  --danger:#d92d20;
-  --success:#159a55;
-  --warning:#b7791f;
-  --accent:#c8653f;
-  --on-accent:#ffffff;
-  --glass-bg:rgba(246,245,241,0.72);
-  --glass-border:rgba(22,20,16,0.08);
-  --shadow-sm:0 1px 2px rgba(22,20,16,0.05);
-  --shadow-md:0 8px 24px rgba(22,20,16,0.07);
-  --shadow-lg:0 24px 60px rgba(22,20,16,0.14);
-  --img-bg:#ffffff;
-  --serif:"Instrument Serif",Georgia,"Times New Roman",serif;
-  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
-  --r-sm:10px;--r-md:14px;--r-lg:20px;--r-xl:26px;--r-pill:999px;
-}
-:root[data-theme="dark"]{
-  --bg:#08080a;
-  --surface:#101013;
-  --surface-2:#18181d;
-  --surface-3:#212128;
-  --border:rgba(255,255,255,0.09);
-  --border-strong:rgba(255,255,255,0.18);
-  --text:#f4f4f5;
-  --text-2:#a2a2ab;
-  --text-3:#6e6e78;
-  --focus:#ffffff;
-  --focus-ring:rgba(255,255,255,0.16);
-  --danger:#ff5a52;
-  --success:#34d27a;
-  --warning:#f5c542;
-  --accent:#ff8a5b;
-  --on-accent:#0a0a0a;
-  --glass-bg:rgba(12,12,15,0.62);
-  --glass-border:rgba(255,255,255,0.08);
-  --shadow-sm:0 1px 2px rgba(0,0,0,0.40);
-  --shadow-md:0 10px 30px rgba(0,0,0,0.45);
-  --shadow-lg:0 30px 70px rgba(0,0,0,0.60);
-  --img-bg:#0c0c0f;
+:root {
+  /* Light â€” editorial off-white */
+  --bg:           #fafaf7;
+  --surface:      #ffffff;
+  --surface-2:    #f4f3ef;
+  --hairline:     #e6e4dd;
+  --hairline-2:   #d8d6cd;
+  --text:         #111111;
+  --text-2:       #6b6b66;
+  --text-3:       #a3a39c;
+  --focus:        #111111;
+  --danger:       #b91c1c;
+  --success:      #15803d;
+  --accent:       #111111;
+  --shadow:       0 1px 0 rgba(0,0,0,0.02);
+  --img-bg:       #ffffff;
+  --swatch-invert: 0;
 }
 
-html{-webkit-text-size-adjust:100%}
-body{
-  font-family:var(--sans);
-  background:var(--bg);
-  color:var(--text);
-  line-height:1.45;
-  min-height:100dvh;
-  overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
-  text-rendering:optimizeLegibility;
-  letter-spacing:-0.01em;
-  transition:background 0.45s ease,color 0.45s ease;
-}
-/* Subtle warm aurora glow in dark mode (Yandex-inspired, very restrained) */
-:root[data-theme="dark"] body{
-  background:
-    radial-gradient(135% 75% at 50% -25%,rgba(184,92,255,0.13),transparent 55%),
-    radial-gradient(120% 65% at 100% -10%,rgba(255,111,97,0.10),transparent 50%),
-    var(--bg);
-  background-attachment:fixed;
+:root[data-theme="dark"] {
+  --bg:           #0e0e0d;
+  --surface:      #161614;
+  --surface-2:    #1d1d1b;
+  --hairline:     #2a2a27;
+  --hairline-2:   #3a3a36;
+  --text:         #f5f5f0;
+  --text-2:       #9a9a92;
+  --text-3:       #5e5e58;
+  --focus:        #f5f5f0;
+  --danger:       #ef4444;
+  --success:      #4ade80;
+  --accent:       #f5f5f0;
+  --shadow:       0 1px 0 rgba(255,255,255,0.02);
+  --img-bg:       #161614;
+  --swatch-invert: 1;
 }
 
-/* ---- Display serif headings (ELOME / editorial) ---- */
-h1,h2{font-family:var(--serif);font-weight:400;letter-spacing:0.015em;line-height:1.04}
-
-/* ---- Controls ---- */
-button{
-  cursor:pointer;
-  border:1px solid var(--border-strong);
-  border-radius:var(--r-md);
-  padding:13px 18px;
-  font-size:13px;
-  background:var(--surface);
-  color:var(--text);
-  min-height:48px;
-  font-family:inherit;
-  font-weight:600;
-  text-transform:uppercase;
-  letter-spacing:0.05em;
-  transition:transform 0.12s ease,background 0.2s ease,border-color 0.2s ease,box-shadow 0.2s ease,opacity 0.15s ease,filter 0.15s ease;
-}
-button:active{transform:scale(0.965)}
-button:disabled{opacity:0.38 !important;cursor:not-allowed;transform:none !important;filter:none !important}
-
-.btn-primary{background:var(--text);color:var(--bg);border-color:var(--text);box-shadow:var(--shadow-sm)}
-.btn-primary:active{filter:brightness(0.9)}
-.btn-danger{background:var(--surface);color:var(--danger);border-color:var(--border-strong)}
-.btn-danger:active{background:var(--surface-2)}
-.btn-ghost{border-color:transparent;background:transparent;color:var(--text);padding:0;min-height:0;border:none}
-.btn-ghost:active{opacity:0.55;transform:scale(0.96)}
-
-input,select,textarea{
-  background:var(--surface-2);
-  border:1px solid var(--border);
-  color:var(--text);
-  padding:14px 16px;
-  border-radius:var(--r-md);
-  font-size:15px;
-  font-family:inherit;
-  width:100%;
-  -webkit-appearance:none;
-  transition:border-color 0.2s ease,box-shadow 0.2s ease,background 0.2s ease;
-}
-input::placeholder,textarea::placeholder{color:var(--text-3);opacity:1}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--text);box-shadow:0 0 0 4px var(--focus-ring);background:var(--surface)}
-textarea{resize:vertical;min-height:110px;line-height:1.55}
-select{
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;
-  background-position:right 16px center;
-  padding-right:40px;
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* ---- Tables ---- */
-.simple-table-wrapper{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin-top:4px;border:1px solid var(--border);border-radius:var(--r-md)}
-.simple-table{min-width:500px;width:100%;border-collapse:collapse;font-size:14px}
-.simple-table th{background:var(--surface-2);padding:12px 10px;font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;text-align:left;border-bottom:1px solid var(--border)}
-.simple-table td{border-top:1px solid var(--border);padding:0}
-.simple-table input,.simple-table select{border:none;background:transparent;min-height:46px;padding:12px 10px;font-size:14px;width:100%;border-radius:0}
-.simple-table input:focus,.simple-table select:focus{box-shadow:inset 0 0 0 2px var(--text);background:transparent}
-.table-btn{width:44px;min-height:44px;padding:0;display:flex;align-items:center;justify-content:center;color:var(--danger);font-weight:600;border:none;background:transparent;font-size:20px;border-radius:var(--r-sm)}
-.table-btn:active{background:var(--surface-2)}
-
-img{max-width:100%;display:block}
-a{color:var(--text);text-decoration:none;font-weight:600}
-a:active{opacity:0.65}
-code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:0.85em;background:var(--surface-2);padding:1px 5px;border-radius:6px}
-
-/* ---- Layout screens ---- */
-.screen{display:none;min-height:100dvh;padding-bottom:calc(100px + env(safe-area-inset-bottom))}
-.screen.active{display:block;animation:fadeUp 0.42s cubic-bezier(0.16,1,0.3,1)}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-
-/* ---- Frosted top bar ---- */
-.topbar{
-  position:sticky;top:0;z-index:50;
-  background:var(--glass-bg);
-  -webkit-backdrop-filter:saturate(180%) blur(20px);
-  backdrop-filter:saturate(180%) blur(20px);
-  border-bottom:1px solid var(--glass-border);
-  padding:13px 16px;
-  padding-top:max(13px,env(safe-area-inset-top));
-  display:flex;align-items:center;gap:12px;
-}
-.topbar h1{font-size:23px;flex:1;margin:0;text-align:left}
-
-/* ---- Badges (soft pills) ---- */
-.badge{
-  font-size:10px;padding:0 10px;height:24px;
-  display:inline-flex;align-items:center;justify-content:center;
-  border:1px solid var(--border-strong);
-  color:var(--text);background:var(--surface-2);
-  font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
-  border-radius:var(--r-pill);
-}
-.badge.pending{color:var(--text);background:transparent;border-color:var(--border-strong)}
-.badge.src-status{color:var(--text-2);background:var(--surface-2);border-color:var(--border)}
-.badge.partial{background:transparent;color:var(--text);border:1px dashed var(--border-strong)}
-
-.theme-toggle{
-  font-size:10px;padding:0 13px;height:30px;min-height:30px;
-  display:inline-flex;align-items:center;justify-content:center;
-  border:1px solid var(--border-strong);color:var(--text);background:var(--surface);
-  border-radius:var(--r-pill);font-weight:600;letter-spacing:0.06em;
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+  font-size: 15px;
 }
 
-/* ---- Queue list (floating cards) ---- */
-#qList{padding:8px 0 24px}
-.post-group{
-  margin:12px 16px;
-  border:1px solid var(--border);
-  border-radius:var(--r-lg);
-  background:var(--surface);
-  overflow:hidden;
-  box-shadow:var(--shadow-sm);
+/* ----- Editorial typography ----- */
+h1, h2, h3, label, .label, .post-id, .p-brand, .item-type, .empty, .topbar h1, .modal-header h2, .src-row .name, .badge {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
-.post-header{
-  display:flex;align-items:center;gap:14px;
-  padding:16px;cursor:pointer;user-select:none;
-  transition:background 0.2s ease;
-}
-.post-header:active{background:var(--surface-2)}
-.post-thumb{
-  width:52px;height:52px;border-radius:var(--r-md);
-  background:var(--surface-2);flex-shrink:0;overflow:hidden;
-  border:1px solid var(--border);
-}
-.post-thumb img{width:100%;height:100%;object-fit:cover;background:var(--img-bg)}
-.post-info{flex:1;min-width:0}
-.post-id{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
-.post-meta{font-size:12px;color:var(--text-2);margin-top:3px;font-weight:500}
-.post-chevron{width:20px;height:20px;color:var(--text-2);transition:transform 0.28s ease,color 0.2s ease;flex-shrink:0}
-.post-group.open .post-chevron{transform:rotate(180deg);color:var(--text)}
 
-.post-items{display:none;padding:6px 8px 8px;border-top:1px solid var(--border);background:var(--surface-2)}
-.post-group.open .post-items{display:block}
+.serif { font-family: "New York", "Iowan Old Style", Georgia, "Times New Roman", serif; font-weight: 500; letter-spacing: -0.01em; }
+.display { font-size: 32px; line-height: 1.1; letter-spacing: -0.02em; text-transform: none; font-weight: 500; }
+.meta-text { font-size: 11px; color: var(--text-2); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
 
-.item-row{
-  display:flex;align-items:center;gap:12px;
-  padding:10px;border-radius:var(--r-md);cursor:pointer;
-  transition:background 0.18s ease,transform 0.12s ease;
+/* ----- Controls ----- */
+button {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 14px 20px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  min-height: 48px;
+  transition: opacity 0.15s ease, transform 0.1s ease, background 0.15s ease;
+  -webkit-appearance: none;
 }
-.item-row:active{transform:scale(0.99);background:var(--surface-3)}
-.item-row + .item-row{margin-top:2px}
-.item-thumb{width:42px;height:58px;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border);flex-shrink:0;overflow:hidden}
-.item-thumb img{width:100%;height:100%;object-fit:cover;background:var(--img-bg)}
-.item-info{flex:1;min-width:0}
-.item-type{font-size:12px;font-weight:600;letter-spacing:0.02em}
-.item-status{font-size:10px;color:var(--text-2);margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em}
+button:active { opacity: 0.5; transform: scale(0.98); }
+button:disabled { opacity: 0.3 !important; cursor: not-allowed; transform: none !important; }
 
-/* ---- Hero ---- */
-.hero{width:100%;background:transparent;position:relative}
-.hero img{width:100%;height:60vh;object-fit:cover;cursor:pointer;transition:object-fit 0.1s;background:var(--img-bg)}
-.hero-meta{padding:14px 16px 6px;display:flex;gap:8px;flex-wrap:wrap;background:transparent}
+.btn-primary { background: var(--text); color: var(--bg); }
+.btn-primary:active { background: var(--text-2); opacity: 1; }
+.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--hairline); }
+.btn-ghost { background: transparent; padding: 0; min-height: 0; color: var(--text); }
+.btn-ghost:active { opacity: 0.5; transform: scale(0.96); }
+.btn-link {
+  background: transparent;
+  color: var(--text);
+  padding: 12px 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--text);
+  border-radius: 0;
+  letter-spacing: 0.08em;
+}
 
-/* ---- Section & product cards ---- */
-.section{padding:0 0 calc(110px + env(safe-area-inset-bottom));background:transparent}
-.section h2{
-  font-size:25px;padding:22px 16px 14px;
-  border-bottom:1px solid var(--border);margin:0;
-  display:flex;justify-content:space-between;align-items:center;
-  background:transparent;
+input, select, textarea {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text);
+  padding: 14px 0;
+  border-radius: 0;
+  font-size: 15px;
+  font-family: inherit;
+  width: 100%;
+  -webkit-appearance: none;
+  transition: border-color 0.2s ease;
 }
-.product-group-title{
-  font-size:11px;padding:20px 16px 6px;color:var(--text-2);background:transparent;
-  text-transform:uppercase;letter-spacing:0.1em;font-weight:600;
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+input:focus, select:focus, textarea:focus { outline: none; border-bottom-color: var(--text); }
+textarea { resize: vertical; min-height: 100px; }
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%236b6b66' stroke-width='1.5'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 24px;
+  cursor: pointer;
 }
-.p-card{
-  margin:10px 16px;padding:14px;display:flex;gap:14px;cursor:pointer;
-  border:1px solid var(--border);border-radius:var(--r-lg);
-  background:var(--surface);box-shadow:var(--shadow-sm);
-  transition:transform 0.12s ease,box-shadow 0.2s ease,opacity 0.2s,filter 0.2s,border-color 0.2s;
-}
-.p-card:active{transform:scale(0.99);box-shadow:var(--shadow-md)}
-.p-card.rejected{opacity:0.42;filter:grayscale(100%)}
-.p-img{width:78px;height:104px;border-radius:var(--r-md);background:var(--surface-2);border:1px solid var(--border);flex-shrink:0;position:relative;overflow:hidden}
-.p-img img{width:100%;height:100%;object-fit:cover;background:var(--img-bg)}
-.p-img .no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em}
-.p-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
-.p-title{font-size:16px;font-weight:600;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.01em}
-.p-brand{font-size:13px;color:var(--text-2);margin-bottom:8px;font-weight:500}
-.p-status{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-top:4px}
 
-/* ---- Modal / editor ---- */
-.modal{position:fixed;inset:0;z-index:100;background:var(--bg);display:none;flex-direction:column}
-.modal.active{display:flex;animation:sheetUp 0.38s cubic-bezier(0.16,1,0.3,1)}
-@keyframes sheetUp{from{transform:translateY(14px);opacity:0.55}to{transform:none;opacity:1}}
-#videoModal.active{animation:none}
-.modal-header{
-  padding:13px 16px;padding-top:max(13px,env(safe-area-inset-top));
-  border-bottom:1px solid var(--glass-border);
-  display:flex;align-items:center;gap:12px;
-  background:var(--glass-bg);
-  -webkit-backdrop-filter:saturate(180%) blur(20px);
-  backdrop-filter:saturate(180%) blur(20px);
+/* ----- Tables (minimal, no inner borders) ----- */
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 8px; }
+.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 14px; border-top: 1px solid var(--hairline); }
+.simple-table th {
+  background: transparent;
+  padding: 14px 8px 10px;
+  font-size: 10px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
 }
-.modal-header h2{font-size:18px;flex:1;text-align:center;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--serif);font-weight:400;letter-spacing:0.02em}
-.modal-body{flex:1;overflow-y:auto;padding:6px 0 calc(110px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
-
-/* ---- Video modal ---- */
-#videoModal{background:#000;z-index:200;cursor:pointer}
-#vPlayer{width:100%;height:100%;object-fit:contain}
-
-/* ---- Editor cards ---- */
-.card{
-  margin:14px 16px;padding:20px;
-  border:1px solid var(--border);border-radius:var(--r-lg);
-  background:var(--surface);box-shadow:var(--shadow-sm);
+.simple-table td {
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  padding: 0;
 }
-.card h3{
-  font-size:12px;color:var(--text-2);margin-bottom:16px;padding-bottom:12px;
-  display:block;border-bottom:1px solid var(--border);
-  text-transform:uppercase;letter-spacing:0.1em;font-weight:600;
+.simple-table tr:last-child td { border-bottom: none; }
+.simple-table input, .simple-table select {
+  border: none;
+  min-height: 48px;
+  padding: 12px 8px;
+  font-size: 14px;
+  width: 100%;
+  background: transparent;
 }
-details.card{padding:0}
-details.card > summary{
-  padding:20px;font-size:12px;color:var(--text);font-weight:600;
-  text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;list-style:none;
-  display:flex;justify-content:space-between;align-items:center;
+.simple-table input:focus, .simple-table select:focus { box-shadow: none; }
+.table-btn {
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-weight: 300;
+  font-size: 18px;
+  letter-spacing: 0;
 }
-details.card > summary::-webkit-details-marker{display:none}
-details.card > summary::after{content:'+';font-size:22px;font-weight:300;color:var(--text-2);transition:transform 0.28s ease;line-height:1}
-details[open].card > summary::after{transform:rotate(45deg)}
-details.card > .details-content{padding:2px 20px 20px}
+.table-btn:active { color: var(--danger); }
 
-/* ---- Image carousel ---- */
-.carousel{
-  display:flex;overflow-x:auto;gap:12px;padding-bottom:4px;
-  scroll-snap-type:x mandatory;margin-bottom:16px;
-  -webkit-overflow-scrolling:touch;-ms-overflow-style:none;scrollbar-width:none;
-  transform:translateZ(0);
+img { max-width: 100%; display: block; }
+a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--text); padding-bottom: 1px; transition: opacity 0.15s ease; }
+a:active { opacity: 0.5; }
+
+/* ----- Layout Screens ----- */
+.screen { display: none; min-height: 100dvh; padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+.screen.active { display: block; }
+
+/* ----- Top bar (minimal, no chrome) ----- */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+  padding: 18px 24px;
+  padding-top: max(18px, env(safe-area-inset-top));
+  display: flex; align-items: center; gap: 16px;
 }
-.carousel::-webkit-scrollbar{display:none}
-.img-cell{
-  flex:0 0 72%;aspect-ratio:3/4;scroll-snap-align:center;
-  position:relative;cursor:pointer;
-  border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;
-  background:var(--surface-2);
-  transition:border-color 0.15s ease,transform 0.12s ease,box-shadow 0.2s ease;
+.topbar h1 {
+  font-size: 12px;
+  flex: 1;
+  margin: 0;
+  text-align: left;
+  letter-spacing: 0.15em;
 }
-.img-cell:active{transform:scale(0.98)}
-.img-cell img{width:100%;height:100%;object-fit:cover;opacity:0.45;transition:opacity 0.2s ease;background:var(--img-bg)}
-.img-cell.on{border-color:transparent;box-shadow:0 0 0 2px var(--accent),var(--shadow-md)}
-.img-cell.on img{opacity:1}
-.img-cell .check{
-  position:absolute;top:12px;right:12px;
-  width:26px;height:26px;border-radius:var(--r-pill);
-  border:1.5px solid rgba(255,255,255,0.75);background:rgba(0,0,0,0.22);
-  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
-  display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;color:transparent;
-  transition:background 0.15s,color 0.15s,transform 0.15s;
+.topbar h1 a { border: none; }
+
+/* ----- Badges â€” text only, no fill ----- */
+.badge {
+  font-size: 10px;
+  padding: 0;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
-.img-cell.on .check{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-
-@keyframes pulse-extract{0%{opacity:1}50%{opacity:0.3;filter:grayscale(100%)}100%{opacity:1}}
-.extracting{animation:pulse-extract 1.5s infinite ease-in-out;pointer-events:none}
-
-/* ---- Form fields ---- */
-.field{margin-bottom:18px}
-.field label{display:block;font-size:11px;margin-bottom:8px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:0.08em}
-.field-row{display:flex;gap:12px}
-.field-row .field{flex:1}
-
-/* ---- Actions bar (frosted) ---- */
-.actions-bar{
-  position:fixed;bottom:0;left:0;right:0;
-  padding:14px 16px;padding-bottom:max(14px,env(safe-area-inset-bottom));
-  background:var(--glass-bg);
-  -webkit-backdrop-filter:saturate(180%) blur(20px);
-  backdrop-filter:saturate(180%) blur(20px);
-  border-top:1px solid var(--glass-border);
-  display:flex;gap:12px;z-index:50;
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  display: inline-block;
 }
-.actions-bar button{flex:1}
+.badge.pending::before   { background: var(--text-2); }
+.badge.completed::before { background: var(--success); }
+.badge.rejected::before  { background: var(--danger); }
+.badge.partial::before   { background: var(--text-2); border: 1px solid var(--text-2); background: transparent; }
+.badge.done::before      { background: var(--text); }
 
-.empty{padding:48px 16px;text-align:center;color:var(--text-2);font-size:13px;font-weight:500;letter-spacing:0.02em}
+.theme-toggle {
+  font-size: 10px;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  color: var(--text-2);
+  background: transparent;
+  letter-spacing: 0.12em;
+}
+.theme-toggle::after { content: " / DARK"; }
+:root[data-theme="dark"] .theme-toggle::after { content: " / LIGHT"; }
 
-/* ---- Loading & utils ---- */
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
-.spinner{width:34px;height:34px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite}
+/* ----- Queue: post groups ----- */
+.queue-wrap { padding: 0; }
+
+.post-group { border-bottom: 1px solid var(--hairline); background: var(--bg); }
+.post-header {
+  display: flex; align-items: center; gap: 20px;
+  padding: 28px 24px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.post-header:active { background: var(--surface-2); }
+.post-thumb {
+  width: 56px; height: 56px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: var(--img-bg); opacity: 0; transition: opacity 0.4s ease; }
+.post-thumb img.loaded { opacity: 1; }
+.post-info { flex: 1; min-width: 0; }
+.post-id {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.1em;
+  color: var(--text);
+}
+.post-meta { font-size: 11px; color: var(--text-2); margin-top: 6px; letter-spacing: 0.1em; text-transform: uppercase; }
+.post-chevron {
+  width: 16px; height: 16px;
+  color: var(--text-2);
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+.post-group.open .post-chevron { transform: rotate(180deg); }
+
+.post-items { display: none; padding: 8px 24px 24px 100px; border-top: 1px solid var(--hairline); background: var(--bg); }
+.post-group.open .post-items { display: block; }
+
+.item-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+  transition: transform 0.1s ease, opacity 0.2s;
+}
+.item-row:last-child { border-bottom: none; }
+.item-row:active { transform: scale(0.99); opacity: 0.6; }
+.item-thumb {
+  width: 44px; height: 62px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: var(--img-bg); opacity: 0; transition: opacity 0.4s ease; }
+.item-thumb img.loaded { opacity: 1; }
+.item-info { flex: 1; min-width: 0; }
+.item-type { font-size: 11px; color: var(--text); letter-spacing: 0.1em; }
+.item-status { font-size: 10px; color: var(--text-2); margin-top: 6px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ----- Hero (Review Main Image) â€” imagery-driven ----- */
+.hero {
+  width: 100%;
+  background: var(--surface-2);
+  position: relative;
+  border-bottom: 1px solid var(--hairline);
+  overflow: hidden;
+}
+.hero img {
+  width: 100%;
+  height: 78vh;
+  max-height: 820px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: object-fit 0.1s;
+  background: var(--img-bg);
+  display: block;
+}
+.hero-meta {
+  padding: 18px 24px;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: var(--bg);
+  border-top: 1px solid var(--hairline);
+  align-items: center;
+}
+
+/* ----- Section & Cards (editorial spacing) ----- */
+.section { padding: 0; background: var(--bg); }
+.section h2 {
+  font-size: 11px;
+  padding: 32px 24px 18px;
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--bg);
+  color: var(--text-2);
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+.section h2 .count {
+  color: var(--text);
+  font-family: "New York", "Iowan Old Style", Georgia, serif;
+  font-size: 14px;
+  letter-spacing: 0;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.product-group-title {
+  font-size: 10px;
+  padding: 24px 24px 12px;
+  color: var(--text-2);
+  background: var(--bg);
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  text-transform: uppercase;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.product-group-title::before {
+  content: "";
+  width: 20px;
+  height: 1px;
+  background: var(--text-3);
+  display: inline-block;
+}
+
+/* ----- Product / source cards (minimal, image-driven) ----- */
+.p-card {
+  display: flex;
+  gap: 20px;
+  padding: 24px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+  transition: background 0.15s ease, opacity 0.25s, filter 0.25s;
+  align-items: center;
+}
+.p-card:active { background: var(--surface-2); }
+.p-card.rejected { opacity: 0.45; filter: grayscale(100%); }
+.p-img {
+  width: 96px; height: 128px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.p-img img { width: 100%; height: 100%; object-fit: cover; background: var(--img-bg); opacity: 0; transition: opacity 0.4s ease; }
+.p-img img.loaded { opacity: 1; }
+.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.15em; }
+.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.p-title { font-size: 17px; font-weight: 500; line-height: 1.3; letter-spacing: -0.01em; text-transform: none; }
+.p-brand { font-size: 11px; color: var(--text-2); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; }
+.p-status { display: flex; align-items: center; gap: 12px; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-top: 4px; letter-spacing: 0.12em; }
+
+/* ----- Modal / Editor (full sheet) ----- */
+.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
+.modal.active { display: flex; }
+.modal-header {
+  padding: 18px 24px;
+  padding-top: max(18px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--hairline);
+  display: flex; align-items: center; gap: 16px;
+  background: var(--bg);
+}
+.modal-header h2 {
+  font-size: 11px;
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+  letter-spacing: 0.18em;
+}
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ----- Video Modal ----- */
+#videoModal { background: #000; z-index: 200; cursor: pointer; }
+#vPlayer { width: 100%; height: 100%; object-fit: contain; }
+
+/* ----- Card sections (collapsible) ----- */
+.card {
+  padding: 32px 24px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+}
+.card h3 {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-bottom: 24px;
+  display: block;
+  letter-spacing: 0.2em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+details.card { padding: 0; }
+details.card > summary {
+  padding: 28px 24px;
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+  position: relative;
+  transition: background 0.15s ease;
+}
+details.card > summary:active { background: var(--surface-2); }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after {
+  content: "+";
+  font-size: 18px;
+  font-weight: 300;
+  color: var(--text-2);
+  letter-spacing: 0;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+}
+details[open].card > summary { border-bottom: 1px solid var(--hairline); }
+details[open].card > summary::after { content: "âˆ’"; }
+details.card > .details-content {
+  padding: 24px;
+  border-top: none;
+}
+
+/* ----- Carousel images (gallery feel) ----- */
+.carousel {
+  display: flex; overflow-x: auto; gap: 16px; padding-bottom: 8px;
+  scroll-snap-type: x mandatory; margin-bottom: 20px;
+  -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  transform: translateZ(0);
+}
+.carousel::-webkit-scrollbar { display: none; }
+
+.img-cell {
+  flex: 0 0 78%; aspect-ratio: 3/4; scroll-snap-align: center;
+  position: relative; cursor: pointer;
+  background: var(--surface-2);
+  transition: transform 0.15s ease;
+  overflow: hidden;
+}
+.img-cell:active { transform: scale(0.98); }
+.img-cell img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0.35;
+  transition: opacity 0.3s ease;
+  background: var(--img-bg);
+}
+.img-cell.on img { opacity: 1; }
+.img-cell.on { box-shadow: inset 0 0 0 1px var(--text); }
+
+.img-cell .check {
+  position: absolute; top: 14px; right: 14px;
+  width: 24px; height: 24px;
+  border: 1px solid var(--text);
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+  color: transparent;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0;
+}
+.img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
+
+@keyframes pulse-extract {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; filter: grayscale(100%); }
+  100% { opacity: 1; }
+}
+.extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
+
+/* ----- Form fields ----- */
+.field { margin-bottom: 24px; }
+.field label, .field .label {
+  display: block;
+  font-size: 10px;
+  margin-bottom: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+.field-row { display: flex; gap: 24px; }
+.field-row .field { flex: 1; }
+
+/* ----- Actions bar (text-link style, hairline top) ----- */
+.actions-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 20px 24px;
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--hairline);
+  display: flex; gap: 24px;
+  z-index: 50;
+  align-items: center;
+  justify-content: space-between;
+}
+.actions-bar button { flex: 0 0 auto; padding: 14px 28px; }
+
+.empty {
+  padding: 80px 24px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+/* ----- Loading ----- */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:32px;color:var(--text)}
+.spinner{
+  width: 28px; height: 28px;
+  border: 1px solid var(--hairline);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
 @keyframes spin{to{transform:rotate(360deg)}}
+.loading-text { font-size: 10px; letter-spacing: 0.3em; color: var(--text-2); }
 
-.toast{
-  position:fixed;top:max(18px,env(safe-area-inset-top));left:50%;
-  transform:translate(-50%,-170px);
-  background:var(--glass-bg);color:var(--text);
-  -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
-  padding:12px 22px;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;
-  z-index:300;transition:transform 0.38s cubic-bezier(0.16,1,0.3,1);
-  border:1px solid var(--glass-border);border-radius:var(--r-pill);
-  font-weight:600;white-space:nowrap;box-shadow:var(--shadow-lg);
+/* ----- Toast (minimal, no fill) ----- */
+.toast {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translate(-50%, -150px);
+  background: var(--text);
+  color: var(--bg);
+  padding: 12px 20px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  z-index: 300;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  font-weight: 600;
+  white-space: nowrap;
 }
-.toast.show{transform:translate(-50%,0)}
+.toast.show { transform: translate(-50%, 0); }
 
-.lazy-img{opacity:0;transition:opacity 0.35s ease}
-.lazy-img.loaded{opacity:1}
-.placeholder{background:var(--surface-2)}
+.lazy-img { opacity: 0; transition: opacity 0.4s ease; }
+.lazy-img.loaded { opacity: 1; }
+.placeholder { background: var(--surface-2); }
 
-/* ---- Accessibility focus ring ---- */
-button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ----- Performance: isolate off-screen cards from layout/paint ----- */
+.post-group, .p-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
 
-/* ---- Performance: isolate off-screen cards from layout/paint ---- */
-.post-group,.p-card{content-visibility:auto;contain-intrinsic-size:auto 200px}
+/* ----- Larger viewport refinements (tablet+) ----- */
+@media (min-width: 720px) {
+  .topbar { padding: 22px 40px; }
+  .post-header { padding: 32px 40px; gap: 24px; }
+  .post-thumb { width: 64px; height: 64px; }
+  .post-items { padding-left: 128px; padding-right: 40px; }
+  .hero-meta { padding: 24px 40px; }
+  .section h2 { padding: 40px 40px 24px; }
+  .product-group-title { padding: 28px 40px 14px; }
+  .p-card { padding: 28px 40px; gap: 28px; }
+  .p-img { width: 120px; height: 160px; }
+  .p-title { font-size: 19px; }
+  .card { padding: 40px 40px; }
+  details.card > summary { padding: 32px 40px; }
+  details.card > .details-content { padding: 32px 40px; }
+  .actions-bar { padding: 24px 40px; }
+  .carousel { gap: 20px; }
+  .img-cell { flex: 0 0 50%; }
+  .item-row { gap: 20px; }
+  .item-thumb { width: 56px; height: 80px; }
+  .display { font-size: 44px; }
+}
 
+@media (min-width: 1024px) {
+  .topbar { padding: 26px 56px; }
+  .post-header { padding: 40px 56px; }
+  .post-items { padding: 8px 56px 32px 144px; }
+  .post-thumb { width: 72px; height: 72px; }
+  .hero-meta { padding: 28px 56px; }
+  .section h2 { padding: 48px 56px 28px; }
+  .product-group-title { padding: 32px 56px 16px; }
+  .p-card { padding: 32px 56px; gap: 32px; }
+  .p-img { width: 140px; height: 188px; }
+  .p-title { font-size: 22px; }
+  .card { padding: 48px 56px; }
+  details.card > summary { padding: 36px 56px; }
+  details.card > .details-content { padding: 36px 56px; }
+  .actions-bar { padding: 28px 56px; }
+  .img-cell { flex: 0 0 40%; }
+  .display { font-size: 56px; }
+}
+
+/* ----- Editorial accent line for top of modal/hero ----- */
+.accent-line {
+  display: block;
+  width: 40px;
+  height: 1px;
+  background: var(--text);
+  margin: 0;
+}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
+    <div class="loading">
+      <div class="spinner"></div>
+      <div class="loading-text">LOADING QUEUE</div>
+    </div>
   </div>
-  
+
   <!-- QUEUE SCREEN -->
   <div id="queue" class="screen">
     <div class="topbar">
       <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
       <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
-      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:0 10px; font-size:10px; min-height:24px; height:24px;">REFRESH</button>
+      <button class="btn-ghost" onclick="loadQueue()" style="border:none; padding:0; min-height:0; font-size:10px; color:var(--text-2); letter-spacing:0.15em;">REFRESH</button>
     </div>
-    <div id="qList"></div>
+    <div id="qList" class="queue-wrap"></div>
   </div>
 
   <!-- REVIEW SCREEN (Item Level) -->
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
-      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
-      <div id="rTopRight" style="width:70px; text-align:right;"></div>
+      <button class="btn-ghost" onclick="showQueue()" style="border:none; padding:0; min-height:0; font-size:10px; color:var(--text-2); letter-spacing:0.15em;">â† BACK</button>
+      <h1 id="rTitle" style="text-align:center; color:var(--text-2);">ITEM</h1>
+      <div id="rTopRight" style="min-width:60px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>SOURCES <span class="badge" id="pCount">0</span></h2>
+      <h2>SOURCES <span class="count" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">DISCARD ITEM</button>
+      <button class="btn-ghost" onclick="deleteItem()" style="color:var(--danger); font-size:10px; letter-spacing:0.15em;">DISCARD</button>
       <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
@@ -490,17 +763,17 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
   <!-- EDITOR MODAL (Source Level) -->
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:none; padding:0; min-height:0; font-size:10px; color:var(--text-2); letter-spacing:0.15em;">â† CANCEL</button>
       <h2 id="eModalTitle">EDIT SOURCE</h2>
-      <button class="btn-primary" onclick="saveSource('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
+      <button class="btn-ghost" onclick="saveSource('completed')" style="border:none; padding:0; min-height:0; font-size:10px; color:var(--text); letter-spacing:0.15em; border-bottom: 1px solid var(--text);">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
-  
+
   <!-- Fullscreen Video Modal -->
   <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
     <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
-      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
+      <button class="btn-ghost" onclick="closeVideo()" style="color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0; font-size:12px; letter-spacing:0.15em;">CLOSE</button>
     </div>
     <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh; pointer-events:none;">
       <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto;"></video>
@@ -511,14 +784,14 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
 <div class="toast" id="toast"></div>
 
 <script>
-const state = { 
-  queue: [], 
-  posts: {}, 
-  current: null, 
+const state = {
+  queue: [],
+  posts: {},
+  current: null,
   editingPIdx: null,
-  editingSIdx: null, 
-  currentSelected: [], 
-  currentGridUrls: [], 
+  editingSIdx: null,
+  currentSelected: [],
+  currentGridUrls: [],
   currentVariants: [],
   currentSizeGuide: { headers: [], rows: [] },
   io: null,
@@ -533,12 +806,12 @@ function toggleTheme() {
   const current = root.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', newTheme);
-  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
+  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#0e0e0d' : '#fafaf7');
   localStorage.setItem('theme', newTheme);
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
+  document.getElementById('metaThemeColor')?.setAttribute('content', '#0e0e0d');
 }
 
 function showScreen(id) {
@@ -589,24 +862,24 @@ function formatPrice(p, fallbackCurrency = "USD") {
   if (p == null || p === "") return "TBD";
   let num = '';
   let curr = fallbackCurrency || '';
-  
+
   if (typeof p === "number" || typeof p === "string") {
     num = getSafeNumber(p);
   } else if (typeof p === "object" && p !== null) {
     num = getSafeNumber(p.current);
     if (p.currency) curr = p.currency;
   }
-  
+
   return num !== '' ? num + (curr ? " " + curr : "") : "TBD";
 }
 
 function computeFinalPriceDisplay(source) {
     const base = getHighestSourcePrice(source);
     if (base == null || isNaN(base)) return "N/A";
-    
+
     const type = source.markup_type || "percentage";
     let final = base;
-    
+
     if (type === "fixed" && source.markup_fixed != null) {
         const fixed = parseFloat(source.markup_fixed);
         if (!isNaN(fixed)) final = base + fixed;
@@ -614,7 +887,7 @@ function computeFinalPriceDisplay(source) {
         const pct = parseFloat(source.markup_percentage);
         if (!isNaN(pct)) final = base * (1 + pct / 100);
     }
-    
+
     const curr = source.price?.currency || source.currency || "";
     return final.toFixed(2) + (curr ? " " + curr : "");
 }
@@ -628,7 +901,6 @@ function initLazyImages() {
         const src = img.dataset.src;
         if (src) {
           img.src = src;
-          img.classList.add("loaded");
           img.removeAttribute("data-src");
         }
         state.io.unobserve(img);
@@ -651,7 +923,7 @@ function getFormPersistKey() {
 function saveFormToLocalStorage() {
   const key = state.formPersistKey;
   if (!key) return;
-  
+
   syncVariantsFromDOM();
   syncSizeGuideFromDOM();
 
@@ -745,7 +1017,7 @@ async function loadQueue() {
     const resText = await r.text();
     let data;
     try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
-    
+
     state.posts = data.posts || {};
     state.queue = data.items || [];
   } catch(e) {
@@ -762,38 +1034,38 @@ async function loadQueue() {
 function renderQueue() {
   const list = document.getElementById("qList");
   const postIds = Object.keys(state.posts);
-  
+
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; opacity:0.5; display:block; margin-top:8px;">All items have been reviewed</span></div>';
+    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; letter-spacing:0; opacity:0.5; display:block; margin-top:14px; font-family: Georgia, serif; font-style: italic;">All items have been reviewed</span></div>';
     document.getElementById("qCount").textContent = "0";
     return;
   }
-  
+
   let totalItems = 0;
-  
+
   list.innerHTML = postIds.map(pid => {
     const post = state.posts[pid];
     const items = post.items || [];
     totalItems += items.length;
     const pending = items.filter(it => it.status === "pending" || it.status === "partial").length;
     const thumb = items[0] ? items[0].thumb : "";
-    
+
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
-          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img" loading="lazy" onload="this.classList.add('loaded')" onerror="this.style.display='none'"></div>
           <div class="post-info">
             <div class="post-id">\${escapeHtml(pid)}</div>
-            <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
+            <div class="post-meta">\${items.length} ITEM\${items.length === 1 ? '' : 'S'} &middot; \${pending} PENDING</div>
           </div>
-          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
             <div class="item-row" data-item-id="\${it._id}-\${it.fileIdx}-\${it.frameIdx !== null ? it.frameIdx : 'img'}" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
-              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img" loading="lazy" onload="this.classList.add('loaded')" onerror="this.style.display='none'"></div>
               <div class="item-info">
-                <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
+                <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} \${it.frameIdx !== null ? 'Â· #' + it.frameIdx : 'Â· #' + it.fileIdx}</div>
                 <div class="item-status">\${escapeHtml(it.status)}</div>
               </div>
               <span class="badge \${it.status}">\${it.status}</span>
@@ -803,10 +1075,10 @@ function renderQueue() {
       </div>
     \`;
   }).join('');
-  
+
   document.getElementById("qCount").textContent = totalItems;
   document.querySelectorAll(".lazy-img[data-src]").forEach(observeImage);
-  
+
   if (state.lastViewedItemId) {
     const scrollToItem = () => {
       const targetRow = document.querySelector(\`.item-row[data-item-id="\${state.lastViewedItemId}"]\`);
@@ -815,7 +1087,7 @@ function renderQueue() {
       }
       state.lastViewedItemId = null;
     };
-      
+
     // Double rAF ensures layout is fully settled regardless of prior scroll position
     requestAnimationFrame(() => requestAnimationFrame(scrollToItem));
   }
@@ -852,19 +1124,19 @@ function renderItem() {
   const pList = document.getElementById("pList");
   const pCount = document.getElementById("pCount");
   const btnCommit = document.getElementById("btnCommitItem");
-  
+
   let igLink = 'https://www.instagram.com/' + item.postId + '/';
   if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
-  
-  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
-  
+
+  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank" style="border:none;">\${escapeHtml(item.postId)}</a>\`;
+
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     const watchBtn = document.createElement('button');
     watchBtn.className = 'btn-ghost';
-    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);');
+    watchBtn.setAttribute('style', 'border:none; padding:0; min-height:0; font-size:10px; color:var(--text-2); letter-spacing:0.15em;');
     watchBtn.textContent = 'WATCH';
     watchBtn.onclick = () => openVideo(proxyUrl);
     rTopRight.innerHTML = '';
@@ -874,9 +1146,9 @@ function renderItem() {
   }
 
   rImage.src = item.url;
-  
+
   const prods = item.response && item.response.products ? item.response.products : [];
-  
+
   let totalSources = 0;
   let pendingSources = 0;
   let listHtml = "";
@@ -886,16 +1158,16 @@ function renderItem() {
   } else {
     prods.forEach((p, pIdx) => {
       listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
-      
+
       const sources = p.sources || [];
       totalSources += sources.length;
-      
+
       if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
+        listHtml += '<div class="empty" style="padding:32px 24px;">NO SOURCES FOUND</div>';
       } else {
         sources.forEach((s, sIdx) => {
           if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
-          
+
           let statusColor = "var(--text)";
           let rejectedClass = "";
           let statusBadge = "";
@@ -904,14 +1176,14 @@ function renderItem() {
           if (s.reviewStatus === "rejected") {
             statusColor = "var(--text-2)";
             rejectedClass = "rejected";
-            statusBadge = '<span class="badge src-status">REJECTED</span>';
+            statusBadge = '<span class="badge rejected">REJECTED</span>';
           } else if (s.reviewStatus === "completed") {
-            statusBadge = '<span class="badge src-status">REVIEWED</span>';
+            statusBadge = '<span class="badge completed">REVIEWED</span>';
           } else {
             const extStatus = s.textExtraction?.status;
-            if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
-            else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
-            else statusBadge = '<span class="badge src-status">PENDING EXTRACT</span>';
+            if (extStatus === 'completed') statusBadge = '<span class="badge completed">EXTRACTED</span>';
+            else if (extStatus === 'failed') statusBadge = '<span class="badge rejected">FAILED</span>';
+            else statusBadge = '<span class="badge pending">PENDING EXTRACT</span>';
           }
 
           const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
@@ -920,7 +1192,7 @@ function renderItem() {
 
           listHtml += \`
             <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
-              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onload="this.classList.add('loaded')" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
               <div class="p-info">
                 <div class="p-title">\${escapeHtml(nameLabel)}</div>
                 <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
@@ -938,10 +1210,10 @@ function renderItem() {
 
   rMeta.innerHTML = \`
     <span class="badge">\${item.type === "frame" ? "FRAME" : "IMAGE"}</span>
-    <span class="badge">\${totalSources} SRC</span>
+    <span class="badge"><span style="color:var(--text);">\${totalSources}</span> SRC</span>
     \${pendingSources ? \`<span class="badge pending">\${pendingSources} PEND</span>\` : ""}
   \`;
-  
+
   if (pendingSources > 0) {
     btnCommit.disabled = true;
     btnCommit.title = "Review all sources first";
@@ -980,20 +1252,20 @@ function updateFinalPrice() {
     const type = document.getElementById("eMarkupType").value;
     const fixedWrap = document.getElementById("fieldMarkupFixed");
     const pctWrap = document.getElementById("fieldMarkupPct");
-    
+
     if (fixedWrap) fixedWrap.style.display = type === "fixed" ? "block" : "none";
     if (pctWrap) pctWrap.style.display = type === "percentage" ? "block" : "none";
-    
+
     const baseEl = document.getElementById("ePrice");
     const finalEl = document.getElementById("eFinalPrice");
     if (!baseEl || !finalEl) return;
-    
+
     const base = parseFloat(baseEl.value);
     if (isNaN(base)) { finalEl.value = "N/A"; return; }
-    
+
     const curr = document.getElementById("eCurrency")?.value || "";
     let final = base;
-    
+
     if (type === "fixed") {
         const fixed = parseFloat(document.getElementById("eMarkupFixed")?.value);
         if (!isNaN(fixed)) final = base + fixed;
@@ -1001,7 +1273,7 @@ function updateFinalPrice() {
         const pct = parseFloat(document.getElementById("eMarkupPct")?.value);
         if (!isNaN(pct)) final = base * (1 + pct / 100);
     }
-    
+
     finalEl.value = final.toFixed(2) + (curr ? " " + curr : "");
     saveFormToLocalStorage();
 }
@@ -1014,10 +1286,10 @@ function getAllImages(source) {
     const url = getImageUrl(u);
     if (url) allUrls.add(url);
   });
-  
+
   (source.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
   (source.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  
+
   return { urls: Array.from(allUrls) };
 }
 
@@ -1025,16 +1297,16 @@ function openSource(pIdx, sIdx) {
   try {
     state.editingPIdx = pIdx;
     state.editingSIdx = sIdx;
-    
+
     const product = state.current.response.products[pIdx];
     const s = product.sources[sIdx];
     if (!s) return toast('Source data missing');
-    
+
     document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
 
     const allImages = getAllImages(s);
     state.currentSelected = [...(s.selectedImages || [])];
-    
+
     const sortedUrls = [...state.currentSelected];
     allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
     state.currentGridUrls = sortedUrls;
@@ -1050,8 +1322,8 @@ function openSource(pIdx, sIdx) {
     const highestPrice = getHighestSourcePrice(s);
     const safePriceVal = highestPrice != null ? highestPrice.toFixed(2) : "";
     const safeCompareVal = s.price?.original != null ? getSafeNumber(s.price.original) : (s.compare_at_price != null ? getSafeNumber(s.compare_at_price) : "");
-    
-    // Robust availability parser — scoped to selected variant color if set
+
+    // Robust availability parser â€” scoped to selected variant color if set
     function parseAvailStr(str) {
       const raw = String(str || "").toLowerCase().replace(/[^a-z]/g, '');
       return (raw.includes('out') || raw.includes('sold')) ? "OutOfStock" : (raw.includes('pre') ? "PreOrder" : "InStock");
@@ -1061,7 +1333,7 @@ function openSource(pIdx, sIdx) {
     if (selectedVariantColor && Array.isArray(s.variants) && s.variants.length) {
       const filteredVars = s.variants.filter(v => (v.color || '').trim() === selectedVariantColor);
       if (filteredVars.length) {
-        // If any are InStock → InStock; else if any PreOrder → PreOrder; else OutOfStock
+        // If any are InStock â†’ InStock; else if any PreOrder â†’ PreOrder; else OutOfStock
         const avails = filteredVars.map(v => parseAvailStr(v.availability));
         mappedAvail = avails.includes('InStock') ? 'InStock' : (avails.includes('PreOrder') ? 'PreOrder' : 'OutOfStock');
       } else {
@@ -1070,39 +1342,39 @@ function openSource(pIdx, sIdx) {
     } else {
       mappedAvail = parseAvailStr(s.availability);
     }
-    
+
     // Robust features string parser to prevent crash
     const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
 
     let html = \`
-      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
-        <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-          IMAGES 
-          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+      <div class="card" style="padding: 32px 24px 24px; border-top: none; border-bottom: 1px solid var(--hairline);">
+        <h3 style="display:flex; justify-content:space-between; align-items:baseline; border:none; margin-bottom:20px;">
+          <span>IMAGES</span>
+          <span style="color:var(--text-2); font-weight:400; text-transform:none; font-size:11px; letter-spacing:0.15em;">
             <span id="selCount">\${state.currentSelected.length}</span> SELECTED
           </span>
         </h3>
         <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:8px; margin-bottom:16px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
+        <div style="display:flex; gap:16px; margin-bottom:8px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border-bottom:1px solid var(--hairline); padding:14px 0; min-height:48px; font-size:10px;">+ PASTE IMAGE URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border-bottom:1px solid var(--hairline); padding:14px 0; min-height:48px; font-size:10px; color:var(--danger);">CLEAR SELECTION</button>
         </div>
       </div>
-      
+
       <div class="card">
         <h3>BASIC INFO</h3>
         <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
-        
+
         <div class="field-row">
           <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
           <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
         </div>
-        
+
         <div class="field-row">
           <div class="field"><label>Color</label><input id="eColor" value="\${escapeHtml(s.color || "")}"></div>
           <div class="field"><label>Material</label><input id="eMaterial" value="\${escapeHtml(s.material || "")}"></div>
         </div>
-        
+
         <div class="field">
           <label>Variant</label>
           <select id="eVariant">
@@ -1110,7 +1382,7 @@ function openSource(pIdx, sIdx) {
             \${(() => {
               const variants = s.variants || [];
               if (!variants.length) return '';
-              
+
               // Collect unique non-empty colors, preserving first-seen order
               const seen = new Set();
               const uniqueColors = [];
@@ -1118,7 +1390,7 @@ function openSource(pIdx, sIdx) {
                 const c = (v.color || '').trim();
                 if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
               });
-              
+
               // Auto-select: use saved s.variant if it matches a known color,
               // else if all variants share the same color, auto-select it,
               // else select the first unique color found.
@@ -1128,8 +1400,8 @@ function openSource(pIdx, sIdx) {
               const defaultVal = (savedVariant && uniqueColors.includes(savedVariant))
                 ? savedVariant
                 : (allSame ? allColors[0] : (uniqueColors[0] || ''));
-                
-              return uniqueColors.map(c => 
+
+              return uniqueColors.map(c =>
                 \`<option value="\${escapeHtml(c)}" \${defaultVal === c ? 'selected' : ''}>\${escapeHtml(c)}</option>\`
               ).join('');
             })()}
@@ -1144,31 +1416,31 @@ function openSource(pIdx, sIdx) {
             <option value="Used" \${escapeHtml(s.condition || "") === "Used" ? "selected" : ""}>Used</option>
           </select>
         </div>
-        
+
         <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
 
         <div class="field" style="margin-bottom:24px;">
           <label>Supplier URL</label>
-          <div style="display:flex; gap:8px;">
-            <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+          <div style="display:flex; gap:12px; align-items:center; border-bottom: 1px solid var(--hairline);">
+            <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1; border:none; padding-left:0;">
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:none; padding:0; font-size:10px; letter-spacing:0.15em; text-transform:uppercase; font-weight:600;">VISIT â†—</a>\` : ''}
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <div style="display:flex; gap:0; margin-top:24px; border-top: 1px solid var(--hairline);">
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:10px; min-height:48px; padding:0; letter-spacing:0.15em; border-right: 1px solid var(--hairline);" onclick="extractImages('lazy')">EXTRACT â€” LAZY</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:10px; min-height:48px; padding:0; letter-spacing:0.15em;" onclick="extractImages('full')">EXTRACT â€” FULL</button>
           </div>
         </div>
 
         <div class="field-row">
           <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}" oninput="updateFinalPrice()"></div>
           <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
-          
+
           <div class="field" style="width:120px">
             <label>Currency</label>
             <div style="display:flex; gap:0;">
               <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
               <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:36px; padding:0 4px; flex-shrink:0; font-size:11px; border-left:none;">
-                <option value="">▾</option>
+                <option value="">â–¾</option>
                 <option>USD</option><option>EUR</option><option>GBP</option>
                 <option>CAD</option><option>AUD</option><option>CHF</option>
                 <option>JPY</option><option>CNY</option><option>SEK</option>
@@ -1199,12 +1471,12 @@ function openSource(pIdx, sIdx) {
           </select>
         </div>
       </div>
-      
+
       <details class="card">
         <summary>VARIANTS</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border-bottom:1px solid var(--hairline); margin-top:8px; min-height:48px; font-size:10px; letter-spacing:0.15em;">+ ADD SIZE</button>
         </div>
       </details>
 
@@ -1212,22 +1484,22 @@ function openSource(pIdx, sIdx) {
         <summary>SIZE GUIDE</summary>
         <div class="details-content">
           <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
+          <div style="display:flex; gap:0; margin-top:8px; flex-wrap:wrap; border-top: 1px solid var(--hairline);">
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border-bottom:1px solid var(--hairline); border-right:1px solid var(--hairline); min-height:48px; font-size:10px; letter-spacing:0.15em;">+ ADD ROW</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border-bottom:1px solid var(--hairline); min-height:48px; font-size:10px; letter-spacing:0.15em;">+ ADD COL</button>
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px;">AI PROMPT</button>
-            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px; color:var(--success);">PASTE JSON</button>
+          <div style="display:flex; gap:0; margin-top:0; border-top: 1px solid var(--hairline);">
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border-bottom:1px solid var(--hairline); border-right:1px solid var(--hairline); min-height:48px; font-size:10px; letter-spacing:0.15em;">AI PROMPT</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border-bottom:1px solid var(--hairline); min-height:48px; font-size:10px; letter-spacing:0.15em;">PASTE JSON</button>
           </div>
-          <div style="font-size:11px; color:var(--text-2); margin-top:8px; line-height:1.5;">
-            Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
+          <div style="font-size:11px; color:var(--text-2); margin-top:20px; line-height:1.6; letter-spacing:0.02em;">
+            Copy the AI prompt â†’ paste into any AI with web search â†’ copy the JSON result â†’ Paste JSON here.
           </div>
         </div>
       </details>
 
       <details class="card">
-        <summary>DETAILS & POLICIES</summary>
+        <summary>DETAILS &amp; POLICIES</summary>
         <div class="details-content">
           <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
           <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
@@ -1239,16 +1511,16 @@ function openSource(pIdx, sIdx) {
       <details class="card">
         <summary>DROPSHIP PRICING</summary>
         <div class="details-content">
-          <div style="background:var(--surface-2); padding:12px; margin-bottom:16px; border:1px solid var(--border);">
-            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-2); margin-bottom:8px;">DROPSHIP CONTEXT</div>
-            <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-            <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-              <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-              <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-              <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-              <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+          <div style="background:transparent; padding:20px 0; margin-bottom:16px; border-top:1px solid var(--hairline); border-bottom:1px solid var(--hairline);">
+            <div style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.2em; color:var(--text-2); margin-bottom:14px;">DROPSHIP CONTEXT</div>
+            <div style="font-size:14px; margin-bottom:10px; line-height:1.5;"><strong style="font-weight:600;">Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+            <div style="display:flex; gap:24px; font-size:13px; flex-wrap:wrap; color:var(--text-2);">
+              <div><strong style="color:var(--text); font-weight:600;">Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+              <div><strong style="color:var(--text); font-weight:600;">Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+              <div><strong style="color:var(--text); font-weight:600;">Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+              <div><strong style="color:var(--text); font-weight:600;">Rating:</strong> \${s.rating || "?"}â˜… (\${s.review_count || 0})</div>
             </div>
-            <div style="font-size:11px; color:var(--text-2); margin-top:8px;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
+            <div style="font-size:11px; color:var(--text-3); margin-top:14px; letter-spacing:0.05em;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
           </div>
           <div class="field">
             <label>Markup Type</label>
@@ -1260,45 +1532,45 @@ function openSource(pIdx, sIdx) {
           <div class="field-row">
             <div class="field" id="fieldMarkupFixed" style="display:\${(s.markup_type || "percentage") === "fixed" ? "block" : "none"}">
               <label>Fixed Markup</label>
-              <input id="eMarkupFixed" type="number" step="0.01" inputmode="decimal" 
-                value="\${s.markup_fixed != null ? escapeHtml(getSafeNumber(s.markup_fixed)) : ""}" 
+              <input id="eMarkupFixed" type="number" step="0.01" inputmode="decimal"
+                value="\${s.markup_fixed != null ? escapeHtml(getSafeNumber(s.markup_fixed)) : ""}"
                 oninput="updateFinalPrice()">
             </div>
             <div class="field" id="fieldMarkupPct" style="display:\${(s.markup_type || "percentage") === "percentage" ? "block" : "none"}">
               <label>Markup %</label>
-              <input id="eMarkupPct" type="number" step="0.1" inputmode="decimal" 
+              <input id="eMarkupPct" type="number" step="0.1" inputmode="decimal"
                 value="\${s.markup_percentage != null ? escapeHtml(String(s.markup_percentage)) : (s.recommended_markup_percentage != null ? escapeHtml(String(s.recommended_markup_percentage)) : '30')}"
                 oninput="updateFinalPrice()">
             </div>
           </div>
           <div class="field">
             <label>Final Price (Auto)</label>
-            <input id="eFinalPrice" type="text" readonly 
-              value="\${escapeHtml(computeFinalPriceDisplay(s))}" 
-              style="background:var(--surface-2); color:var(--text-2);">
+            <input id="eFinalPrice" type="text" readonly
+              value="\${escapeHtml(computeFinalPriceDisplay(s))}"
+              style="background:transparent; color:var(--text-2); border-bottom-style:dashed;">
           </div>
         </div>
       </details>
 
       <div class="card" style="border-bottom:none;">
         <h3>ACTIONS</h3>
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
+        <div style="display:flex; gap:0; margin-bottom:16px; border-top: 1px solid var(--hairline);">
+          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border-bottom: 1px solid var(--hairline); min-height:48px; font-size:10px; letter-spacing:0.15em;">DELETE SOURCE</button>
         </div>
-        <div style="display:flex; gap:12px">
-          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
-          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
+        <div style="display:flex; gap:0; border-top: 1px solid var(--hairline);">
+          <button class="btn-danger" onclick="rejectSource()" style="flex:1; border-right: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); border-radius: 0; min-height:56px; font-size:10px; letter-spacing:0.15em;">REJECT</button>
+          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1; border-bottom: 1px solid var(--hairline); border-radius: 0; min-height:56px; font-size:10px; letter-spacing:0.15em;">SAVE</button>
         </div>
       </div>
     \`;
-    
+
     document.getElementById("eBody").innerHTML = html;
-    
+
     renderImgGrid(state.currentGridUrls);
     updateSelCount();
     renderVariantsTable();
     renderSizeGuideTable();
-    
+
     state.formPersistKey = getFormPersistKey();
     restoreFormFromLocalStorage();
 
@@ -1344,13 +1616,13 @@ function clearSelection() {
 function renderImgGrid(urls) {
   const grid = document.getElementById("eImgGrid");
   if (!urls.length) { grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>'; return; }
-  
+
   grid.innerHTML = urls.map(url => {
     const selIdx = state.currentSelected.indexOf(url);
     const isOn = selIdx > -1;
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f4f3ef%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23a3a39c%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
       </div>\`;
   }).join("");
@@ -1361,17 +1633,17 @@ async function addImage() {
     const text = await navigator.clipboard.readText();
     if (!text) { toast("CLIPBOARD EMPTY"); return; }
     let url = text.trim();
-    if (!/^https?:\\/\\//i.test(url)) { toast("NO VALID URL IN CLIPBOARD"); return; }
-    
+    if (!/^https?:\/\//i.test(url)) { toast("NO VALID URL IN CLIPBOARD"); return; }
+
     const product = state.current.response.products[state.editingPIdx];
     const s = product.sources[state.editingSIdx];
-    
+
     s.customImages = s.customImages || [];
     if (!s.customImages.includes(url)) s.customImages.push(url);
-    
+
     if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
     if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
-    
+
     renderImgGrid(state.currentGridUrls);
     updateSelCount();
     saveFormToLocalStorage();
@@ -1384,7 +1656,7 @@ async function addImage() {
 async function extractImages(mode) {
   const url = document.getElementById("eUrl").value;
   if (!url) return toast("NO URL PROVIDED");
-  
+
   const carousel = document.getElementById("eImgGrid");
   const btnLazy = document.getElementById("btnExtractLazy");
   const btnFull = document.getElementById("btnExtractFull");
@@ -1392,26 +1664,26 @@ async function extractImages(mode) {
   if (carousel) carousel.classList.add("extracting");
   if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "EXTRACTING..."; }
   if (btnFull) { btnFull.disabled = true; btnFull.innerText = "EXTRACTING..."; }
-  
+
   try {
     const r = await fetch("/api/extract", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, mode })
     });
-    
+
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    
+
     if (d.images && d.images.length > 0) {
       const s = state.current.response.products[state.editingPIdx].sources[state.editingSIdx];
       const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
-      
+
       if (newUnique.length > 0) {
         s.customImages = s.customImages || [];
         s.customImages = [...newUnique, ...s.customImages];
         state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
         newUnique.forEach(u => { if (!state.currentSelected.includes(u)) state.currentSelected.push(u); });
-        
+
         renderImgGrid(state.currentGridUrls);
         updateSelCount();
         saveFormToLocalStorage();
@@ -1426,8 +1698,8 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT â€” LAZY"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT â€” FULL"; }
   }
 }
 
@@ -1435,12 +1707,12 @@ async function extractImages(mode) {
 function renderVariantsTable() {
   const container = document.getElementById("variantsContainer");
   if (!state.currentVariants.length) { container.innerHTML = ''; return; }
-  
+
   let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>COLOR</th><th>STOCK</th><th>QTY</th><th>PRICE</th><th style="width:48px;"></th></tr></thead><tbody>';
   state.currentVariants.forEach((v, i) => {
     let rawAvail = String(v.availability || "").toLowerCase().replace(/[^a-z]/g, '');
     let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
-    
+
     html += \`
       <tr class="v-row" data-idx="\${i}">
         <td><input type="text" class="v-size" value="\${escapeHtml(v.size || '')}"></td>
@@ -1454,7 +1726,7 @@ function renderVariantsTable() {
         </td>
         <td><input type="number" class="v-qty" inputmode="numeric" value="\${escapeHtml(v.inventory_quantity != null ? String(v.inventory_quantity) : '')}"></td>
         <td><input type="number" class="v-price" step="0.01" inputmode="decimal" value="\${escapeHtml(v.price != null ? getSafeNumber(v.price) : '')}"></td>
-        <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
+        <td><button class="table-btn" onclick="delVariantRow(\${i})">Ã—</button></td>
       </tr>
     \`;
   });
@@ -1495,33 +1767,33 @@ function delVariantRow(idx) {
 function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
   const sg = state.currentSizeGuide || { headers: [], rows: [] };
-  
+
   // Ensure rows always exists
   if (!sg.rows) sg.rows = [];
-  
-  if (!sg.headers || !sg.headers.length) { 
-    container.innerHTML = ''; 
-    return; 
+
+  if (!sg.headers || !sg.headers.length) {
+    container.innerHTML = '';
+    return;
   }
-  
+
   let html = '<table class="simple-table"><thead><tr>';
   sg.headers.forEach((h, cIdx) => {
     html += \`<th>
-      <div style="display:flex; align-items:center;">
-        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
-        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:18px; min-height:0;">&times;</button>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:10px; font-weight:600; background:transparent; border:none; padding:0; letter-spacing:0.15em;">
+        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:24px; font-size:18px; min-height:0;">Ã—</button>
       </div>
     </th>\`;
   });
   html += '<th style="width:48px;"></th></tr></thead><tbody>';
-  
+
   sg.rows.forEach((row, rIdx) => {
     html += \`<tr class="sg-row" data-ridx="\${rIdx}">\`;
     sg.headers.forEach((_, cIdx) => {
       const val = row[cIdx] || "";
       html += \`<td><input type="text" class="sg-cell" data-ridx="\${rIdx}" data-cidx="\${cIdx}" value="\${escapeHtml(val)}"></td>\`;
     });
-    html += \`<td><button class="table-btn" onclick="delSizeGuideRow(\${rIdx})">&times;</button></td></tr>\`;
+    html += \`<td><button class="table-btn" onclick="delSizeGuideRow(\${rIdx})">Ã—</button></td></tr>\`;
   });
   html += '</tbody></table>';
   container.innerHTML = html;
@@ -1611,7 +1883,7 @@ PRODUCT DATA:
 CURRENCY: \${currency}
 
 RESEARCH PROTOCOL:
-1. **Scraped Size Guide Check**: If size_guide is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can — but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
+1. **Scraped Size Guide Check**: If size_guide is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can â€” but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
 2. **Web Verification**: Search for the brand's official size/fit chart for this exact product category and gender. If the scraped data conflicts with official brand data, prioritize the official source. If the scraped data is missing, garbled, or clearly wrong, ignore it and rely on web research.
 3. Infer the primary target market(s) from the currency, URL TLD, and brand origin country. Produce conversions relevant to those markets.
 4. Use the variant sizes as the primary column naming convention. Include all variant sizes plus logically adjacent standard sizes if typical for this category.
@@ -1621,7 +1893,7 @@ RESEARCH PROTOCOL:
    - Bottoms: Waist, Hips, Inseam (and Rise if available)
    - Footwear: Foot Length (cm), plus US/UK/EU/AU conversions
    - Outerwear: Same as tops, possibly with Length
-7. If you cannot find reliable data for a conversion column, use an empty string "" in that cell — do NOT remove the column from headers. All rows must have the exact same number of cells as headers.
+7. If you cannot find reliable data for a conversion column, use an empty string "" in that cell â€” do NOT remove the column from headers. All rows must have the exact same number of cells as headers.
 8. If no official brand data exists, synthesize from 3+ high-authority sources for this category/gender and note the source count.
 
 LIVE DISPLAY REQUIREMENTS:
@@ -1655,7 +1927,7 @@ Return ONLY valid JSON. No markdown. No backticks. No text before or after the J
 </user>\`;
 
   navigator.clipboard.writeText(fullPrompt).then(() => {
-    toast("PROMPT COPIED — Live customer-facing size guide ready");
+    toast("PROMPT COPIED â€” Live customer-facing size guide ready");
   }).catch(() => toast("CLIPBOARD PERMISSION DENIED"));
 }
 
@@ -1669,11 +1941,11 @@ async function pasteSizeGuideJson() {
       const clean = text.trim().replace(/^\`\`\`[a-z]*\\n?/i, '').replace(/\\n?\`\`\`$/,'').trim();
       parsed = JSON.parse(clean);
     } catch(e) {
-      return toast("INVALID JSON — COULD NOT PARSE");
+      return toast("INVALID JSON â€” COULD NOT PARSE");
     }
 
     if (!Array.isArray(parsed.headers) || !Array.isArray(parsed.rows)) {
-      return toast("INVALID FORMAT — NEED {headers:[...], rows:[[...]]}");
+      return toast("INVALID FORMAT â€” NEED {headers:[...], rows:[[...]]}");
     }
     if (!parsed.headers.length) return toast("HEADERS ARRAY IS EMPTY");
     const colCount = parsed.headers.length;
@@ -1764,8 +2036,8 @@ async function saveSource(status = "completed") {
     reviewStatus: status
   };
 
-  const saveBtn = document.querySelector('.modal-header .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
+  const saveBtn = document.querySelector('.modal-header .btn-ghost');
+  if (saveBtn && saveBtn.textContent === 'SAVE') { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
   try {
     const body = {
       docId: state.current._id,
@@ -1790,7 +2062,7 @@ async function saveSource(status = "completed") {
   } catch(e) {
     toast("ERROR: " + e.message);
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
+    if (saveBtn && saveBtn.textContent === 'SAVING...') { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
   }
 }
 
@@ -1799,19 +2071,19 @@ function rejectSource() { saveSource("rejected"); }
 async function deleteSource() {
   if (!confirm("DELETE THIS SOURCE ENTIRELY?")) return;
   try {
-    const body = { 
-      docId: state.current._id, 
-      fileIdx: state.current.fileIdx, 
-      frameIdx: state.current.frameIdx, 
-      prodIdx: state.editingPIdx, 
-      sourceIdx: state.editingSIdx 
+    const body = {
+      docId: state.current._id,
+      fileIdx: state.current.fileIdx,
+      frameIdx: state.current.frameIdx,
+      prodIdx: state.editingPIdx,
+      sourceIdx: state.editingSIdx
     };
     const r = await fetch("/api/delete-source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Delete failed");
-    
+
     clearFormPersist(state.formPersistKey);
     state.current.response.products[state.editingPIdx].sources.splice(state.editingSIdx, 1);
-    
+
     toast("SOURCE DELETED");
     renderItem();
     closeEditor();
@@ -1820,10 +2092,10 @@ async function deleteSource() {
   }
 }
 
-function closeEditor() { 
+function closeEditor() {
   // clearFormPersist(state.formPersistKey);
   showScreen("review");
-  
+
   // Re-scroll back to source card context instantly upon pressing cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
     const scrollBack = () => {
@@ -1840,13 +2112,13 @@ async function commitItem() {
   try {
     const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
     const r = await fetch("/api/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    
+
     if (r.status === 409) {
       toast("NOT ALL SOURCES REVIEWED");
       return;
     }
     if (!r.ok) throw new Error("Commit failed");
-    
+
     toast("COMMITTED");
     const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
     const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
@@ -1962,7 +2234,7 @@ initSwipeNavigation();
 function normalizeResponse(item) {
     let resp = item.response;
     let rawText = null;
-    
+
     if (typeof resp === 'string') {
         try { resp = JSON.parse(resp); } catch { rawText = resp; resp = { products: [] }; }
     }
@@ -2220,7 +2492,7 @@ async function uploadToCatbox(base64Data, filename) {
     const form = new FormData();
     form.append('reqtype', 'fileupload');
     form.append('fileToUpload', blob, filename || 'paste.jpg');
-    
+
     const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: form });
     const url = (await res.text()).trim();
     if (!url.startsWith('http')) throw new Error('Upload failed: ' + url);
@@ -2232,10 +2504,10 @@ async function runPythonExtractor(targetUrl, mode) {
         const runId = crypto.randomBytes(4).toString('hex');
         const inFile = path.join(os.tmpdir(), `in_${runId}.json`);
         const outFile = path.join(os.tmpdir(), `out_${runId}.json`);
-        
+
         fs.writeFileSync(inFile, JSON.stringify([targetUrl]));
         const scriptPath = path.resolve(process.cwd(), 'ecom-image-extractor.py');
-        
+
         if (!fs.existsSync(scriptPath)) {
             try { fs.unlinkSync(inFile); } catch(e){}
             return reject(new Error('ecom-image-extractor.py NOT FOUND.'));
@@ -2258,7 +2530,7 @@ async function runPythonExtractor(targetUrl, mode) {
                 if (!fs.existsSync(outFile)) throw new Error("No output generated.");
                 const resultData = JSON.parse(fs.readFileSync(outFile, 'utf8'));
                 fs.unlinkSync(inFile); fs.unlinkSync(outFile);
-                
+
                 const images = resultData[targetUrl] || [];
                 if (images.error) throw new Error(images.error);
                 resolve(images.map(i => i.url));
@@ -2313,7 +2585,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v2.2.0 (New Schema)');
+    log('info', '  REVIEW SERVER â€” Production Human Review v2.2.0 (New Schema)');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
@@ -2340,7 +2612,7 @@ async function main() {
             res.end(REVIEW_UI_HTML);
             return;
         }
-        
+
         if (parsed.pathname === '/api/video' && req.method === 'GET') {
             try {
                 const vidUrl = parsed.searchParams.get('url');
@@ -2350,9 +2622,9 @@ async function main() {
                 if (CONFIG.hfToken) fetchHeaders['Authorization'] = `Bearer ${CONFIG.hfToken}`;
                 const fRes = await fetch(vidUrl, { headers: fetchHeaders });
                 const resHeaders = { 'Cache-Control': 'public, max-age=86400' };
-                fRes.headers.forEach((v, k) => { 
+                fRes.headers.forEach((v, k) => {
                   const lk = k.toLowerCase();
-                  if (lk !== 'content-encoding' && lk !== 'cache-control') resHeaders[k] = v; 
+                  if (lk !== 'content-encoding' && lk !== 'cache-control') resHeaders[k] = v;
                 });
                 res.writeHead(fRes.status, resHeaders);
 
@@ -2473,7 +2745,7 @@ async function main() {
                     const product = frameIdx !== null
                         ? post.file_urls[fileIdx].frames[frameIdx].response.products[prodIdx]
                         : post.file_urls[fileIdx].response.products[prodIdx];
-                    
+
                     if (product && Array.isArray(product.sources)) {
                         const seen = new Map();
                         const deduped = [];
@@ -2544,11 +2816,11 @@ async function main() {
                 try {
                     const { docId, fileIdx, frameIdx } = JSON.parse(body);
                     const objectId = new ObjectId(docId);
-                    
+
                     const post = await collection.findOne({ _id: objectId });
                     const item = frameIdx !== null ? post.file_urls[fileIdx].frames[frameIdx] : post.file_urls[fileIdx];
-                    
-                    const allSourcesReviewed = item.response.products.every(p => 
+
+                    const allSourcesReviewed = item.response.products.every(p =>
                         !p.sources || p.sources.length === 0 || p.sources.every(s => s.reviewStatus === 'completed' || s.reviewStatus === 'rejected')
                     );
 
