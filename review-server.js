@@ -947,10 +947,13 @@ function openSource(pIdx, sIdx) {
     state.currentGridUrls = sortedUrls;
 
     state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
-    state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
-      ? JSON.parse(JSON.stringify(s.size_guide)) 
+    const rawSg = s.size_guide;
+    const hasHeaders = rawSg && Array.isArray(rawSg.headers);
+    const hasRows    = rawSg && Array.isArray(rawSg.rows);
+    state.currentSizeGuide = (hasHeaders && hasRows)
+      ? JSON.parse(JSON.stringify(rawSg))
       : { headers: ["US", "EU", "UK"], rows: [] };
-    
+
     const highestPrice = getHighestSourcePrice(s);
     const safePriceVal = highestPrice != null ? highestPrice.toFixed(2) : "";
     const safeCompareVal = s.price?.original != null ? getSafeNumber(s.price.original) : (s.compare_at_price != null ? getSafeNumber(s.compare_at_price) : "");
@@ -1398,8 +1401,15 @@ function delVariantRow(idx) {
 /* --- Size Guide Table Logic --- */
 function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
-  const sg = state.currentSizeGuide;
-  if (!sg.headers.length) { container.innerHTML = ''; return; }
+  const sg = state.currentSizeGuide || { headers: [], rows: [] };
+  
+  // Ensure rows always exists
+  if (!sg.rows) sg.rows = [];
+  
+  if (!sg.headers || !sg.headers.length) { 
+    container.innerHTML = ''; 
+    return; 
+  }
   
   let html = '<table class="simple-table"><thead><tr>';
   sg.headers.forEach((h, cIdx) => {
@@ -1481,7 +1491,7 @@ function copySizeGuidePrompt() {
     category: s.primary_category,
     url: s.url,
     description: s.description,
-    size_guide: s.size_guide,
+    size_guide: s.size_guide || null,
     features: s.features,
     variants: (s.variants || []).map(v => ({ size: v.size, color: v.color }))
   };
@@ -1508,7 +1518,7 @@ PRODUCT DATA:
 CURRENCY: \${currency}
 
 RESEARCH PROTOCOL:
-1. **Scraped Size Guide Check**: If \`size_guide\` is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can — but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
+1. **Scraped Size Guide Check**: If size_guide is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can — but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
 2. **Web Verification**: Search for the brand's official size/fit chart for this exact product category and gender. If the scraped data conflicts with official brand data, prioritize the official source. If the scraped data is missing, garbled, or clearly wrong, ignore it and rely on web research.
 3. Infer the primary target market(s) from the currency, URL TLD, and brand origin country. Produce conversions relevant to those markets.
 4. Use the variant sizes as the primary column naming convention. Include all variant sizes plus logically adjacent standard sizes if typical for this category.
