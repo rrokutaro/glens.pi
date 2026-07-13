@@ -2,12 +2,13 @@
  * review-server.js
  *
  * Production human review server for the UGC dropship pipeline.
- * Brutalist Native Apple Aesthetic, lazy loading, Python AI extraction.
+ * UI Refactored for High-Fashion, Brutalist Native Apple Aesthetic.
+ * Editorial typography contrast, edge-to-edge alignment, absolute minimal Chrome.
  *
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.3.0 - Mobile Table overflow, Collapsible sections,
+ * FINAL PRODUCTION v2.4.0 (Design Edit) - Mobile Table overflow, Collapsible sections,
  * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
  */
 
@@ -46,7 +47,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
+/* HTML UI (Editorial Minimalist / Apple Brutalist Polish)                    */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -56,36 +57,43 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v2.3</title>
+<title>DropShip Review • v2.4</title>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+/* Brutalist / Apple Native Foundations */
+*,*::before,*::after {box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+
 :root {
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f5f5f5;
-  --border: #e5e5e5;
-  --text: #000000;
-  --text-2: #737373;
-  --focus: #000000;
-  --danger: #dc2626;
-  --success: #16a34a;
-  --warning: #ca8a04;
+  --bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-2: #F2F2F2;
+  --border: #E0E0E0;
+  --text: #050505;
+  --text-2: #858585;
+  --focus: #050505;
+  --danger: #E3342F;
+  --success: #000000;
+  --warning: #000000;
+  
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-serif: "Apple Garamond", "Baskerville", "Times New Roman", "Playfair Display", "Georgia", serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
+
 :root[data-theme="dark"] {
-  --bg: #121212;
-  --surface: #121212;
-  --surface-2: #1e1e1e;
-  --border: #333333;
-  --text: #ffffff;
-  --text-2: #a3a3a3;
-  --focus: #ffffff;
-  --danger: #ef4444;
-  --success: #22c55e;
-  --warning: #eab308;
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #161616;
+  --border: #2A2A2A;
+  --text: #F0F0F0;
+  --text-2: #7A7A7A;
+  --focus: #FFFFFF;
+  --danger: #FF443A;
+  --success: #FFFFFF;
+  --warning: #FFFFFF;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   line-height: 1.4;
@@ -95,326 +103,293 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Typography Overrides */
-h1, h2, h3, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
-  font-weight: 700;
+/* Typography Editorial Contrast */
+.serif-headline {
+  font-family: var(--font-serif);
+  font-weight: normal;
+  letter-spacing: -0.015em;
+}
+.mono-util {
+  font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  font-weight: 500;
 }
+h1 { font-size: 28px; line-height: 1; }
+h2 { font-size: 20px; line-height: 1; padding: 24px 20px 16px; margin: 0; background: var(--bg); border-bottom: 1px solid var(--border);}
+.p-title, .modal-header h2 { font-size: 24px; line-height: 1.1; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Controls */
-button {
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 12px 16px;
-  font-size: 13px;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 48px;
-  font-family: inherit;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  transition: opacity 0.15s ease, transform 0.1s ease;
-}
-button:active { opacity: 0.7; transform: scale(0.98); }
-button:disabled { opacity: 0.4 !important; cursor: not-allowed; border-color: var(--border); transform: none !important; }
-
-.btn-primary { background: var(--text); color: var(--bg); border: 1px solid var(--text); }
-.btn-danger { background: var(--bg); color: var(--danger); border: 1px solid var(--border); }
-.btn-ghost { border-color: transparent; background: transparent; color: var(--text); padding: 0; min-height: 0; border: none; }
-.btn-ghost:active { opacity: 0.5; transform: scale(0.96); }
-
-input, select, textarea {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 14px;
-  border-radius: 0;
-  font-size: 14px;
-  font-family: inherit;
-  width: 100%;
-  -webkit-appearance: none;
-  transition: border-color 0.2s ease;
-}
-input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
-textarea { resize: vertical; min-height: 100px; }
-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23737373'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 14px center;
-  padding-right: 32px;
-}
-
-/* Tables */
-.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 8px; }
-.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 14px; }
-.simple-table th { background: var(--surface-2); padding: 12px 8px; font-size: 12px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
-.simple-table td { border: 1px solid var(--border); padding: 0; }
-.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; font-size: 14px; width: 100%; }
-.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text); }
-.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; font-size: 18px; }
-
-img { max-width: 100%; display: block; }
-a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
-a:active { opacity: 0.7; }
-
-/* Layout Screens */
-.screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
-.screen.active { display: block; }
-
+/* Structural Navigation */
 .topbar {
   position: sticky; top: 0; z-index: 50;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding: 12px 16px;
-  padding-top: max(12px, env(safe-area-inset-top));
-  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  display: flex; align-items: baseline; gap: 16px;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: rgba(var(--bg-rgb), 0.85); /* fallback */
 }
-.topbar h1 { font-size: 14px; flex: 1; margin: 0; text-align: left; }
+/* For frosted effect fix if --bg holds variables, falling back to opaqueness handled neatly by UI */
+@supports (-webkit-backdrop-filter: blur(20px)) {
+    :root { --bg-rgb: 255,255,255; }
+    :root[data-theme="dark"] { --bg-rgb: 0,0,0; }
+    .topbar, .modal-header { background: rgba(var(--bg-rgb), 0.85) !important; backdrop-filter: saturate(180%) blur(20px); }
+}
 
+.topbar h1 { flex: 1; margin: 0; text-align: left; }
+.top-action { border: none; font-family: var(--font-mono); font-size: 11px; padding: 0; min-height: 0; text-transform: uppercase; background: none; letter-spacing: 0.02em; }
+
+/* Interactive Badges & Indicators */
 .badge {
-  font-size: 10px;
-  padding: 0 8px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--text);
-  color: var(--bg);
-  background: var(--text);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;
+  padding: 3px 8px; border-radius: 4px;
+  border: 1px solid var(--text); color: var(--bg); background: var(--text);
+  line-height: 1.2; vertical-align: middle;
 }
-.badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.badge.src-status { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
+.badge.pending, .badge.src-status { color: var(--text); background: var(--bg); border-color: var(--text-2); opacity: 0.75; }
+.badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--text); }
+.badge.warning { background: var(--warning); color: var(--bg); border: none; }
+.p-status .badge { margin-top: 6px; }
 
-.theme-toggle {
-  font-size: 10px;
-  padding: 0 8px;
-  height: 24px;
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  color: var(--text);
-  background: transparent;
+/* Standard Forms & Buttons Edge-to-Edge Vibe */
+button {
+  cursor: pointer; border: 1px solid var(--text); border-radius: 4px;
+  padding: 12px 20px; font-size: 11px; font-family: var(--font-sans);
+  background: var(--bg); color: var(--text); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  transition: opacity 0.1s, transform 0.1s, background-color 0.15s; min-height: 48px;
+}
+button:active { opacity: 0.6; }
+button:disabled { opacity: 0.2 !important; cursor: not-allowed; border-color: var(--text-2); }
+
+.btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn-danger { color: var(--danger); border-color: transparent; background: transparent;} /* minimal native danger look */
+.btn-ghost { border: none; background: transparent; padding: 0; min-height: 0; display: inline; text-transform: uppercase; letter-spacing: 0.05em;}
+
+input, select, textarea {
+  background: transparent; color: var(--text); font-family: var(--font-sans); font-size: 16px;
+  padding: 12px 0px; margin-bottom: 0px; width: 100%; border: none;
+  border-bottom: 1px solid var(--border); border-radius: 0;
+  -webkit-appearance: none; outline: none;
+  transition: border-color 0.2s;
+}
+input::placeholder, textarea::placeholder { color: var(--text-2); font-weight: 300;}
+input:focus, select:focus, textarea:focus { border-color: var(--text); border-bottom-width: 2px; margin-bottom: -1px; }
+textarea { resize: vertical; min-height: 80px; padding: 12px 0; }
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237A7A7A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0px center; padding-right: 28px;
 }
 
-/* Lists & Groups */
-.post-group { border-bottom: 1px solid var(--border); margin: 0; background: var(--bg); }
+/* Fields & Labels Editorial Approach */
+.field { margin-bottom: 24px; position: relative;}
+.field label { 
+  display: block; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.05em; 
+  text-transform: uppercase; font-weight: bold; color: var(--text-2); margin-bottom: 2px;
+}
+.field-row { display: flex; gap: 20px; }
+.field-row .field { flex: 1; }
+.info-plate { 
+  font-family: var(--font-mono); font-size: 10px; border-left: 2px solid var(--border); padding-left: 12px; margin: 8px 0 24px;
+  color: var(--text-2); letter-spacing: -0.01em; line-height: 1.4; text-transform: none;
+}
+
+/* Brutalist Clean Tables */
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 16px; border-top: 1px solid var(--text); }
+.simple-table { min-width: 600px; width: 100%; border-collapse: collapse; font-family: var(--font-sans); }
+.simple-table th { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; font-size: 9px; color: var(--text-2); padding: 12px 0px; text-align: left; border-bottom: 1px solid var(--border); }
+.simple-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--border); vertical-align: top;}
+.simple-table input, .simple-table select { font-size: 14px; padding: 8px 0; border-bottom: none; height: 100%; background: transparent; }
+.simple-table input:focus { border:none; margin: 0; box-shadow: inset 0 -2px 0 var(--text); }
+.table-btn { width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; min-height:0; color: var(--text-2); border: 1px solid var(--border); border-radius:4px; }
+.table-btn:active { background: var(--text); color: var(--bg); border-color: var(--text);}
+
+/* Index Queues / List View Edge to Edge Layout */
+.screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+.screen.active { display: block; }
+.empty { padding: 40px 20px; text-align: center; color: var(--text-2); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; font-family: var(--font-mono); }
+
+.post-group { margin: 0; background: var(--bg); border-bottom: 1px solid var(--border); transition: background-color 0.15s ease; }
 .post-header {
-  display: flex; align-items: center; gap: 12px;
-  padding: 20px 16px; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 16px; padding: 24px 20px; cursor: pointer; user-select: none;
 }
 .post-header:active { background: var(--surface-2); }
-.post-thumb {
-  width: 48px; height: 48px;
-  background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
-}
-.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.post-thumb { width: 64px; height: 80px; background: var(--surface-2); border-radius: 4px; border: 1px solid rgba(127,127,127,0.1); overflow: hidden; flex-shrink: 0; }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; opacity: 1; transition: opacity 0.3s; background: #E8E8E8; }
 .post-info { flex: 1; min-width: 0; }
-.post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.post-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 600; }
-.post-chevron { width: 20px; height: 20px; color: var(--text); transition: transform 0.2s ease; }
+.post-id { line-height: 1.1; margin-bottom: 6px; }
+.post-meta { display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono); font-size: 10px; color: var(--text-2); text-transform: uppercase;}
+.post-chevron { width: 24px; height: 24px; color: var(--text-2); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 .post-group.open .post-chevron { transform: rotate(180deg); }
 
-.post-items { display: none; padding: 0 16px 16px; border-top: 1px dashed var(--border); }
-.post-group.open .post-items { display: block; margin-top: 0; padding-top: 16px; background: var(--surface-2); }
+.post-items { display: none; border-top: 1px dashed var(--border); background: var(--surface-2); padding-bottom: 8px;}
+.post-group.open .post-items { display: block; }
 
 .item-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer;
-  transition: transform 0.1s ease;
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border); cursor: pointer;
+  background: transparent;
 }
-.item-row:active { transform: scale(0.98); }
-.item-row:last-child { border-bottom: none; padding-bottom: 0; }
-.item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
-.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.item-row:last-child { border-bottom: none; }
+.item-row:active { opacity: 0.6; }
+.item-thumb { width: 44px; height: 56px; border-radius: 2px; overflow: hidden; border: 1px solid rgba(127,127,127,0.2); flex-shrink: 0; background: var(--bg);}
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff;}
 .item-info { flex: 1; min-width: 0; }
-.item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
+.item-type { font-family: var(--font-sans); font-weight: bold; font-size: 14px; margin-bottom: 2px;}
 
-/* Hero (Review Main Image) */
-.hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
-.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; background: #fff; }
-.hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
+/* Source / Detail Pages */
+.hero { width: 100%; background: var(--surface-2); position: relative; border-bottom: 1px solid var(--text); }
+.hero img { width: 100%; height: 60vh; object-fit: cover; cursor: crosshair; transition: object-fit 0.2s; background: transparent; display: block; }
+.hero-meta { padding: 12px 20px; display: flex; gap: 12px; background: var(--bg); justify-content: flex-start; align-items: center;}
 
-/* Section & Cards */
 .section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
-.section h2 { font-size: 14px; padding: 20px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
-
-.product-group-title { font-size: 11px; padding: 16px 16px 8px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-
-.p-card {
-  padding: 16px; display: flex; gap: 16px; cursor: pointer;
-  border-bottom: 1px solid var(--border); background: var(--bg);
-  transition: transform 0.1s ease, opacity 0.2s, filter 0.2s;
+.product-group-title {
+  font-family: var(--font-serif); font-size: 20px; padding: 40px 20px 8px; margin:0; border-bottom: 1px solid var(--text); line-height: 1.1; font-weight: normal; 
 }
-.p-card:active { background: var(--surface-2); transform: scale(0.98); }
-.p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
-.p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
-.p-img img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
-.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
-.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-.p-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.p-brand { font-size: 13px; color: var(--text-2); margin-bottom: 8px; font-weight: 500; }
-.p-status { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-top: 4px; }
+.p-card {
+  padding: 24px 20px; display: flex; gap: 24px; cursor: pointer; align-items: flex-start;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  transition: background-color 0.15s, opacity 0.2s;
+}
+.p-card:active { background: var(--surface-2); }
+.p-card.rejected { opacity: 0.35; filter: grayscale(100%); }
+.p-img { width: 88px; height: 118px; border-radius: 4px; border: 1px solid rgba(127,127,127,0.15); overflow: hidden; background: var(--surface-2); flex-shrink: 0; position: relative;}
+.p-img img { width: 100%; height: 100%; object-fit: cover; }
+.p-img .no-img { display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; color: var(--text-2); letter-spacing: 0.05em; }
+.p-info { flex: 1; min-width: 0; padding-top: 4px;}
+.p-brand { font-family: var(--font-mono); font-size: 10px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display:block; line-height: 1.5; }
 
-/* Modal / Editor */
-.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
+/* Sticky Modal (Bottom Up/Full Page native vibe) */
+.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+@keyframes slideUp { from{ transform:translateY(20%); opacity: 0; } to{ transform:translateY(0); opacity:1;} }
 .modal.active { display: flex; }
-.modal-header { padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
-.modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
+.modal-header { padding: 16px 20px; padding-top: max(16px, env(safe-area-inset-top)); border-bottom: 1px solid var(--text); display: flex; align-items: center; gap: 16px; background: var(--bg); justify-content: space-between; flex-shrink: 0; }
+.modal-header h2 { font-size: 20px; margin: 0; flex: 1; text-align: center; border: none; padding: 0;}
+.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(140px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
 
-/* Video Modal */
-#videoModal { background: #000; z-index: 200; cursor: pointer; }
-#vPlayer { width: 100%; height: 100%; object-fit: contain; }
-
-.card { padding: 24px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
-.card h3 { font-size: 13px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px dashed var(--border); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 700; }
+/* Minimalist Editorial Detail Content Containers */
+.card { padding: 32px 20px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.card > h3 { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; color: var(--text); letter-spacing: 0.08em; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; font-weight: normal; }
 
 details.card { padding: 0; }
-details.card > summary { padding: 24px 16px; font-size: 13px; color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
-details.card > summary::after { content: '+'; font-size: 16px; font-weight: 400; }
+details.card > summary { padding: 32px 20px; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-transform: uppercase; letter-spacing: 0.08em; font-weight: normal; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.card > summary::after { content: '+'; font-size: 18px; font-family: var(--font-sans); }
 details[open].card > summary { border-bottom: 1px dashed var(--border); }
 details[open].card > summary::after { content: '−'; }
-details.card > .details-content { padding: 16px; border-top: 1px solid var(--border); }
+details.card > .details-content { padding: 24px 20px; }
 
-/* 3:4 Carousel Images - Taller (75%) */
+/* iOS/Mac fluid snapping horizontal image scroll */
 .carousel { 
-  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
-  scroll-snap-type: x mandatory; margin-bottom: 16px;
-  -webkit-overflow-scrolling: touch;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  transform: translateZ(0);
+  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 8px; margin-bottom: 20px;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none;
 }
 .carousel::-webkit-scrollbar { display: none; }
-
 .img-cell { 
-  flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
-  position: relative; cursor: pointer; 
-  border: 1px solid var(--border); background: var(--surface-2);
-  transition: border-color 0.15s ease, transform 0.1s ease;
+  flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; position: relative; cursor: pointer; 
+  border-radius: 4px; overflow: hidden; background: var(--surface-2); 
+  border: 1px solid rgba(127,127,127,0.15); transition: opacity 0.15s, transform 0.15s; 
 }
-.img-cell:active { transform: scale(0.98); }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; background: #fff; }
-.img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
-.img-cell.on img { opacity: 1; }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; filter: grayscale(50%); transition: opacity 0.2s, filter 0.2s; display: block;}
+.img-cell.on { border-color: var(--text); opacity: 1; }
+.img-cell.on img { opacity: 1; filter: none; }
+.img-cell .check { position: absolute; top: 12px; right: 12px; font-family: var(--font-mono); font-size: 11px; color: var(--bg); background: var(--text); padding: 4px 8px; border-radius: 4px; font-weight:bold; opacity: 0; transform: scale(0.9); transition: all 0.2s; }
+.img-cell.on .check { opacity: 1; transform: scale(1); }
+@keyframes pulse { 0% { opacity: 1;} 50% {opacity:0.3; filter: grayscale(100%);} 100% {opacity:1;} }
+.extracting { animation: pulse 1.5s infinite; pointer-events: none; }
 
-.img-cell .check { 
-  position: absolute; top: 12px; right: 12px; 
-  width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: transparent;
-  transition: background 0.1s, color 0.1s;
+/* Brutalist Absolute Flush Actions Bars */
+.actions-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; display: flex; z-index: 150;
+  border-top: 1px solid var(--text); background: var(--bg);
+  padding-bottom: env(safe-area-inset-bottom); align-items: stretch; height: calc(64px + env(safe-area-inset-bottom));
 }
-.img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
+.actions-bar button { flex: 1; border: none !important; border-radius: 0; border-right: 1px solid var(--text) !important; background: transparent; height: 100%; color: var(--text); min-height:0; }
+.actions-bar button:last-child { border-right: none !important; background: var(--text); color: var(--bg); }
+.actions-bar .btn-danger { color: var(--danger); font-weight: normal; font-family: var(--font-mono); text-transform: uppercase; font-size: 12px;}
 
-@keyframes pulse-extract {
-  0% { opacity: 1; }
-  50% { opacity: 0.3; filter: grayscale(100%); }
-  100% { opacity: 1; }
+/* Video Player Extreme Minimal Overlay */
+#videoModal { background: #000; cursor: pointer; transition: opacity 0.3s ease; display:none; }
+#videoModal.active { display:block; opacity:1;}
+#vPlayer { width: 100%; height: 100%; object-fit: contain; }
+
+/* High-contrast Toasts */
+.toast {
+  position: fixed; top: calc(24px + env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px);
+  background: var(--text); color: var(--bg); padding: 12px 24px; border-radius: 100px;
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;
+  z-index: 300; transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 20px 40px rgba(0,0,0,0.15); white-space: nowrap; border: 1px solid rgba(127,127,127,0.3);
 }
-.extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
-
-/* Form fields */
-.field { margin-bottom: 16px; }
-.field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; text-transform: uppercase; }
-.field-row { display: flex; gap: 12px; }
-.field-row .field { flex: 1; }
-
-/* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
-.actions-bar button { flex: 1; }
-
-.empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
-
-/* Loading & Utils */
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
-.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-.toast { position: fixed; top: max(16px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px); background: var(--text); color: var(--bg); padding: 14px 24px; font-size: 12px; text-transform: uppercase; z-index: 300; transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 700; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,0.15);}
 .toast.show { transform: translate(-50%, 0); }
+[data-theme="dark"] .toast { box-shadow: 0 10px 40px rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.1); }
 
-.lazy-img { opacity: 0; transition: opacity 0.3s ease; }
-.lazy-img.loaded { opacity: 1; }
-.placeholder { background: var(--surface-2); }
-
-/* Performance: isolate off-screen cards from layout/paint */
-.post-group, .p-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
-}
-
+/* Loader aesthetic spin */
+.loading {display:flex; flex-direction:column; align-items:center; justify-content:center; height:100dvh;}
+.spinner {width:24px; height:24px; border:2px solid var(--border); border-top-color:var(--text); border-radius:50%; animation: spin 0.6s cubic-bezier(.5, .1, .4, .9) infinite; }
+@keyframes spin {to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
+    <div class="loading">
+      <div class="spinner" style="margin-bottom:16px;"></div>
+      <p class="mono-util" style="color:var(--text); margin:0;">Preparing Architecture</p>
+    </div>
   </div>
   
   <!-- QUEUE SCREEN -->
   <div id="queue" class="screen">
     <div class="topbar">
-      <h1>REVIEW QUEUE</h1>
-      <span class="badge" id="qCount">0</span>
-      <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
-      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:0 10px; font-size:10px; min-height:24px; height:24px;">REFRESH</button>
+      <h1 class="serif-headline">Index</h1>
+      <span class="mono-util" style="color:var(--text-2);">Queue <span id="qCount">0</span></span>
+      <button class="top-action" style="margin-left:8px;" onclick="toggleTheme()">Invert</button>
+      <button class="top-action" onclick="loadQueue()" style="color:var(--text); text-decoration:underline; text-underline-offset:4px;">Sync</button>
     </div>
     <div id="qList"></div>
   </div>
 
-  <!-- REVIEW SCREEN (Item Level) -->
+  <!-- REVIEW SCREEN -->
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
-      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
-      <div id="rTopRight" style="width:70px; text-align:right;"></div>
+      <button class="top-action" onclick="showQueue()" style="color:var(--text); text-decoration:underline; text-underline-offset:4px;">← Back</button>
+      <h1 id="rTitle" class="serif-headline" style="text-align:center; font-size:20px; font-weight:normal; margin-bottom: 2px;">Asset</h1>
+      <div id="rTopRight" style="min-width:60px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
-      <div class="hero-meta" id="rMeta"></div>
     </div>
+    <div class="hero-meta" id="rMeta"></div>
     <div class="section">
-      <h2>SOURCES <span class="badge" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">DISCARD ITEM</button>
-      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
+      <button class="btn-danger mono-util" onclick="deleteItem()" style="background:var(--bg); border-right:1px solid var(--border)!important;">Discard</button>
+      <button class="btn-primary mono-util" id="btnCommitItem" onclick="commitItem()" style="letter-spacing:0.1em; background:var(--text); color:var(--bg);">Commit Review</button>
     </div>
   </div>
 
-  <!-- EDITOR MODAL (Source Level) -->
+  <!-- SOURCE MODAL (Editor) -->
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
-      <h2 id="eModalTitle">EDIT SOURCE</h2>
-      <button class="btn-primary" onclick="saveSource('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
+      <button class="top-action" onclick="closeEditor()" style="width: 50px; text-align:left; border: none!important; min-height:auto!important; margin-left: 0;">Cancel</button>
+      <h2 id="eModalTitle" class="serif-headline">Parameters</h2>
+      <button class="top-action" onclick="saveSource('completed')" style="width: 50px; text-align:right; font-weight:bold; border:none!important; min-height:auto!important; margin-right: 0;">Done</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
   
-  <!-- Fullscreen Video Modal -->
+  <!-- Media Fullscreen Vibe Player -->
   <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
     <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
-      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
+      <button class="mono-util" onclick="closeVideo()" style="background:none; color:#fff; border:1px solid rgba(255,255,255,0.2); height:auto; display:flex; align-items:center; justify-content:center; padding: 6px 12px; border-radius:100px; min-height: 0;">Close</button>
     </div>
     <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh; pointer-events:none;">
-      <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto;"></video>
+      <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto; border-radius:6px; background:#050505;"></video>
     </div>
   </div>
-
 </div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -434,18 +409,18 @@ const state = {
   formPersistKey: null
 };
 
-// Theme Toggle
+// Vibe Invert
 function toggleTheme() {
   const root = document.documentElement;
   const current = root.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', newTheme);
-  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
+  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#000000' : '#FFFFFF');
   localStorage.setItem('theme', newTheme);
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
+  document.getElementById('metaThemeColor')?.setAttribute('content', '#000000');
 }
 
 function showScreen(id) {
@@ -457,28 +432,24 @@ function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 3000);
+  setTimeout(() => t.classList.remove("show"), 2500);
 }
 
 function escapeHtml(str) {
   if (str == null) return "";
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-
 function getImageUrl(u) {
   if (!u) return "";
   if (typeof u === "object" && u !== null && u.url) return String(u.url);
   return String(u);
 }
-
-// Safely parse messy string numbers (e.g. "$120.00" -> 120.00)
 function getSafeNumber(val) {
   if (val == null || val === '') return '';
   const str = String(val).replace(/[^0-9.-]/g, '');
   const num = parseFloat(str);
   return isNaN(num) ? '' : num.toFixed(2);
 }
-
 function getHighestSourcePrice(src) {
   const candidates = [];
   if (src.price?.current != null) { const n = parseFloat(getSafeNumber(src.price.current)); if (!isNaN(n)) candidates.push(n); }
@@ -491,29 +462,19 @@ function getHighestSourcePrice(src) {
   }
   return candidates.length ? Math.max(...candidates) : null;
 }
-
 function formatPrice(p, fallbackCurrency = "USD") {
   if (p == null || p === "") return "TBD";
-  let num = '';
-  let curr = fallbackCurrency || '';
-  
-  if (typeof p === "number" || typeof p === "string") {
-    num = getSafeNumber(p);
-  } else if (typeof p === "object" && p !== null) {
-    num = getSafeNumber(p.current);
-    if (p.currency) curr = p.currency;
-  }
-  
+  let num = ''; let curr = fallbackCurrency || '';
+  if (typeof p === "number" || typeof p === "string") { num = getSafeNumber(p); } 
+  else if (typeof p === "object" && p !== null) { num = getSafeNumber(p.current); if (p.currency) curr = p.currency; }
   return num !== '' ? num + (curr ? " " + curr : "") : "TBD";
 }
 
 function computeFinalPriceDisplay(source) {
     const base = getHighestSourcePrice(source);
     if (base == null || isNaN(base)) return "N/A";
-    
     const type = source.markup_type || "percentage";
     let final = base;
-    
     if (type === "fixed" && source.markup_fixed != null) {
         const fixed = parseFloat(source.markup_fixed);
         if (!isNaN(fixed)) final = base + fixed;
@@ -521,7 +482,6 @@ function computeFinalPriceDisplay(source) {
         const pct = parseFloat(source.markup_percentage);
         if (!isNaN(pct)) final = base * (1 + pct / 100);
     }
-    
     const curr = source.price?.currency || source.currency || "";
     return final.toFixed(2) + (curr ? " " + curr : "");
 }
@@ -531,177 +491,98 @@ function initLazyImages() {
   state.io = new IntersectionObserver(entries => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
-        const img = entry.target;
-        const src = img.dataset.src;
-        if (src) {
-          img.src = src;
-          img.classList.add("loaded");
-          img.removeAttribute("data-src");
-        }
+        const img = entry.target; const src = img.dataset.src;
+        if (src) { img.src = src; img.removeAttribute("data-src"); }
         state.io.unobserve(img);
       }
     });
-  }, { rootMargin: "200px" });
+  }, { rootMargin: "300px" });
 }
+function observeImage(img) { if (state.io) state.io.observe(img); }
 
-function observeImage(img) {
-  if (state.io) state.io.observe(img);
-}
-
-/* --- Local Storage Draft Saving --- */
+/* Loc Store Sync */
 function getFormPersistKey() {
   if (!state.current || state.editingPIdx === null || state.editingSIdx === null) return null;
   const fid = state.current.frameIdx !== null ? \`f\${state.current.frameIdx}\` : \`img\${state.current.fileIdx}\`;
-  return \`reviewV2_\${state.current._id}_\${fid}_p\${state.editingPIdx}_s\${state.editingSIdx}\`;
+  return \`rv_2.4_\${state.current._id}_\${fid}_p\${state.editingPIdx}_s\${state.editingSIdx}\`;
 }
-
 function saveFormToLocalStorage() {
-  const key = state.formPersistKey;
-  if (!key) return;
-  
-  syncVariantsFromDOM();
-  syncSizeGuideFromDOM();
-
+  const key = state.formPersistKey; if (!key) return;
+  syncVariantsFromDOM(); syncSizeGuideFromDOM();
   try {
     const data = {
-      name: document.getElementById("eTitle")?.value || "",
-      brand: document.getElementById("eBrand")?.value || "",
-      vendor: document.getElementById("eVendor")?.value || "",
-      color: document.getElementById("eColor")?.value || "",
-      variant: document.getElementById("eVariant")?.value || "",
-      material: document.getElementById("eMaterial")?.value || "",
-      condition: document.getElementById("eCondition")?.value || "",
-      url: document.getElementById("eUrl")?.value || "",
-      category: document.getElementById("eCategory")?.value || "",
-      price: document.getElementById("ePrice")?.value || "",
-      comparePrice: document.getElementById("eComparePrice")?.value || "",
-      currency: document.getElementById("eCurrency")?.value || "",
-      availability: document.getElementById("eAvail")?.value || "",
-      desc: document.getElementById("eDesc")?.value || "",
-      features: document.getElementById("eFeatures")?.value || "",
-      shipping: document.getElementById("eShippingInfo")?.value || "",
-      returns: document.getElementById("eReturnPolicy")?.value || "",
-      markupType: document.getElementById("eMarkupType")?.value || "percentage",
-      markupFixed: document.getElementById("eMarkupFixed")?.value || "",
-      markupPct: document.getElementById("eMarkupPct")?.value || "",
-      variants: state.currentVariants,
-      sizeGuide: state.currentSizeGuide,
-      selectedImages: state.currentSelected
+      name: document.getElementById("eTitle")?.value || "", brand: document.getElementById("eBrand")?.value || "", vendor: document.getElementById("eVendor")?.value || "", color: document.getElementById("eColor")?.value || "",
+      variant: document.getElementById("eVariant")?.value || "", material: document.getElementById("eMaterial")?.value || "", condition: document.getElementById("eCondition")?.value || "", url: document.getElementById("eUrl")?.value || "",
+      category: document.getElementById("eCategory")?.value || "", price: document.getElementById("ePrice")?.value || "", comparePrice: document.getElementById("eComparePrice")?.value || "", currency: document.getElementById("eCurrency")?.value || "",
+      availability: document.getElementById("eAvail")?.value || "", desc: document.getElementById("eDesc")?.value || "", features: document.getElementById("eFeatures")?.value || "", shipping: document.getElementById("eShippingInfo")?.value || "",
+      returns: document.getElementById("eReturnPolicy")?.value || "", markupType: document.getElementById("eMarkupType")?.value || "percentage", markupFixed: document.getElementById("eMarkupFixed")?.value || "", markupPct: document.getElementById("eMarkupPct")?.value || "",
+      variants: state.currentVariants, sizeGuide: state.currentSizeGuide, selectedImages: state.currentSelected
     };
-
     localStorage.setItem(key, JSON.stringify(data));
   } catch(e) {}
 }
-
 function restoreFormFromLocalStorage() {
-  const key = state.formPersistKey;
-  if (!key) return false;
+  const key = state.formPersistKey; if (!key) return false;
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
-
-    setVal("eTitle", data.name);
-    setVal("eBrand", data.brand);
-    setVal("eVendor", data.vendor);
-    setVal("eColor", data.color);
-    setVal("eVariant", data.variant);
-    setVal("eMaterial", data.material);
-    setVal("eCondition", data.condition);
-    setVal("eUrl", data.url);
-    setVal("eCategory", data.category);
-    setVal("ePrice", data.price);
-    setVal("eComparePrice", data.comparePrice);
-    setVal("eCurrency", data.currency);
-    setVal("eAvail", data.availability);
-    setVal("eDesc", data.desc);
-    setVal("eFeatures", data.features);
-    setVal("eShippingInfo", data.shipping);
-    setVal("eReturnPolicy", data.returns);
-    setVal("eMarkupType", data.markupType);
-    setVal("eMarkupFixed", data.markupFixed);
-    setVal("eMarkupPct", data.markupPct);
-
-    if (data.variants && Array.isArray(data.variants)) {
-      state.currentVariants = data.variants;
-      renderVariantsTable();
-    }
-    if (data.sizeGuide && data.sizeGuide.headers) {
-      state.currentSizeGuide = data.sizeGuide;
-      renderSizeGuideTable();
-    }
-    if (data.selectedImages && Array.isArray(data.selectedImages)) {
-      state.currentSelected = data.selectedImages;
-      renderImgGrid(state.currentGridUrls);
-      updateSelCount();
-    }
+    const raw = localStorage.getItem(key); if (!raw) return false;
+    const d = JSON.parse(raw); const sv = (id, v) => { const e = document.getElementById(id); if(e && v != null) e.value = v; };
+    sv("eTitle", d.name); sv("eBrand", d.brand); sv("eVendor", d.vendor); sv("eColor", d.color); sv("eVariant", d.variant); sv("eMaterial", d.material); sv("eCondition", d.condition);
+    sv("eUrl", d.url); sv("eCategory", d.category); sv("ePrice", d.price); sv("eComparePrice", d.comparePrice); sv("eCurrency", d.currency); sv("eAvail", d.availability);
+    sv("eDesc", d.desc); sv("eFeatures", d.features); sv("eShippingInfo", d.shipping); sv("eReturnPolicy", d.returns); sv("eMarkupType", d.markupType); sv("eMarkupFixed", d.markupFixed); sv("eMarkupPct", d.markupPct);
+    if (d.variants && Array.isArray(d.variants)) { state.currentVariants = d.variants; renderVariantsTable(); }
+    if (d.sizeGuide && d.sizeGuide.headers) { state.currentSizeGuide = d.sizeGuide; renderSizeGuideTable(); }
+    if (d.selectedImages && Array.isArray(d.selectedImages)) { state.currentSelected = d.selectedImages; renderImgGrid(state.currentGridUrls); updateSelCount(); }
     return true;
   } catch(e) { return false; }
 }
+function clearFormPersist(key) { if (key) localStorage.removeItem(key); }
 
-function clearFormPersist(key) {
-  if (key) localStorage.removeItem(key);
-}
-
-/* --- Core Loading & Display --- */
+/* --- Fetch and Render Pipeline --- */
 async function loadQueue() {
+  document.getElementById("loading").classList.add("active");
   try {
     const r = await fetch("/api/queue");
-    const resText = await r.text();
-    let data;
-    try { data = JSON.parse(resText); } catch(e) { throw new Error(resText.slice(0, 100)); }
-    
-    state.posts = data.posts || {};
-    state.queue = data.items || [];
+    const d = await r.json();
+    state.posts = d.posts || {};
+    state.queue = d.items || [];
   } catch(e) {
-    state.posts = {};
-    state.queue = [];
-    toast("ERR: " + e.message);
+    state.posts = {}; state.queue = []; toast("SYNC ERR: " + e.message);
   }
   document.getElementById("loading").classList.remove("active");
-  showScreen("queue");
-  initLazyImages();
-  renderQueue();
+  showScreen("queue"); initLazyImages(); renderQueue();
 }
 
 function renderQueue() {
   const list = document.getElementById("qList");
   const postIds = Object.keys(state.posts);
-  
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; opacity:0.5; display:block; margin-top:8px;">All items have been reviewed</span></div>';
-    document.getElementById("qCount").textContent = "0";
-    return;
+    list.innerHTML = '<div class="empty" style="padding-top:35dvh;">All Tasks Complete<br><span style="text-transform:none; font-family:var(--font-sans); color:var(--text-2); font-weight:normal; letter-spacing:0; margin-top:8px; display:inline-block;">Archive sync finished cleanly.</span></div>';
+    document.getElementById("qCount").textContent = "0"; return;
   }
   
   let totalItems = 0;
-  
   list.innerHTML = postIds.map(pid => {
     const post = state.posts[pid];
-    const items = post.items || [];
-    totalItems += items.length;
+    const items = post.items || []; totalItems += items.length;
     const pending = items.filter(it => it.status === "pending" || it.status === "partial").length;
     const thumb = items[0] ? items[0].thumb : "";
     
     return \`
       <div class="post-group" id="g_\${pid}" onclick="toggleGroup(event, '\${pid}')">
         <div class="post-header">
-          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+          <div class="post-thumb"><img data-src="\${escapeHtml(thumb)}" alt="" class="lazy-img" loading="lazy" onerror="this.style.display='none'"></div>
           <div class="post-info">
-            <div class="post-id">\${escapeHtml(pid)}</div>
-            <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
+            <div class="post-id serif-headline" style="font-size:22px;">\${escapeHtml(pid)}</div>
+            <div class="post-meta">\${items.length} Frame\${items.length !== 1 ? 's' : ''} &nbsp;|&nbsp; \${pending} Action\${pending !== 1 ? 's' : ''} Reqd.</div>
           </div>
-          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
             <div class="item-row" data-item-id="\${it._id}-\${it.fileIdx}-\${it.frameIdx !== null ? it.frameIdx : 'img'}" onclick="openItem('\${it._id}', \${it.fileIdx}, \${it.frameIdx !== null ? it.frameIdx : null})">
-              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img placeholder" loading="lazy" onload="this.classList.remove('placeholder')" onerror="this.style.display='none'"></div>
+              <div class="item-thumb"><img data-src="\${escapeHtml(it.thumb)}" alt="" class="lazy-img" loading="lazy" onerror="this.style.display='none'"></div>
               <div class="item-info">
-                <div class="item-type">\${it.type === "frame" ? "FRAME" : "IMAGE"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
-                <div class="item-status">\${escapeHtml(it.status)}</div>
+                <div class="item-type">\${it.type === "frame" ? "Snapshot" : "Capture"} #\${it.frameIdx !== null ? it.frameIdx : it.fileIdx}</div>
               </div>
               <span class="badge \${it.status}">\${it.status}</span>
             </div>
@@ -710,1154 +591,527 @@ function renderQueue() {
       </div>
     \`;
   }).join('');
-  
   document.getElementById("qCount").textContent = totalItems;
   document.querySelectorAll(".lazy-img[data-src]").forEach(observeImage);
-  
   if (state.lastViewedItemId) {
-    const scrollToItem = () => {
-      const targetRow = document.querySelector(\`.item-row[data-item-id="\${state.lastViewedItemId}"]\`);
-      if (targetRow) {
-        targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      state.lastViewedItemId = null;
-    };
-      
-    // Double rAF ensures layout is fully settled regardless of prior scroll position
-    requestAnimationFrame(() => requestAnimationFrame(scrollToItem));
+    const rf = () => { const tr = document.querySelector(\`.item-row[data-item-id="\${state.lastViewedItemId}"]\`); if (tr) tr.scrollIntoView({ behavior:'smooth', block:'center' }); state.lastViewedItemId = null; };
+    requestAnimationFrame(() => requestAnimationFrame(rf));
   }
 }
 
-function toggleGroup(ev, pid) {
-  if (ev.target.closest(".item-row")) return;
-  document.getElementById("g_" + pid).classList.toggle("open");
-}
+function toggleGroup(ev, pid) { if (ev.target.closest(".item-row")) return; document.getElementById("g_" + pid).classList.toggle("open"); }
 
 async function openItem(_id, fileIdx, frameIdx) {
   try {
-    let url = \`/api/item/\${_id}/\${fileIdx}\`;
-    if (frameIdx !== null) url += \`/\${frameIdx}\`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error("Fetch failed");
-    state.current = await r.json();
-    state.lastViewedItemId = \`\${_id}-\${fileIdx}-\${frameIdx !== null ? frameIdx : 'img'}\`;
-  } catch(e) {
-    toast("ERR: " + e.message);
-    return;
-  }
-  renderItem();
-  showScreen("review");
-  window.scrollTo(0,0);
+    let url = \`/api/item/\${_id}/\${fileIdx}\`; if (frameIdx !== null) url += \`/\${frameIdx}\`;
+    const r = await fetch(url); if (!r.ok) throw new Error("Load Fail");
+    state.current = await r.json(); state.lastViewedItemId = \`\${_id}-\${fileIdx}-\${frameIdx !== null ? frameIdx : 'img'}\`;
+  } catch(e) { toast(e.message); return; }
+  renderItem(); showScreen("review"); window.scrollTo(0,0);
 }
 
 function renderItem() {
   const item = state.current;
-  const rTitle = document.getElementById("rTitle");
-  const rTopRight = document.getElementById("rTopRight");
-  const rImage = document.getElementById("rImage");
-  const rMeta = document.getElementById("rMeta");
-  const pList = document.getElementById("pList");
-  const pCount = document.getElementById("pCount");
-  const btnCommit = document.getElementById("btnCommitItem");
-  
   let igLink = 'https://www.instagram.com/' + item.postId + '/';
-  if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) {
-    igLink = 'https://www.instagram.com/p/' + item.postId + '/';
-  }
+  if (!item.postId.startsWith('p/') && !item.postId.startsWith('reel/')) igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   
-  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
+  document.getElementById("rTitle").innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank" style="color:var(--text); text-decoration:none;">\${escapeHtml(item.postId)}</a>\`;
+  const rTopRight = document.getElementById("rTopRight"); rTopRight.innerHTML = '';
   
   if (item.type === 'frame' && item.parentUrl) {
-    const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
-    const watchBtn = document.createElement('button');
-    watchBtn.className = 'btn-ghost';
-    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);');
-    watchBtn.textContent = 'WATCH';
-    watchBtn.onclick = () => openVideo(proxyUrl);
-    rTopRight.innerHTML = '';
-    rTopRight.appendChild(watchBtn);
-  } else {
-    rTopRight.innerHTML  = '';
+    const watchBtn = document.createElement('button'); watchBtn.className = 'top-action mono-util'; 
+    watchBtn.setAttribute('style', 'color:var(--text); text-decoration:underline; text-underline-offset: 4px; padding: 0;'); 
+    watchBtn.textContent = 'Playback'; watchBtn.onclick = () => openVideo("/api/video?url=" + encodeURIComponent(item.parentUrl)); rTopRight.appendChild(watchBtn);
   }
-
-  rImage.src = item.url;
   
-  const prods = item.response && item.response.products ? item.response.products : [];
-  
-  let totalSources = 0;
-  let pendingSources = 0;
-  let listHtml = "";
+  document.getElementById("rImage").src = item.url;
+  const prods = item.response?.products || []; let totalSources = 0; let pendingSources = 0; let listHtml = "";
 
   if (!prods.length) {
-    listHtml = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
+    listHtml = '<div class="empty">Directory contains 0 products.</div>';
   } else {
     prods.forEach((p, pIdx) => {
-      listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
-      
-      const sources = p.sources || [];
-      totalSources += sources.length;
-      
-      if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
-      } else {
+      listHtml += \`<h2 class="serif-headline">\${escapeHtml(p.title || 'Artifact Unnamed')}</h2>\`;
+      const sources = p.sources || []; totalSources += sources.length;
+      if (!sources.length) listHtml += '<div class="empty" style="padding:20px;">Orphan Product. No Suppliers Found.</div>';
+      else {
         sources.forEach((s, sIdx) => {
           if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
-          
-          let statusColor = "var(--text)";
-          let rejectedClass = "";
-          let statusBadge = "";
-
-          // All indicator badges on the listing page remain a uniform grey color for a clean UI
-          if (s.reviewStatus === "rejected") {
-            statusColor = "var(--text-2)";
-            rejectedClass = "rejected";
-            statusBadge = '<span class="badge src-status">REJECTED</span>';
-          } else if (s.reviewStatus === "completed") {
-            statusBadge = '<span class="badge src-status">REVIEWED</span>';
-          } else {
-            const extStatus = s.textExtraction?.status;
-            if (extStatus === 'completed') statusBadge = '<span class="badge src-status">EXTRACTED</span>';
-            else if (extStatus === 'failed') statusBadge = '<span class="badge src-status">FAILED</span>';
-            else statusBadge = '<span class="badge src-status">PENDING EXTRACT</span>';
+          let rejectedClass = s.reviewStatus === "rejected" ? "rejected" : "";
+          let btxt = "";
+          if (s.reviewStatus === "rejected") btxt = '<span class="badge pending" style="opacity:1; text-decoration:line-through; font-weight:normal;">Excised</span>';
+          else if (s.reviewStatus === "completed") btxt = '<span class="badge">Approved</span>';
+          else {
+            const es = s.textExtraction?.status;
+            btxt = es === 'completed' ? '<span class="badge src-status">Analyzed</span>' : 
+                   (es === 'failed' ? '<span class="badge src-status">No Ext</span>' : '<span class="badge partial">Scraping</span>');
           }
-
-          const imgUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
-          const nameLabel = s.name || p.title || "UNTITLED";
-          const storeLabel = s.brand || s.vendor || s.store || "Unknown Store";
-
+          const iUrl = getImageUrl((s.selectedImages && s.selectedImages[0]) || (s.images && s.images[0]));
           listHtml += \`
             <div class="p-card \${rejectedClass}" data-source-id="\${pIdx}-\${sIdx}" onclick="openSource(\${pIdx}, \${sIdx})">
-              <div class="p-img">\${imgUrl ? \`<img src="\${escapeHtml(imgUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">\` : \`<div class="no-img">N/A</div>\`}</div>
+              <div class="p-img">\${iUrl ? \`<img src="\${escapeHtml(iUrl)}" loading="lazy" alt="">\` : \`<div class="no-img">Empty</div>\`}</div>
               <div class="p-info">
-                <div class="p-title">\${escapeHtml(nameLabel)}</div>
-                <div class="p-brand">\${escapeHtml(storeLabel)} &middot; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
-                <div class="p-status" style="color:\${statusColor}">\${statusBadge}</div>
+                <div class="p-brand">\${escapeHtml(s.brand || s.vendor || s.store || "Generic Manufacturer")} &nbsp;/&nbsp; \${escapeHtml(formatPrice(s.price, s.currency))}</div>
+                <div class="p-title">\${escapeHtml(s.name || p.title || "UNTITLED")}</div>
+                <div class="p-status">\${btxt}</div>
               </div>
-            </div>
-          \`;
+            </div>\`;
         });
       }
     });
   }
-
-  pList.innerHTML = listHtml;
-  pCount.textContent = totalSources;
-
-  rMeta.innerHTML = \`
-    <span class="badge">\${item.type === "frame" ? "FRAME" : "IMAGE"}</span>
-    <span class="badge">\${totalSources} SRC</span>
-    \${pendingSources ? \`<span class="badge pending">\${pendingSources} PEND</span>\` : ""}
+  document.getElementById("pList").innerHTML = listHtml;
+  document.getElementById("rMeta").innerHTML = \`
+    <span class="badge" style="background:var(--surface-2); color:var(--text); border:none;">Type: \${item.type==="frame"?"Snapshot":"Static"}</span>
+    <span class="badge" style="background:var(--surface-2); color:var(--text); border:none;">Sources: \${totalSources}</span>
+    \${pendingSources ? \`<span class="badge warning">\${pendingSources} PENDING</span>\` : ""}
   \`;
-  
-  if (pendingSources > 0) {
-    btnCommit.disabled = true;
-    btnCommit.title = "Review all sources first";
-  } else {
-    btnCommit.disabled = false;
-    btnCommit.title = "";
-  }
-
+  const bc = document.getElementById("btnCommitItem");
+  bc.disabled = (pendingSources > 0); bc.title = bc.disabled ? "Clear dependencies to commit" : "";
   if (state.justEditedSId !== null) {
-    const scrollToCard = () => {
-      const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`);
-      if (targetCard) {
-        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      state.justEditedSId = null;
-    };
-    requestAnimationFrame(() => requestAnimationFrame(scrollToCard));
+    const rc = () => { const tg = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`); if (tg) tg.scrollIntoView({behavior:'smooth',block:'center'}); state.justEditedSId=null;};
+    requestAnimationFrame(() => requestAnimationFrame(rc));
   }
 }
 
-function openVideo(url) {
-  const v = document.getElementById('vPlayer');
-  v.src = url;
-  document.getElementById('videoModal').classList.add('active');
-  v.play().catch(e => console.error(e));
-}
-
-function closeVideo() {
-  const v = document.getElementById('vPlayer');
-  v.pause();
-  v.src = '';
-  document.getElementById('videoModal').classList.remove('active');
-}
+function openVideo(url) { const v = document.getElementById('vPlayer'); v.src = url; document.getElementById('videoModal').classList.add('active'); v.play().catch(console.error); }
+function closeVideo() { const v = document.getElementById('vPlayer'); v.pause(); v.src = ''; document.getElementById('videoModal').classList.remove('active'); }
 
 function updateFinalPrice() {
     const type = document.getElementById("eMarkupType").value;
-    const fixedWrap = document.getElementById("fieldMarkupFixed");
-    const pctWrap = document.getElementById("fieldMarkupPct");
-    
-    if (fixedWrap) fixedWrap.style.display = type === "fixed" ? "block" : "none";
-    if (pctWrap) pctWrap.style.display = type === "percentage" ? "block" : "none";
-    
-    const baseEl = document.getElementById("ePrice");
-    const finalEl = document.getElementById("eFinalPrice");
-    if (!baseEl || !finalEl) return;
-    
-    const base = parseFloat(baseEl.value);
-    if (isNaN(base)) { finalEl.value = "N/A"; return; }
-    
-    const curr = document.getElementById("eCurrency")?.value || "";
-    let final = base;
-    
-    if (type === "fixed") {
-        const fixed = parseFloat(document.getElementById("eMarkupFixed")?.value);
-        if (!isNaN(fixed)) final = base + fixed;
-    } else {
-        const pct = parseFloat(document.getElementById("eMarkupPct")?.value);
-        if (!isNaN(pct)) final = base * (1 + pct / 100);
-    }
-    
-    finalEl.value = final.toFixed(2) + (curr ? " " + curr : "");
-    saveFormToLocalStorage();
+    document.getElementById("fieldMarkupFixed").style.display = (type === "fixed") ? "block" : "none";
+    document.getElementById("fieldMarkupPct").style.display = (type === "percentage") ? "block" : "none";
+    const be = document.getElementById("ePrice"); const fe = document.getElementById("eFinalPrice"); if(!be || !fe) return;
+    const b = parseFloat(be.value); if (isNaN(b)) { fe.value = "NA"; return; }
+    const c = document.getElementById("eCurrency")?.value || ""; let f = b;
+    if (type === "fixed") { const val = parseFloat(document.getElementById("eMarkupFixed")?.value); if (!isNaN(val)) f = b + val; } 
+    else { const val = parseFloat(document.getElementById("eMarkupPct")?.value); if (!isNaN(val)) f = b * (1 + val/100); }
+    fe.value = f.toFixed(2) + (c ? " " + c : ""); saveFormToLocalStorage();
 }
 
 function getAllImages(source) {
-  const allUrls = new Set();
-  if (state.current && state.current.url) allUrls.add(state.current.url);
-
-  (source.images || []).forEach(u => {
-    const url = getImageUrl(u);
-    if (url) allUrls.add(url);
-  });
-  
-  (source.customImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  (source.selectedImages || []).forEach(u => { if (u) allUrls.add(String(u)); });
-  
-  return { urls: Array.from(allUrls) };
+  const st = new Set();
+  if (state.current?.url) st.add(state.current.url);
+  (source.images||[]).forEach(u=>{const p=getImageUrl(u);if(p)st.add(p);});
+  (source.customImages||[]).forEach(u=>st.add(String(u)));
+  (source.selectedImages||[]).forEach(u=>st.add(String(u)));
+  return { urls: Array.from(st) };
 }
 
 function openSource(pIdx, sIdx) {
   try {
-    state.editingPIdx = pIdx;
-    state.editingSIdx = sIdx;
+    state.editingPIdx = pIdx; state.editingSIdx = sIdx;
+    const prd = state.current.response.products[pIdx]; const s = prd.sources[sIdx];
+    if(!s) return toast('Data missing');
     
-    const product = state.current.response.products[pIdx];
-    const s = product.sources[sIdx];
-    if (!s) return toast('Source data missing');
-    
-    document.getElementById("eModalTitle").textContent = "EDIT SOURCE";
-
-    const allImages = getAllImages(s);
-    state.currentSelected = [...(s.selectedImages || [])];
-    
-    const sortedUrls = [...state.currentSelected];
-    allImages.urls.forEach(u => { if (!sortedUrls.includes(u)) sortedUrls.push(u); });
-    state.currentGridUrls = sortedUrls;
-
+    const imDat = getAllImages(s); state.currentSelected = [...(s.selectedImages||[])];
+    state.currentGridUrls = Array.from(new Set([...state.currentSelected, ...imDat.urls]));
     state.currentVariants = Array.isArray(s.variants) ? JSON.parse(JSON.stringify(s.variants)) : [];
-    const rawSg = s.size_guide;
-    const hasHeaders = rawSg && Array.isArray(rawSg.headers);
-    const hasRows    = rawSg && Array.isArray(rawSg.rows);
-    state.currentSizeGuide = (hasHeaders && hasRows)
-      ? JSON.parse(JSON.stringify(rawSg))
-      : { headers: ["US", "EU", "UK"], rows: [] };
-
-    const highestPrice = getHighestSourcePrice(s);
-    const safePriceVal = highestPrice != null ? highestPrice.toFixed(2) : "";
-    const safeCompareVal = s.price?.original != null ? getSafeNumber(s.price.original) : (s.compare_at_price != null ? getSafeNumber(s.compare_at_price) : "");
     
-    // Robust availability parser — scoped to selected variant color if set
-    function parseAvailStr(str) {
-      const raw = String(str || "").toLowerCase().replace(/[^a-z]/g, '');
-      return (raw.includes('out') || raw.includes('sold')) ? "OutOfStock" : (raw.includes('pre') ? "PreOrder" : "InStock");
-    }
-    const selectedVariantColor = (s.variant || '').trim();
-    let mappedAvail;
-    if (selectedVariantColor && Array.isArray(s.variants) && s.variants.length) {
-      const filteredVars = s.variants.filter(v => (v.color || '').trim() === selectedVariantColor);
-      if (filteredVars.length) {
-        // If any are InStock → InStock; else if any PreOrder → PreOrder; else OutOfStock
-        const avails = filteredVars.map(v => parseAvailStr(v.availability));
-        mappedAvail = avails.includes('InStock') ? 'InStock' : (avails.includes('PreOrder') ? 'PreOrder' : 'OutOfStock');
-      } else {
-        mappedAvail = parseAvailStr(s.availability);
-      }
-    } else {
-      mappedAvail = parseAvailStr(s.availability);
-    }
+    const hHeaders = s.size_guide?.headers?.length > 0;
+    state.currentSizeGuide = (hHeaders) ? JSON.parse(JSON.stringify(s.size_guide)) : { headers: ["US", "EU", "UK"], rows: [] };
+    const hPr = getHighestSourcePrice(s); const sPrV = hPr != null ? hPr.toFixed(2) : "";
+    const sCmpV = s.price?.original!=null ? getSafeNumber(s.price.original) : (s.compare_at_price!=null ? getSafeNumber(s.compare_at_price) : "");
     
-    // Robust features string parser to prevent crash
-    const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
-
+    const paV = (str) => { const rm = String(str||"").toLowerCase().replace(/[^a-z]/g,''); return rm.includes('out')||rm.includes('sold') ? "OutOfStock" : rm.includes('pre') ? "PreOrder" : "InStock"; };
+    const vC = (s.variant||'').trim(); let mAv;
+    if(vC && Array.isArray(s.variants) && s.variants.length) {
+      const fi = s.variants.filter(v=>(v.color||'').trim()===vC);
+      mAv = fi.length ? (fi.map(v=>paV(v.availability)).includes('InStock') ? 'InStock' : 'OutOfStock') : paV(s.availability);
+    } else mAv = paV(s.availability);
+    
+    const feats = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features==="string" ? s.features : "");
+    
     let html = \`
-      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
-        <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-          IMAGES 
-          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
-            <span id="selCount">\${state.currentSelected.length}</span> SELECTED
-          </span>
-        </h3>
+      <div class="card" style="padding-bottom:16px;">
+        <h3>Assets // <span style="text-transform:none;font-weight:bold;"><span id="selCount">\${state.currentSelected.length}</span> Active</span></h3>
         <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:8px; margin-bottom:16px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
+        <div style="display:flex; gap:16px; margin-top:8px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px solid var(--border); border-style:dashed;">Drop IMG URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px solid var(--danger); color:var(--danger); border-style:dashed;">Purge List</button>
         </div>
       </div>
       
       <div class="card">
-        <h3>BASIC INFO</h3>
-        <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
-        
+        <h3>Primary Meta</h3>
+        <div class="field"><label>Nomenclature</label><input id="eTitle" value="\${escapeHtml(s.name||prd.title||"")}" style="font-size:22px; font-family:var(--font-serif); font-weight:normal; letter-spacing:0.02em;"></div>
         <div class="field-row">
-          <div class="field"><label>Brand</label><input id="eBrand" value="\${escapeHtml(s.brand || "")}"></div>
-          <div class="field"><label>Vendor</label><input id="eVendor" value="\${escapeHtml(s.vendor || s.store || "")}"></div>
+          <div class="field"><label>House / Brand</label><input id="eBrand" value="\${escapeHtml(s.brand||"")}"></div>
+          <div class="field"><label>Origin / Store</label><input id="eVendor" value="\${escapeHtml(s.vendor||s.store||"")}"></div>
         </div>
-        
         <div class="field-row">
-          <div class="field"><label>Color</label><input id="eColor" value="\${escapeHtml(s.color || "")}"></div>
-          <div class="field"><label>Material</label><input id="eMaterial" value="\${escapeHtml(s.material || "")}"></div>
+          <div class="field"><label>Tone / Color</label><input id="eColor" value="\${escapeHtml(s.color||"")}"></div>
+          <div class="field"><label>Substance / Mat.</label><input id="eMaterial" value="\${escapeHtml(s.material||"")}"></div>
         </div>
-        
         <div class="field">
-          <label>Variant</label>
+          <label>Selected Master Variant</label>
           <select id="eVariant">
-            <option value="">All Variants</option>
-            \${(() => {
-              const variants = s.variants || [];
-              if (!variants.length) return '';
-              
-              // Collect unique non-empty colors, preserving first-seen order
-              const seen = new Set();
-              const uniqueColors = [];
-              variants.forEach(v => {
-                const c = (v.color || '').trim();
-                if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
-              });
-              
-              // Auto-select: use saved s.variant if it matches a known color,
-              // else if all variants share the same color, auto-select it,
-              // else select the first unique color found.
-              const allColors = variants.map(v => (v.color || '').trim());
-              const allSame = allColors.every(c => c === allColors[0]) && allColors[0] !== '';
-              const savedVariant = (s.variant || '').trim();
-              const defaultVal = (savedVariant && uniqueColors.includes(savedVariant))
-                ? savedVariant
-                : (allSame ? allColors[0] : (uniqueColors[0] || ''));
-                
-              return uniqueColors.map(c => 
-                \`<option value="\${escapeHtml(c)}" \${defaultVal === c ? 'selected' : ''}>\${escapeHtml(c)}</option>\`
-              ).join('');
+            <option value="">Aggregate All</option>
+            \${(()=>{
+              const vs=s.variants||[]; if(!vs.length) return '';
+              const uniq=[...new Set(vs.map(v=>(v.color||'').trim()).filter(c=>c))];
+              const aSame=vs.map(v=>(v.color||'').trim()).every((c,i,a)=>c===a[0])&&vs[0];
+              const sd=(s.variant||'').trim(); const dV= (sd&&uniq.includes(sd))?sd:(aSame?vs[0].color.trim():(uniq[0]||''));
+              return uniq.map(c=>\`<option value="\${escapeHtml(c)}" \${dV===c?'selected':''}>\${escapeHtml(c)}</option>\`).join('');
             })()}
           </select>
         </div>
-
         <div class="field">
-          <label>Condition</label>
-          <select id="eCondition">
-            <option value="" \${escapeHtml(s.condition || "") === "" ? "selected" : ""}>Unknown</option>
-            <option value="New" \${escapeHtml(s.condition || "") === "New" ? "selected" : ""}>New</option>
-            <option value="Used" \${escapeHtml(s.condition || "") === "Used" ? "selected" : ""}>Used</option>
-          </select>
+          <label>State / Condition</label>
+          <select id="eCondition"><option value="" \${escapeHtml(s.condition||"")===""?"selected":""}>Unlisted</option><option value="New" \${escapeHtml(s.condition||"")==="New"?"selected":""}>Pristine (New)</option><option value="Used" \${escapeHtml(s.condition||"")==="Used"?"selected":""}>Archived (Used)</option></select>
         </div>
-        
-        <div class="field"><label>Category</label><input id="eCategory" value="\${escapeHtml(s.primary_category || product.category || "")}"></div>
-
-        <div class="field" style="margin-bottom:24px;">
-          <label>Supplier URL</label>
-          <div style="display:flex; gap:8px;">
-            <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+        <div class="field"><label>Classification</label><input id="eCategory" value="\${escapeHtml(s.primary_category||prd.category||"")}"></div>
+        <div class="field">
+          <label>Extraction Source Link</label>
+          <div style="display:flex; gap:16px;">
+            <input id="eUrl" type="url" value="\${escapeHtml(s.url||"")}" style="flex:1;">
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;color:var(--bg);background:var(--text);border-radius:4px;text-decoration:none;display:flex;align-items:center;padding:0 24px; font-weight:bold; letter-spacing:0.05em;">LINK OUT ↗</a>\` : ''}
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <div style="display:flex; gap:16px; margin-top:16px;">
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; border:1px solid var(--border); font-size:9px;" onclick="extractImages('lazy')">Scrape Basic</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; border:1px solid var(--border); font-size:9px;" onclick="extractImages('full')">Deep Analysis</button>
           </div>
         </div>
-
         <div class="field-row">
-          <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}" oninput="updateFinalPrice()"></div>
-          <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
-          
-          <div class="field" style="width:120px">
-            <label>Currency</label>
-            <div style="display:flex; gap:0;">
-              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
-              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:36px; padding:0 4px; flex-shrink:0; font-size:11px; border-left:none;">
-                <option value="">▾</option>
-                <option>USD</option><option>EUR</option><option>GBP</option>
-                <option>CAD</option><option>AUD</option><option>CHF</option>
-                <option>JPY</option><option>CNY</option><option>SEK</option>
-                <option>NOK</option><option>DKK</option><option>PLN</option>
-                <option>SGD</option><option>HKD</option><option>NZD</option>
-                <option>MXN</option><option>KRW</option><option>INR</option>
-                <option>AED</option><option>SAR</option><option>ZAR</option>
-              </select>
+          <div class="field"><label>Tag (Current)</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(sPrV)}" oninput="updateFinalPrice()"></div>
+          <div class="field"><label>Tag (Legacy)</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(sCmpV)}"></div>
+          <div class="field" style="width:110px;">
+            <label>Curr.</label>
+            <div style="display:flex;">
+              <input id="eCurrency" value="\${escapeHtml(s.price?.currency||s.currency||'USD')}" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();updateFinalPrice()">
             </div>
-            <datalist id="currencyList">
-              <option value="USD"><option value="EUR"><option value="GBP">
-              <option value="CAD"><option value="AUD"><option value="CHF">
-              <option value="JPY"><option value="CNY"><option value="SEK">
-              <option value="NOK"><option value="DKK"><option value="PLN">
-              <option value="SGD"><option value="HKD"><option value="NZD">
-              <option value="MXN"><option value="KRW"><option value="INR">
-              <option value="AED"><option value="SAR"><option value="ZAR">
-            </datalist>
           </div>
-
         </div>
         <div class="field">
-          <label>Availability</label>
-          <select id="eAvail">
-            <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
-            <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
-            <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
-          </select>
+          <label>Inventory Presence</label>
+          <select id="eAvail"><option \${mAv==="InStock"?"selected":""}>InStock</option><option \${mAv==="OutOfStock"?"selected":""}>OutOfStock</option><option \${mAv==="PreOrder"?"selected":""}>PreOrder</option></select>
         </div>
       </div>
       
-      <details class="card">
-        <summary>VARIANTS</summary>
+      <details class="card"><summary>Granular Stock Mapping</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:20px;">+ Extend Variant Record</button>
         </div>
       </details>
 
-      <details class="card">
-        <summary>SIZE GUIDE</summary>
+      <details class="card"><summary>Anatomy Charting (Sizing)</summary>
         <div class="details-content">
-          <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
+          <div class="info-plate">Consult global metric logic before generating structures via clipboard inject. Paste standard schema ONLY.</div>
+          <div style="display:flex; gap:16px;">
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--text);">Export System Matrix ⎘</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; background:var(--text); color:var(--bg);">Inject Architect JSON ↓</button>
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px;">AI PROMPT</button>
-            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px; color:var(--success);">PASTE JSON</button>
-          </div>
-          <div style="font-size:11px; color:var(--text-2); margin-top:8px; line-height:1.5;">
-            Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
+          <div id="sizeGuideContainer" class="simple-table-wrapper" style="margin-top:24px;"></div>
+          <div style="display:flex; gap:16px; margin-top:16px;">
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); font-size:10px;">+ Node Y (Row)</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); font-size:10px;">+ Node X (Col)</button>
           </div>
         </div>
       </details>
 
-      <details class="card">
-        <summary>DETAILS & POLICIES</summary>
-        <div class="details-content">
-          <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
-          <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
-          <div class="field"><label>Shipping Info</label><textarea id="eShippingInfo">\${escapeHtml(s.shipping_info || "")}</textarea></div>
-          <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
+      <details class="card"><summary>Verbiage / Intel</summary>
+        <div class="details-content" style="padding-bottom:12px;">
+          <div class="field"><label>Narrative Description</label><textarea id="eDesc" style="line-height:1.6; font-size:15px; border-left:1px solid var(--border); border-bottom:1px solid var(--border); padding: 12px; margin-bottom:8px;">\${escapeHtml(s.description||prd.description||"")}</textarea></div>
+          <div class="field"><label>Bullet Struct. (NL delim.)</label><textarea id="eFeatures" style="line-height:1.6; font-size:15px; border-left:1px solid var(--border); border-bottom:1px solid var(--border); padding: 12px; margin-bottom:8px;">\${escapeHtml(feats)}</textarea></div>
+          <div class="field"><label>Logistics Transit</label><textarea id="eShippingInfo" style="font-family:var(--font-mono); font-size:12px; border-bottom:1px solid var(--border);">\${escapeHtml(s.shipping_info||"")}</textarea></div>
+          <div class="field"><label>Return Policy Statement</label><textarea id="eReturnPolicy" style="font-family:var(--font-mono); font-size:12px; border-bottom:1px solid var(--border);">\${escapeHtml(s.return_policy||"")}</textarea></div>
         </div>
       </details>
 
-      <details class="card">
-        <summary>DROPSHIP PRICING</summary>
+      <details class="card"><summary>Econ Projection Parameters</summary>
         <div class="details-content">
-          <div style="background:var(--surface-2); padding:12px; margin-bottom:16px; border:1px solid var(--border);">
-            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-2); margin-bottom:8px;">DROPSHIP CONTEXT</div>
-            <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-            <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-              <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-              <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-              <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-              <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+          <div style="background:var(--surface-2); border-left: 3px solid var(--text); padding: 16px 20px; margin-bottom:24px;">
+            <div class="mono-util" style="margin-bottom:8px;">Algorithm Signals</div>
+            <div style="font-family:var(--font-serif); font-size:16px; line-height:1.3; margin-bottom:12px;">Warning Node: \${escapeHtml(s.dropship_advisory||"CLEAR")}</div>
+            <div style="font-family:var(--font-mono); font-size:11px; display:flex; flex-wrap:wrap; gap:16px;">
+              <div>[R] Price <br><strong style="font-size:14px;color:var(--text);margin-top:2px;display:block;">\${s.base_price_for_markup||"NaN"}</strong></div>
+              <div>[R] Rate % <br><strong style="font-size:14px;color:var(--text);margin-top:2px;display:block;">\${s.recommended_markup_percentage?s.recommended_markup_percentage+"%":"NaN"}</strong></div>
+              <div>[P] Retail <br><strong style="font-size:14px;color:var(--text);margin-top:2px;display:block;">\${s.suggested_resell_price||"NaN"}</strong></div>
             </div>
-            <div style="font-size:11px; color:var(--text-2); margin-top:8px;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
           </div>
-          <div class="field">
-            <label>Markup Type</label>
-            <select id="eMarkupType" onchange="updateFinalPrice()">
-              <option value="percentage" \${(s.markup_type || "percentage") === "percentage" ? "selected" : ""}>Percentage</option>
-              <option value="fixed" \${(s.markup_type || "") === "fixed" ? "selected" : ""}>Fixed Amount</option>
-            </select>
-          </div>
+          
+          <div class="field"><label>Strategy Lock</label><select id="eMarkupType" onchange="updateFinalPrice()"><option value="percentage" \${(s.markup_type||"percentage")==="percentage"?"selected":""}>Scale Modifier (%)</option><option value="fixed" \${(s.markup_type||"")==="fixed"?"selected":""}>Static Offset (+)</option></select></div>
           <div class="field-row">
-            <div class="field" id="fieldMarkupFixed" style="display:\${(s.markup_type || "percentage") === "fixed" ? "block" : "none"}">
-              <label>Fixed Markup</label>
-              <input id="eMarkupFixed" type="number" step="0.01" inputmode="decimal" 
-                value="\${s.markup_fixed != null ? escapeHtml(getSafeNumber(s.markup_fixed)) : ""}" 
-                oninput="updateFinalPrice()">
-            </div>
-            <div class="field" id="fieldMarkupPct" style="display:\${(s.markup_type || "percentage") === "percentage" ? "block" : "none"}">
-              <label>Markup %</label>
-              <input id="eMarkupPct" type="number" step="0.1" inputmode="decimal" 
-                value="\${s.markup_percentage != null ? escapeHtml(String(s.markup_percentage)) : (s.recommended_markup_percentage != null ? escapeHtml(String(s.recommended_markup_percentage)) : '30')}"
-                oninput="updateFinalPrice()">
-            </div>
+            <div class="field" id="fieldMarkupFixed" style="display:\${(s.markup_type||"percentage")==="fixed"?"block":"none"}"><label>Nominal (+)</label><input id="eMarkupFixed" type="number" step="0.01" value="\${s.markup_fixed!=null?escapeHtml(getSafeNumber(s.markup_fixed)):""}" oninput="updateFinalPrice()"></div>
+            <div class="field" id="fieldMarkupPct" style="display:\${(s.markup_type||"percentage")==="percentage"?"block":"none"}"><label>Coefficient (%)</label><input id="eMarkupPct" type="number" step="0.1" value="\${s.markup_percentage!=null?escapeHtml(String(s.markup_percentage)):(s.recommended_markup_percentage!=null?escapeHtml(String(s.recommended_markup_percentage)):'30')}" oninput="updateFinalPrice()"></div>
           </div>
-          <div class="field">
-            <label>Final Price (Auto)</label>
-            <input id="eFinalPrice" type="text" readonly 
-              value="\${escapeHtml(computeFinalPriceDisplay(s))}" 
-              style="background:var(--surface-2); color:var(--text-2);">
-          </div>
+          <div class="field" style="margin-top: 32px;"><label style="font-size:12px;">Computed Terminal Yield</label><input id="eFinalPrice" type="text" readonly value="\${escapeHtml(computeFinalPriceDisplay(s))}" style="border-bottom: 2px solid var(--text); font-family:var(--font-mono); font-weight:bold; color:var(--text); pointer-events:none;"></div>
         </div>
       </details>
-
-      <div class="card" style="border-bottom:none;">
-        <h3>ACTIONS</h3>
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
-        </div>
-        <div style="display:flex; gap:12px">
-          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
-          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
-        </div>
-      </div>
+      
+      <!-- Safe scroll clearance in Editor -->
+      <div style="height:48px;"></div>
     \`;
-    
     document.getElementById("eBody").innerHTML = html;
     
-    renderImgGrid(state.currentGridUrls);
-    updateSelCount();
-    renderVariantsTable();
-    renderSizeGuideTable();
+    renderImgGrid(state.currentGridUrls); updateSelCount();
+    renderVariantsTable(); renderSizeGuideTable();
     
     state.formPersistKey = getFormPersistKey();
     restoreFormFromLocalStorage();
 
-    const eBody = document.getElementById("eBody");
-    if (eBody) {
-      eBody.removeEventListener('input', saveFormToLocalStorage);
-      eBody.removeEventListener('change', saveFormToLocalStorage);
-      eBody.addEventListener('input', () => saveFormToLocalStorage(), { passive: true });
-      eBody.addEventListener('change', () => saveFormToLocalStorage(), { passive: true });
-    }
-
-    showScreen("editor");
-    document.getElementById("eBody").scrollTop = 0;
-    window.scrollTo(0,0);
-  } catch (err) {
-    toast("ERROR OPENING SOURCE: " + err.message);
-  }
+    const eb = document.getElementById("eBody");
+    if(eb) { eb.removeEventListener('input', saveFormToLocalStorage); eb.removeEventListener('change', saveFormToLocalStorage);
+             eb.addEventListener('input', ()=>saveFormToLocalStorage(), {passive:true}); eb.addEventListener('change', ()=>saveFormToLocalStorage(), {passive:true}); }
+    
+    showScreen("editor"); document.getElementById("eBody").scrollTop = 0; window.scrollTo(0,0);
+    
+  } catch(e) { toast("RUNTIME FAULT: " + e.message); }
 }
 
-function updateSelCount() {
-  const el = document.getElementById('selCount');
-  if (el) el.textContent = state.currentSelected.length;
-}
+function updateSelCount() { const e=document.getElementById('selCount'); if(e) e.textContent=state.currentSelected.length; }
 
 function toggleImageSelection(url) {
-  const idx = state.currentSelected.indexOf(url);
-  if (idx > -1) state.currentSelected.splice(idx, 1);
-  else state.currentSelected.push(url);
-  renderImgGrid(state.currentGridUrls);
-  updateSelCount();
-  saveFormToLocalStorage();
+  const i=state.currentSelected.indexOf(url);
+  if(i>-1) state.currentSelected.splice(i,1); else state.currentSelected.push(url);
+  renderImgGrid(state.currentGridUrls); updateSelCount(); saveFormToLocalStorage();
 }
-
 function clearSelection() {
-  if (!confirm('CLEAR ALL SELECTED IMAGES?')) return;
-  state.currentSelected = [];
-  renderImgGrid(state.currentGridUrls);
-  updateSelCount();
-  saveFormToLocalStorage();
-  toast('SELECTION CLEARED');
+  if(!confirm('ERASE ASSET LOCKS?')) return;
+  state.currentSelected=[]; renderImgGrid(state.currentGridUrls); updateSelCount(); saveFormToLocalStorage();
 }
 
 function renderImgGrid(urls) {
-  const grid = document.getElementById("eImgGrid");
-  if (!urls.length) { grid.innerHTML = '<div class="empty" style="flex:1;">NO IMAGES</div>'; return; }
-  
-  grid.innerHTML = urls.map(url => {
-    const selIdx = state.currentSelected.indexOf(url);
-    const isOn = selIdx > -1;
-    return \`
-      <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
-        <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
-      </div>\`;
-  }).join("");
+  const gr = document.getElementById("eImgGrid");
+  if(!urls.length) { gr.innerHTML = '<div class="empty" style="flex:1;">Awaiting Media Drop</div>'; return; }
+  gr.innerHTML = urls.map(u => {
+    const si = state.currentSelected.indexOf(u); const isOn = si > -1;
+    return \`<div class="img-cell \${isOn?'on':''}" onclick="toggleImageSelection('\${escapeHtml(u)}')">
+      <img src="\${escapeHtml(u)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23222%22/></svg>'">
+      <div class="check">\${isOn?(si+1):''}</div>
+    </div>\`;
+  }).join('');
 }
 
 async function addImage() {
   try {
-    const text = await navigator.clipboard.readText();
-    if (!text) { toast("CLIPBOARD EMPTY"); return; }
-    let url = text.trim();
-    if (!/^https?:\\/\\//i.test(url)) { toast("NO VALID URL IN CLIPBOARD"); return; }
-    
-    const product = state.current.response.products[state.editingPIdx];
-    const s = product.sources[state.editingSIdx];
-    
-    s.customImages = s.customImages || [];
-    if (!s.customImages.includes(url)) s.customImages.push(url);
-    
-    if (!state.currentSelected.includes(url)) state.currentSelected.push(url);
-    if (!state.currentGridUrls.includes(url)) state.currentGridUrls.unshift(url);
-    
-    renderImgGrid(state.currentGridUrls);
-    updateSelCount();
-    saveFormToLocalStorage();
-    toast("IMAGE PASTED FROM CLIPBOARD");
-  } catch (err) {
-    toast("CLIPBOARD PERMISSION DENIED");
-  }
+    const text=await navigator.clipboard.readText(); if(!text){ toast("BOARD EMP."); return; }
+    let u=text.trim(); if(!/^https?:\\/\\//i.test(u)){ toast("NO HREF IDENTIFIED."); return; }
+    const s = state.current.response.products[state.editingPIdx].sources[state.editingSIdx];
+    s.customImages=s.customImages||[]; if(!s.customImages.includes(u)) s.customImages.push(u);
+    if(!state.currentSelected.includes(u)) state.currentSelected.push(u);
+    if(!state.currentGridUrls.includes(u)) state.currentGridUrls.unshift(u);
+    renderImgGrid(state.currentGridUrls); updateSelCount(); saveFormToLocalStorage(); toast("LOCK APPENDED");
+  } catch(e) { toast("SYS CLIP ERR"); }
 }
 
 async function extractImages(mode) {
-  const url = document.getElementById("eUrl").value;
-  if (!url) return toast("NO URL PROVIDED");
-  
-  const carousel = document.getElementById("eImgGrid");
-  const btnLazy = document.getElementById("btnExtractLazy");
-  const btnFull = document.getElementById("btnExtractFull");
-
-  if (carousel) carousel.classList.add("extracting");
-  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "EXTRACTING..."; }
-  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "EXTRACTING..."; }
-  
+  const url=document.getElementById("eUrl").value; if(!url) return toast("NULL FIELD - URI");
+  const cg=document.getElementById("eImgGrid"); const bl=document.getElementById("btnExtractLazy"); const bf=document.getElementById("btnExtractFull");
+  if(cg) cg.classList.add("extracting"); if(bl)bl.disabled=true; if(bf)bf.disabled=true;
   try {
-    const r = await fetch("/api/extract", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, mode })
-    });
-    
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    
-    if (d.images && d.images.length > 0) {
+    const r=await fetch("/api/extract", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url,mode}) });
+    const d=await r.json(); if(d.error) throw new Error(d.error);
+    if(d.images?.length > 0) {
       const s = state.current.response.products[state.editingPIdx].sources[state.editingSIdx];
-      const newUnique = d.images.filter(imgUrl => !state.currentGridUrls.includes(imgUrl)).slice(0, 20);
-      
-      if (newUnique.length > 0) {
-        s.customImages = s.customImages || [];
-        s.customImages = [...newUnique, ...s.customImages];
-        state.currentGridUrls = [...newUnique, ...state.currentGridUrls];
-        newUnique.forEach(u => { if (!state.currentSelected.includes(u)) state.currentSelected.push(u); });
-        
-        renderImgGrid(state.currentGridUrls);
-        updateSelCount();
-        saveFormToLocalStorage();
-        toast(\`EXTRACTED \${newUnique.length} IMAGES\`);
-      } else {
-        toast("NO NEW IMAGES (ALL DUPES)");
-      }
-    } else {
-      toast("NO IMAGES EXTRACTED");
-    }
-  } catch(e) {
-    toast("ERROR: " + e.message);
-  } finally {
-    if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
+      const nu = d.images.filter(i=>!state.currentGridUrls.includes(i)).slice(0,20);
+      if(nu.length > 0) {
+        s.customImages=[...nu, ...(s.customImages||[])];
+        state.currentGridUrls=[...nu, ...state.currentGridUrls];
+        nu.forEach(x=>{if(!state.currentSelected.includes(x))state.currentSelected.push(x)});
+        renderImgGrid(state.currentGridUrls); updateSelCount(); saveFormToLocalStorage(); toast(\`INDUCT \${nu.length}\`);
+      } else toast("INDEX COLLISION - ALL CACHED");
+    } else toast("SCRAPE 0 YIELD");
+  } catch(e) { toast(e.message); } finally {
+    if(cg)cg.classList.remove("extracting"); if(bl)bl.disabled=false; if(bf)bf.disabled=false;
   }
 }
 
-/* --- Variants Table Logic --- */
+/* --- Granular --- */
 function renderVariantsTable() {
-  const container = document.getElementById("variantsContainer");
-  if (!state.currentVariants.length) { container.innerHTML = ''; return; }
-  
-  let html = '<table class="simple-table"><thead><tr><th>SIZE</th><th>COLOR</th><th>STOCK</th><th>QTY</th><th>PRICE</th><th style="width:48px;"></th></tr></thead><tbody>';
+  const ct = document.getElementById("variantsContainer");
+  if (!state.currentVariants.length) { ct.innerHTML = ''; return; }
+  let ht = '<table class="simple-table"><thead><tr><th style="padding-left:0;">F/Factor</th><th>Tonal</th><th>Node</th><th>Units</th><th>Vol (C$)</th><th style="width:36px; border:none;"></th></tr></thead><tbody>';
   state.currentVariants.forEach((v, i) => {
-    let rawAvail = String(v.availability || "").toLowerCase().replace(/[^a-z]/g, '');
-    let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
-    
-    html += \`
-      <tr class="v-row" data-idx="\${i}">
-        <td><input type="text" class="v-size" value="\${escapeHtml(v.size || '')}"></td>
-        <td><input type="text" class="v-color" value="\${escapeHtml(v.color || '')}"></td>
-        <td>
-          <select class="v-avail">
-            <option \${mappedAvail === "InStock" ? "selected" : ""}>InStock</option>
-            <option \${mappedAvail === "OutOfStock" ? "selected" : ""}>OutOfStock</option>
-            <option \${mappedAvail === "PreOrder" ? "selected" : ""}>PreOrder</option>
-          </select>
-        </td>
-        <td><input type="number" class="v-qty" inputmode="numeric" value="\${escapeHtml(v.inventory_quantity != null ? String(v.inventory_quantity) : '')}"></td>
-        <td><input type="number" class="v-price" step="0.01" inputmode="decimal" value="\${escapeHtml(v.price != null ? getSafeNumber(v.price) : '')}"></td>
-        <td><button class="table-btn" onclick="delVariantRow(\${i})">&times;</button></td>
-      </tr>
-    \`;
+    let aStr = String(v.availability||"").toLowerCase().replace(/[^a-z]/g,'');
+    let mAv = aStr.includes('out')||aStr.includes('sold') ? "OutOfStock" : (aStr.includes('pre')?"PreOrder":"InStock");
+    ht += \`<tr class="v-row" data-idx="\${i}">
+      <td><input type="text" class="v-size mono-util" value="\${escapeHtml(v.size||'')}" style="font-size:12px; font-weight:normal; letter-spacing:0;"></td>
+      <td><input type="text" class="v-color" value="\${escapeHtml(v.color||'')}" style="font-size:13px; font-weight:normal;"></td>
+      <td style="padding-top:14px;"><select class="v-avail mono-util" style="font-size:9px; border-bottom:none;"><option \${mAv==="InStock"?"selected":""}>InStock</option><option \${mAv==="OutOfStock"?"selected":""}>OutOfStock</option><option \${mAv==="PreOrder"?"selected":""}>PreOrder</option></select></td>
+      <td><input type="number" class="v-qty" value="\${escapeHtml(v.inventory_quantity!=null?String(v.inventory_quantity):'')}" style="font-size:13px; font-family:var(--font-mono);"></td>
+      <td><input type="number" step="0.01" class="v-price" value="\${escapeHtml(v.price!=null?getSafeNumber(v.price):'')}" style="font-size:13px; font-family:var(--font-mono);"></td>
+      <td style="text-align:right;"><button class="table-btn" onclick="delVariantRow(\${i})" style="border:none;">&times;</button></td>
+    </tr>\`;
   });
-  html += '</tbody></table>';
-  container.innerHTML = html;
+  ct.innerHTML = ht + '</tbody></table>';
 }
-
 function syncVariantsFromDOM() {
-  const rows = document.querySelectorAll(".v-row");
-  state.currentVariants = Array.from(rows).map(row => {
-    const qtyVal = row.querySelector(".v-qty").value;
-    const priceVal = row.querySelector(".v-price").value;
+  const rs = document.querySelectorAll(".v-row");
+  state.currentVariants = Array.from(rs).map(r => {
+    const qv = r.querySelector(".v-qty").value; const pv = r.querySelector(".v-price").value;
     return {
-      size: row.querySelector(".v-size").value,
-      color: row.querySelector(".v-color").value,
-      availability: row.querySelector(".v-avail").value,
-      inventory_quantity: qtyVal !== '' ? parseInt(qtyVal, 10) : null,
-      price: priceVal !== '' ? parseFloat(priceVal) : null
+      size: r.querySelector(".v-size").value, color: r.querySelector(".v-color").value, availability: r.querySelector(".v-avail").value,
+      inventory_quantity: qv!==''?parseInt(qv,10):null, price: pv!==''?parseFloat(pv):null
     };
   });
 }
+function addVariantRow(){syncVariantsFromDOM();state.currentVariants.push({size:"",color:"",availability:"InStock",inventory_quantity:null,price:null});renderVariantsTable();saveFormToLocalStorage();}
+function delVariantRow(i){syncVariantsFromDOM();state.currentVariants.splice(i,1);renderVariantsTable();saveFormToLocalStorage();}
 
-function addVariantRow() {
-  syncVariantsFromDOM();
-  state.currentVariants.push({ size: "", color: "", availability: "InStock", inventory_quantity: null, price: null });
-  renderVariantsTable();
-  saveFormToLocalStorage();
-}
-
-function delVariantRow(idx) {
-  syncVariantsFromDOM();
-  state.currentVariants.splice(idx, 1);
-  renderVariantsTable();
-  saveFormToLocalStorage();
-}
-
-/* --- Size Guide Table Logic --- */
+/* --- Architect JSON sizing --- */
 function renderSizeGuideTable() {
-  const container = document.getElementById("sizeGuideContainer");
-  const sg = state.currentSizeGuide || { headers: [], rows: [] };
-  
-  // Ensure rows always exists
-  if (!sg.rows) sg.rows = [];
-  
-  if (!sg.headers || !sg.headers.length) { 
-    container.innerHTML = ''; 
-    return; 
-  }
-  
-  let html = '<table class="simple-table"><thead><tr>';
-  sg.headers.forEach((h, cIdx) => {
-    html += \`<th>
-      <div style="display:flex; align-items:center;">
-        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
-        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:18px; min-height:0;">&times;</button>
-      </div>
-    </th>\`;
+  const ct = document.getElementById("sizeGuideContainer");
+  const sg = state.currentSizeGuide || {headers:[], rows:[]}; if(!sg.rows)sg.rows=[];
+  if (!sg.headers || !sg.headers.length) { ct.innerHTML = ''; return; }
+  let ht = '<table class="simple-table" style="border:1px solid var(--border);"><thead><tr>';
+  sg.headers.forEach((h, c) => {
+    ht += \`<th style="padding:4px 8px; border-right:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--surface-2);"><div style="display:flex;align-items:center;"><input type="text" class="sg-header mono-util" data-cidx="\${c}" value="\${escapeHtml(h)}" style="flex:1; border:none; text-transform:uppercase;"><button class="table-btn" onclick="delSizeGuideCol(\${c})" style="border:none; height:18px;">&times;</button></div></th>\`;
   });
-  html += '<th style="width:48px;"></th></tr></thead><tbody>';
-  
-  sg.rows.forEach((row, rIdx) => {
-    html += \`<tr class="sg-row" data-ridx="\${rIdx}">\`;
-    sg.headers.forEach((_, cIdx) => {
-      const val = row[cIdx] || "";
-      html += \`<td><input type="text" class="sg-cell" data-ridx="\${rIdx}" data-cidx="\${cIdx}" value="\${escapeHtml(val)}"></td>\`;
-    });
-    html += \`<td><button class="table-btn" onclick="delSizeGuideRow(\${rIdx})">&times;</button></td></tr>\`;
+  ht += '<th style="width:30px; border-bottom:1px solid var(--border); background:var(--surface-2);"></th></tr></thead><tbody>';
+  sg.rows.forEach((r, i) => {
+    ht += \`<tr class="sg-row">\`;
+    sg.headers.forEach((_, c) => { ht += \`<td style="padding:2px 8px; border-right:1px solid var(--border);"><input type="text" class="sg-cell" data-ridx="\${i}" data-cidx="\${c}" value="\${escapeHtml(r[c]||"")}" style="border:none; font-family:var(--font-mono); font-size:12px;"></td>\`;});
+    ht += \`<td style="text-align:center;"><button class="table-btn" onclick="delSizeGuideRow(\${i})" style="border:none;">&times;</button></td></tr>\`;
   });
-  html += '</tbody></table>';
-  container.innerHTML = html;
+  ct.innerHTML = ht + '</tbody></table>';
 }
-
 function syncSizeGuideFromDOM() {
-  const sg = state.currentSizeGuide;
-  document.querySelectorAll(".sg-header").forEach(inp => {
-    sg.headers[parseInt(inp.dataset.cidx, 10)] = inp.value;
-  });
-  document.querySelectorAll(".sg-cell").forEach(inp => {
-    const r = parseInt(inp.dataset.ridx, 10);
-    const c = parseInt(inp.dataset.cidx, 10);
-    if (!sg.rows[r]) sg.rows[r] = [];
-    sg.rows[r][c] = inp.value;
-  });
+  const sg=state.currentSizeGuide; document.querySelectorAll(".sg-header").forEach(n=>sg.headers[parseInt(n.dataset.cidx,10)]=n.value);
+  document.querySelectorAll(".sg-cell").forEach(n=>{const r=parseInt(n.dataset.ridx,10),c=parseInt(n.dataset.cidx,10); if(!sg.rows[r])sg.rows[r]=[]; sg.rows[r][c]=n.value;});
 }
-
-function addSizeGuideRow() {
-  syncSizeGuideFromDOM();
-  if (!state.currentSizeGuide.headers.length) state.currentSizeGuide.headers = ["US", "EU", "UK"];
-  state.currentSizeGuide.rows.push(new Array(state.currentSizeGuide.headers.length).fill(""));
-  renderSizeGuideTable();
-  saveFormToLocalStorage();
-}
-
-function addSizeGuideCol() {
-  syncSizeGuideFromDOM();
-  state.currentSizeGuide.headers.push("NEW");
-  state.currentSizeGuide.rows.forEach(r => r.push(""));
-  renderSizeGuideTable();
-  saveFormToLocalStorage();
-}
-
-function delSizeGuideRow(rIdx) {
-  syncSizeGuideFromDOM();
-  state.currentSizeGuide.rows.splice(rIdx, 1);
-  renderSizeGuideTable();
-  saveFormToLocalStorage();
-}
-
-function delSizeGuideCol(cIdx) {
-  syncSizeGuideFromDOM();
-  state.currentSizeGuide.headers.splice(cIdx, 1);
-  state.currentSizeGuide.rows.forEach(r => r.splice(cIdx, 1));
-  renderSizeGuideTable();
-  saveFormToLocalStorage();
-}
+function addSizeGuideRow(){syncSizeGuideFromDOM();if(!state.currentSizeGuide.headers.length)state.currentSizeGuide.headers=["REF","ALT"];state.currentSizeGuide.rows.push(new Array(state.currentSizeGuide.headers.length).fill(""));renderSizeGuideTable();saveFormToLocalStorage();}
+function addSizeGuideCol(){syncSizeGuideFromDOM();state.currentSizeGuide.headers.push("TBD");state.currentSizeGuide.rows.forEach(r=>r.push(""));renderSizeGuideTable();saveFormToLocalStorage();}
+function delSizeGuideRow(i){syncSizeGuideFromDOM();state.currentSizeGuide.rows.splice(i,1);renderSizeGuideTable();saveFormToLocalStorage();}
+function delSizeGuideCol(c){syncSizeGuideFromDOM();state.currentSizeGuide.headers.splice(c,1);state.currentSizeGuide.rows.forEach(r=>r.splice(c,1));renderSizeGuideTable();saveFormToLocalStorage();}
 
 function copySizeGuidePrompt() {
-  const pIdx = state.editingPIdx;
-  const sIdx = state.editingSIdx;
-  const s = state.current?.response?.products?.[pIdx]?.sources?.[sIdx];
-  if (!s) return toast("NO SOURCE LOADED");
-
-  const sourceData = {
-    name: s.name,
-    brand: s.brand,
-    vendor: s.vendor || s.store,
-    category: s.primary_category,
-    url: s.url,
-    description: s.description,
-    size_guide: s.size_guide || null,
-    features: s.features,
-    variants: (s.variants || []).map(v => ({ size: v.size, color: v.color }))
-  };
-
-  const currency = (s.price?.currency || s.currency || '').toUpperCase();
-
-  const systemPrompt = \`You are a senior e-commerce sizing analyst. Generate live, customer-facing size guides that reduce returns through clarity and accuracy.
-
-Rules:
-1. Only include data you have verified through web search.
-2. Label the source basis: "Official Brand Data" or "Synthesized Industry Consensus".
-3. Detect gender and product sub-type from the data to choose correct body measurements and proportions.
-4. Match the exact JSON schema. No markdown. No text outside the JSON object.
-5. This output will be displayed directly to shoppers. Be concise, scannable, and actionable.
-
-Example output for Women's Tops:
-{"headers":["Alpha","US","UK","EU","AU","Bust (cm)","Waist (cm)"],"rows":[["XS","0-2","4-6","32-34","6-8","78-82","60-64"],["S","4-6","8-10","36-38","8-10","84-88","66-70"],["M","8-10","12-14","40-42","10-12","90-94","72-76"]],"gender":"Women","product_type":"Women's Tops","research_summary":"Official Zara size chart","confidence":"high (official brand data)","fit_notes":"True to size. Slight taper at waist. Size up for oversized fit.","measurement_note":"Bust: measure around fullest part. Waist: measure around natural waistline. Allow 2-3cm ease.","how_to_measure":"Use a soft tape measure. Keep it level and snug but not tight. Measure over undergarments.","disclaimer":"Size guidance based on research. Fit may vary slightly by style and batch."}\`;
-
-  const userPrompt = \`Generate a live, customer-facing size guide for this product.
-
-PRODUCT DATA:
-\${JSON.stringify(sourceData, null, 2)}
-
-CURRENCY: \${currency}
-
-RESEARCH PROTOCOL:
-1. **Scraped Size Guide Check**: If size_guide is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can — but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
-2. **Web Verification**: Search for the brand's official size/fit chart for this exact product category and gender. If the scraped data conflicts with official brand data, prioritize the official source. If the scraped data is missing, garbled, or clearly wrong, ignore it and rely on web research.
-3. Infer the primary target market(s) from the currency, URL TLD, and brand origin country. Produce conversions relevant to those markets.
-4. Use the variant sizes as the primary column naming convention. Include all variant sizes plus logically adjacent standard sizes if typical for this category.
-5. If the product is "One Size" or has only a single variant, output a single row with available measurements and note it in fit_notes.
-6. Add body measurement columns (in cm) appropriate to the gender and product type:
-   - Tops/Dresses: Bust/Chest, Waist
-   - Bottoms: Waist, Hips, Inseam (and Rise if available)
-   - Footwear: Foot Length (cm), plus US/UK/EU/AU conversions
-   - Outerwear: Same as tops, possibly with Length
-7. If you cannot find reliable data for a conversion column, use an empty string "" in that cell — do NOT remove the column from headers. All rows must have the exact same number of cells as headers.
-8. If no official brand data exists, synthesize from 3+ high-authority sources for this category/gender and note the source count.
-
-LIVE DISPLAY REQUIREMENTS:
-- Use clean, scannable ranges (e.g., "78-82" not "78.5-82.3").
-- fit_notes must be specific to this product type (not generic). Mention if it runs small/large, has stretch, or is cropped/oversized.
-- how_to_measure must be 1-2 sentences telling the shopper exactly how to take the key measurement for this product.
-- measurement_note should clarify if numbers are body measurements or garment measurements.
-
-OUTPUT SCHEMA:
-{
-  "headers": ["<primary size system from variants>", "US", "UK", "EU", "AU", "<body measurements in cm>"],
-  "rows": [["<val>", "<val>", ...], ...],
-  "gender": "Women" | "Men" | "Kids" | "Unisex",
-  "product_type": "e.g. Women's Tops / Men's Footwear - Sneakers",
-  "research_summary": "Used official [Brand] chart" OR "No official data. Synthesized from [N] [category] sources.",
-  "confidence": "high (official brand data)" | "medium (synthesized consensus)" | "low (limited direct mapping)",
-  "fit_notes": "Specific to this product. E.g. Runs small in shoulders. Size up if between sizes. Stretch fabric allows some give.",
-  "measurement_note": "E.g. Body measurements in cm. Allow 2-3cm ease. These are garment measurements, not body measurements.",
-  "how_to_measure": "1-2 sentences instructing the shopper how to measure for this specific product.",
-  "disclaimer": "Brief, honest disclaimer."
+  const pIdx=state.editingPIdx, sIdx=state.editingSIdx, s=state.current?.response?.products?.[pIdx]?.sources?.[sIdx];
+  if(!s) return toast("BAD HLD");
+  const sDat = { name: s.name, brand: s.brand, vendor: s.vendor||s.store, category: s.primary_category, url: s.url, desc: s.description, guide: s.size_guide||null, variantData: (s.variants||[]).map(v=>v.size+"_"+v.color) };
+  
+  const prom = \`Return raw structured size metric logic for UI layout referencing exact fields found from online intel. Strict JSON matching { "headers":["Alpha","...cm"], "rows":[["XS",".."],...] } . Data basis:\n\${JSON.stringify(sDat)}\`;
+  navigator.clipboard.writeText(prom).then(()=>toast("Prompt Bound")).catch(()=>toast("Permission Denied"));
 }
-
-Return ONLY valid JSON. No markdown. No backticks. No text before or after the JSON object.\`;
-
-  const fullPrompt = \`<system>
-\${systemPrompt}
-</system>
-
-<user>
-\${userPrompt}
-</user>\`;
-
-  navigator.clipboard.writeText(fullPrompt).then(() => {
-    toast("PROMPT COPIED — Live customer-facing size guide ready");
-  }).catch(() => toast("CLIPBOARD PERMISSION DENIED"));
-}
-
 async function pasteSizeGuideJson() {
   try {
-    const text = await navigator.clipboard.readText();
-    if (!text) return toast("CLIPBOARD EMPTY");
-
-    let parsed;
-    try {
-      const clean = text.trim().replace(/^\`\`\`[a-z]*\\n?/i, '').replace(/\\n?\`\`\`$/,'').trim();
-      parsed = JSON.parse(clean);
-    } catch(e) {
-      return toast("INVALID JSON — COULD NOT PARSE");
-    }
-
-    if (!Array.isArray(parsed.headers) || !Array.isArray(parsed.rows)) {
-      return toast("INVALID FORMAT — NEED {headers:[...], rows:[[...]]}");
-    }
-    if (!parsed.headers.length) return toast("HEADERS ARRAY IS EMPTY");
-    const colCount = parsed.headers.length;
-    const validRows = parsed.rows.filter(r => Array.isArray(r) && r.length === colCount);
-    if (validRows.length !== parsed.rows.length) {
-      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) HAD WRONG COLUMN COUNT AND WERE SKIPPED\`);
-    }
-    if (!validRows.length) return toast("NO VALID ROWS FOUND");
-
-    // FIX: Preserve all AI-returned metadata, not just headers/rows
-    state.currentSizeGuide = {
-      headers: parsed.headers.map(h => String(h)),
-      rows: validRows.map(r => r.map(c => String(c))),
-      gender: parsed.gender || "",
-      product_type: parsed.product_type || "",
-      research_summary: parsed.research_summary || "",
-      confidence: parsed.confidence || "",
-      fit_notes: parsed.fit_notes || "",
-      measurement_note: parsed.measurement_note || "",
-      how_to_measure: parsed.how_to_measure || "",
-      disclaimer: parsed.disclaimer || ""
-    };
-
-    renderSizeGuideTable();
-    saveFormToLocalStorage();
-    toast(\`SIZE GUIDE LOADED: \${parsed.headers.length} COLS, \${validRows.length} ROWS\`);
-  } catch(err) {
-    toast("CLIPBOARD PERMISSION DENIED");
-  }
+    const raw = await navigator.clipboard.readText(); if(!raw) return;
+    const cln = raw.trim().replace(/^\`\`\`[a-z]*\\n?/i, '').replace(/\\n?\`\`\`$/,'').trim();
+    const d = JSON.parse(cln);
+    if(d.headers&&d.rows){ state.currentSizeGuide={headers:d.headers.map(String), rows:d.rows.map(x=>x.map(String)), ...d}; renderSizeGuideTable(); saveFormToLocalStorage(); toast("Injected Structural Nodes"); }
+    else toast("Corrupt Format Tree");
+  } catch(e) { toast("Rejection or parse issue."); }
 }
 
 
-/* --- Saving --- */
-async function saveSource(status = "completed") {
-  syncVariantsFromDOM();
-  syncSizeGuideFromDOM();
+/* --- IO Mutators --- */
+async function saveSource(status="completed") {
+  syncVariantsFromDOM(); syncSizeGuideFromDOM();
+  const px = state.editingPIdx, sx = state.editingSIdx, bst = state.current.response.products[px].sources[sx];
+  const prv = parseFloat(document.getElementById("ePrice").value), cmpv = parseFloat(document.getElementById("eComparePrice").value);
+  const np = { ...bst.price, current: isNaN(prv)?null:prv, original: isNaN(cmpv)?null:cmpv, currency: document.getElementById("eCurrency").value };
+  
+  const typ = document.getElementById("eMarkupType").value, fv = parseFloat(document.getElementById("eMarkupFixed").value), pv = parseFloat(document.getElementById("eMarkupPct").value);
+  const ovs = bst.variants||[], nvs = state.currentVariants.map(v => ({...(ovs.find(o=>o.size===v.size&&o.color===v.color)||{}), ...v}));
 
-  const pIdx = state.editingPIdx;
-  const sIdx = state.editingSIdx;
-  const existing = state.current.response.products[pIdx].sources[sIdx];
-
-  const priceVal = parseFloat(document.getElementById("ePrice").value);
-  const compareVal = parseFloat(document.getElementById("eComparePrice").value);
-  const oldPrice = existing.price || {};
-  const newPrice = {
-    ...oldPrice,
-    current: isNaN(priceVal) ? null : priceVal,
-    original: isNaN(compareVal) ? null : compareVal,
-    currency: document.getElementById("eCurrency").value
+  const pay = {
+    ...bst, name: document.getElementById("eTitle").value, brand: document.getElementById("eBrand").value, vendor: document.getElementById("eVendor").value,
+    color: document.getElementById("eColor").value, variant: document.getElementById("eVariant").value, material: document.getElementById("eMaterial").value, condition: document.getElementById("eCondition").value,
+    url: document.getElementById("eUrl").value, primary_category: document.getElementById("eCategory").value, price: np, compare_at_price: np.original,
+    is_on_sale: (np.original!=null&&np.current!=null&&np.original>np.current), currency: np.currency, availability: document.getElementById("eAvail").value, description: document.getElementById("eDesc").value,
+    features: document.getElementById("eFeatures").value.split("\\n").map(x=>x.trim()).filter(Boolean), shipping_info: document.getElementById("eShippingInfo").value, return_policy: document.getElementById("eReturnPolicy").value,
+    markup_type: typ, markup_fixed: typ==="fixed"?(isNaN(fv)?null:fv):null, markup_percentage: typ==="percentage"?(isNaN(pv)?null:pv):null,
+    variants: nvs, size_guide: state.currentSizeGuide, selectedImages: [...state.currentSelected], reviewStatus: status
   };
 
-  const markupType = document.getElementById("eMarkupType").value;
-  const markupFixed = parseFloat(document.getElementById("eMarkupFixed").value);
-  const markupPct = parseFloat(document.getElementById("eMarkupPct").value);
-
-  const oldVariants = existing.variants || [];
-  const newVariants = state.currentVariants.map(v => {
-    const found = oldVariants.find(ov => ov.size === v.size && ov.color === v.color) || {};
-    return { ...found, size: v.size, color: v.color, availability: v.availability, inventory_quantity: v.inventory_quantity, price: v.price };
-  });
-
-  const payload = {
-    ...existing,
-    name: document.getElementById("eTitle").value,
-    brand: document.getElementById("eBrand").value,
-    vendor: document.getElementById("eVendor").value,
-    color: document.getElementById("eColor").value,
-    variant: document.getElementById("eVariant").value,
-    material: document.getElementById("eMaterial").value,
-    condition: document.getElementById("eCondition").value,
-    url: document.getElementById("eUrl").value,
-    primary_category: document.getElementById("eCategory").value,
-    price: newPrice,
-    compare_at_price: newPrice.original,
-    is_on_sale: (newPrice.original != null && newPrice.current != null && newPrice.original > newPrice.current),
-    currency: newPrice.currency,
-    availability: document.getElementById("eAvail").value,
-    description: document.getElementById("eDesc").value,
-    features: document.getElementById("eFeatures").value.split("\\n").map(s => s.trim()).filter(Boolean),
-    shipping_info: document.getElementById("eShippingInfo").value,
-    return_policy: document.getElementById("eReturnPolicy").value,
-    markup_type: markupType,
-    markup_fixed: markupType === "fixed" ? (isNaN(markupFixed) ? null : markupFixed) : null,
-    markup_percentage: markupType === "percentage" ? (isNaN(markupPct) ? null : markupPct) : null,
-    variants: newVariants,
-    size_guide: state.currentSizeGuide,
-    selectedImages: [...state.currentSelected],
-    reviewStatus: status
-  };
-
-  const saveBtn = document.querySelector('.modal-header .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
+  const btn = document.querySelector('.modal-header button:last-child');
+  if (btn) { btn.disabled = true; btn.textContent = 'I/O'; }
   try {
-    const body = {
-      docId: state.current._id,
-      fileIdx: state.current.fileIdx,
-      frameIdx: state.current.frameIdx,
-      prodIdx: pIdx,
-      sourceIdx: sIdx,
-      source: payload
-    };
-
-    const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error("Save failed");
-
-    // Only mutate in-memory state after confirmed server success
-    state.current.response.products[pIdx].sources[sIdx] = payload;
-
-    clearFormPersist(state.formPersistKey);
-    state.justEditedSId = \`\${pIdx}-\${sIdx}\`;
-    toast(status === "rejected" ? "REJECTED" : "SAVED");
-    renderItem();
-    closeEditor();
-  } catch(e) {
-    toast("ERROR: " + e.message);
-  } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
-  }
+    const rp = await fetch("/api/product", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx, prodIdx: px, sourceIdx: sx, source: pay }) });
+    if (!rp.ok) throw new Error("Sync failure");
+    state.current.response.products[px].sources[sx] = pay;
+    clearFormPersist(state.formPersistKey); state.justEditedSId = \`\${px}-\${sx}\`; toast("Parameter Overridden");
+    renderItem(); closeEditor();
+  } catch(e) { toast("Err: "+e.message); } finally { if (btn) { btn.disabled = false; btn.textContent = 'Done'; } }
 }
-
-function rejectSource() { saveSource("rejected"); }
 
 async function deleteSource() {
-  if (!confirm("DELETE THIS SOURCE ENTIRELY?")) return;
+  if(!confirm("CONFIRM FULL SEVERANCE OF SOURCE?")) return;
   try {
-    const body = { 
-      docId: state.current._id, 
-      fileIdx: state.current.fileIdx, 
-      frameIdx: state.current.frameIdx, 
-      prodIdx: state.editingPIdx, 
-      sourceIdx: state.editingSIdx 
-    };
-    const r = await fetch("/api/delete-source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error("Delete failed");
-    
-    clearFormPersist(state.formPersistKey);
-    state.current.response.products[state.editingPIdx].sources.splice(state.editingSIdx, 1);
-    
-    toast("SOURCE DELETED");
-    renderItem();
-    closeEditor();
-  } catch(e) {
-    toast("ERROR: " + e.message);
-  }
+    const rb = {docId:state.current._id, fileIdx:state.current.fileIdx, frameIdx:state.current.frameIdx, prodIdx:state.editingPIdx, sourceIdx:state.editingSIdx};
+    const rx = await fetch("/api/delete-source", {method:"POST",headers:{"Content-Type":"application/json"}, body:JSON.stringify(rb)});
+    if(!rx.ok) throw new Error("Delete issue");
+    clearFormPersist(state.formPersistKey); state.current.response.products[state.editingPIdx].sources.splice(state.editingSIdx,1); toast("Asset Excised.");
+    renderItem(); closeEditor();
+  } catch(e) { toast(e.message); }
 }
 
-function closeEditor() { 
-  // clearFormPersist(state.formPersistKey);
+function closeEditor() {
   showScreen("review");
-  
-  // Re-scroll back to source card context instantly upon pressing cancel
-  if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    const scrollBack = () => {
-      const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
-      if (targetCard) {
-        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    };
-    requestAnimationFrame(() => requestAnimationFrame(scrollBack));
+  if(state.editingPIdx!==null&&state.editingSIdx!==null) {
+    requestAnimationFrame(()=>{ const el=document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); });
   }
 }
 
 async function commitItem() {
   try {
-    const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
-    const r = await fetch("/api/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    
-    if (r.status === 409) {
-      toast("NOT ALL SOURCES REVIEWED");
-      return;
+    const rx = await fetch("/api/commit", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({docId:state.current._id, fileIdx:state.current.fileIdx, frameIdx:state.current.frameIdx})});
+    if(rx.status===409) { toast("Audit Missing Flags."); return; }
+    if(!rx.ok) throw new Error("Fault");
+    toast("Validated."); 
+    const mtch=(a,b,c)=>(x)=>x._id===a&&x.fileIdx===b&&x.frameIdx===c;
+    const curMtch=mtch(state.current?._id,state.current?.fileIdx,state.current?.frameIdx??null);
+    state.queue=state.queue.filter(it=>!curMtch(it));
+    for(const pid in state.posts) {
+      state.posts[pid].items=state.posts[pid].items.filter(it=>!curMtch(it));
+      if(state.posts[pid].items.length===0) delete state.posts[pid];
     }
-    if (!r.ok) throw new Error("Commit failed");
-    
-    toast("COMMITTED");
-    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
-    const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
-    state.queue = state.queue.filter(it => !itemMatch(it));
-    for (const pid in state.posts) {
-      const post = state.posts[pid];
-      post.items = post.items.filter(it => !itemMatch(it));
-      if (post.items.length === 0) delete state.posts[pid];
-    }
-    state.current = null;
-    showQueue();
-    renderQueue();
-  } catch(e) {
-    toast("ERROR: " + e.message);
-  }
+    state.current=null; showScreen("queue"); renderQueue();
+  } catch(e) { toast("Err: " + e.message); }
 }
 
 async function deleteItem() {
-  if (!confirm("DISCARD ENTIRE ITEM?")) return;
+  if(!confirm("NULLIFY ENTIRE ITEM RECORD?")) return;
   try {
-    const body = { docId: state.current._id, fileIdx: state.current.fileIdx, frameIdx: state.current.frameIdx };
-    const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error("Discard failed");
-    toast("ITEM DISCARDED");
-    const curId = state.current?._id, curFileIdx = state.current?.fileIdx, curFrameIdx = state.current?.frameIdx ?? null;
-    const itemMatch = it => it._id === curId && it.fileIdx === curFileIdx && it.frameIdx === curFrameIdx;
-    state.queue = state.queue.filter(it => !itemMatch(it));
-    for (const pid in state.posts) {
-      const post = state.posts[pid];
-      post.items = post.items.filter(it => !itemMatch(it));
-      if (post.items.length === 0) delete state.posts[pid];
-    }
-    state.current = null;
-    showQueue();
-    renderQueue();
-  } catch(e) {
-    toast("ERROR: " + e.message);
-  }
+    const r=await fetch("/api/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({docId:state.current._id,fileIdx:state.current.fileIdx,frameIdx:state.current.frameIdx})});
+    if(!r.ok) throw new Error("Wipe Err"); toast("Directory Voided.");
+    const curMtch=(x)=>x._id===state.current._id&&x.fileIdx===state.current.fileIdx&&(state.current.frameIdx===undefined?x.frameIdx===null:x.frameIdx===state.current.frameIdx);
+    state.queue=state.queue.filter(i=>!curMtch(i));
+    for(let pid in state.posts) { state.posts[pid].items=state.posts[pid].items.filter(i=>!curMtch(i)); if(!state.posts[pid].items.length) delete state.posts[pid]; }
+    state.current=null; showScreen("queue"); renderQueue();
+  } catch(e) { toast("Fault: " + e.message); }
 }
 
 function showQueue() { showScreen("queue"); }
 
+/* Peripheral Bindings */
 function initKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const videoModal = document.getElementById('videoModal');
-      const editorModal = document.getElementById('editor');
-      if (videoModal.classList.contains('active')) closeVideo();
-      else if (editorModal.classList.contains('active')) closeEditor();
-      else if (document.getElementById('review').classList.contains('active')) {
-        // Preserve lastViewedItemId so renderQueue scrolls to it
-        showQueue();
-      }
+      if (document.getElementById('videoModal').classList.contains('active')) closeVideo();
+      else if (document.getElementById('editor').classList.contains('active')) closeEditor();
+      else if (document.getElementById('review').classList.contains('active')) showQueue();
     }
   });
 }
 
-/* --- Swipe Navigation on Hero --- */
 function initSwipeNavigation() {
-  const hero = document.querySelector('.hero');
-  if (!hero) return;
-
-  let startX = 0, startY = 0, startTime = 0;
-  let didSwipe = false;
-  const SWIPE_TIME = 500; // ms
-
-  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150); // 30vw, capped at 150px
-
-  const onStart = (x, y) => { startX = x; startY = y; startTime = Date.now(); didSwipe = false; };
-  const onEnd = (x, y) => {
-    if (!startTime) return;
-    const dx = x - startX, dy = y - startY, dt = Date.now() - startTime;
-    startTime = 0;
-    if (dt > SWIPE_TIME || Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < getThreshold()) return;
-    didSwipe = true;
-
-    const idx = state.queue.findIndex(it =>
-      it._id === state.current?._id &&
-      it.fileIdx === state.current?.fileIdx &&
-      (it.frameIdx === state.current?.frameIdx || (it.frameIdx === null && state.current?.frameIdx === null))
-    );
-    if (idx === -1) return;
-
-    if (dx < 0 && idx + 1 < state.queue.length) {
-      const n = state.queue[idx + 1];
-      openItem(n._id, n.fileIdx, n.frameIdx);
-    } else if (dx > 0 && idx > 0) {
-      const p = state.queue[idx - 1];
-      openItem(p._id, p.fileIdx, p.frameIdx);
-    } else {
-      toast(dx < 0 ? 'LAST ITEM IN QUEUE' : 'FIRST ITEM IN QUEUE');
-    }
-  };
-
-  hero.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-  hero.addEventListener('touchend', e => { onEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY); }, { passive: true });
-  hero.addEventListener('mousedown', e => onStart(e.clientX, e.clientY));
-  hero.addEventListener('mouseup', e => onEnd(e.clientX, e.clientY));
-  hero.addEventListener('click', e => { if (didSwipe) { e.preventDefault(); e.stopPropagation(); didSwipe = false; } }, true);
+  const hr=document.querySelector('.hero'); if(!hr)return;
+  let sx=0, sy=0, sT=0, sW=false; const ST_TH = () => Math.min(window.innerWidth * 0.3, 130);
+  hr.addEventListener('touchstart',e=>{if(e.touches.length===1){sx=e.touches[0].clientX;sy=e.touches[0].clientY;sT=Date.now();sW=false;}},{passive:true});
+  hr.addEventListener('touchend',e=>{
+    if(!sT)return; const dx=e.changedTouches[0].clientX-sx, dy=e.changedTouches[0].clientY-sy, dt=Date.now()-sT; sT=0;
+    if(dt>400||Math.abs(dy)>Math.abs(dx)||Math.abs(dx)<ST_TH())return; sW=true;
+    const cid=(it)=>it._id===state.current?._id&&it.fileIdx===state.current?.fileIdx&&it.frameIdx===state.current?.frameIdx;
+    const x=state.queue.findIndex(cid); if(x===-1)return;
+    if(dx<0&&x+1<state.queue.length){let n=state.queue[x+1];openItem(n._id,n.fileIdx,n.frameIdx);}
+    else if(dx>0&&x>0){let p=state.queue[x-1];openItem(p._id,p.fileIdx,p.frameIdx);}
+    else toast(dx<0?'EOL Right':'BOL Left');
+  },{passive:true});
+  hr.addEventListener('mousedown',e=>{sx=e.clientX;sy=e.clientY;sT=Date.now();});
+  hr.addEventListener('mouseup',e=>{
+    if(!sT)return; const dx=e.clientX-sx,dy=e.clientY-sy,dt=Date.now()-sT; sT=0;
+    if(dt>400||Math.abs(dy)>Math.abs(dx)||Math.abs(dx)<ST_TH())return; sW=true;
+    const x=state.queue.findIndex(it=>it._id===state.current?._id&&it.fileIdx===state.current?.fileIdx&&it.frameIdx===state.current?.frameIdx);
+    if(x===-1)return;
+    if(dx<0&&x+1<state.queue.length){let n=state.queue[x+1];openItem(n._id,n.fileIdx,n.frameIdx);}
+    else if(dx>0&&x>0){let p=state.queue[x-1];openItem(p._id,p.fileIdx,p.frameIdx);}
+  });
+  hr.addEventListener('click',e=>{if(sW){e.preventDefault();e.stopPropagation();sW=false;}},true);
 }
 
-loadQueue();
-initKeyboard();
-initSwipeNavigation();
+loadQueue(); initKeyboard(); initSwipeNavigation();
 </script>
 </body>
 </html>`;
@@ -1892,7 +1146,6 @@ function normalizeResponse(item) {
             s.markup_fixed = s.markup_fixed != null ? s.markup_fixed : null;
             s.markup_percentage = s.markup_percentage != null ? s.markup_percentage : null;
 
-            // Robust price normalization to handle raw python extractor numbers
             if (typeof s.price === 'number' || typeof s.price === 'string') {
                 s.price = {
                     current: s.price,
@@ -1950,7 +1203,7 @@ function getItemStatus(item) {
         });
     });
 
-    if (totalSources === 0) return 'done'; // Empty arrays can be committed safely to clear from queue
+    if (totalSources === 0) return 'done';
     if (reviewedSources === totalSources) return 'done';
     if (reviewedSources > 0) return 'partial';
     return 'pending';
@@ -2220,7 +1473,7 @@ async function startNgrok(port) {
 /* -------------------------------------------------------------------------- */
 async function main() {
     log('info', '===============================================================');
-    log('info', '  REVIEW SERVER — Production Human Review v2.2.0 (New Schema)');
+    log('info', '  REVIEW SERVER — Production Human Review v2.4 (Minimalist iOS)');
     log('info', '===============================================================');
 
     if (!CONFIG.mongodb.uri) { log('error', 'ORCH_MONGODB_URI is required'); process.exit(1); }
@@ -2372,7 +1625,6 @@ async function main() {
                         }}
                     );
 
-                    // Deduplicate sources by URL within the same product in DB
                     const post = await collection.findOne({ _id: new ObjectId(docId) });
                     const targetPath = frameIdx !== null
                         ? `file_urls.${fileIdx}.frames.${frameIdx}.response.products.${prodIdx}`
@@ -2405,7 +1657,6 @@ async function main() {
                         );
                     }
 
-                    // Propagate ALL review statuses to matching URLs across items
                     if (source.url) {
                         propagateReviewToSameSources(collection, docId, source.url, source)
                             .catch(e => log('warn', 'Propagation err:', e.message));
