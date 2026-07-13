@@ -555,6 +555,7 @@ function saveFormToLocalStorage() {
       brand: document.getElementById("eBrand")?.value || "",
       vendor: document.getElementById("eVendor")?.value || "",
       color: document.getElementById("eColor")?.value || "",
+      variant: document.getElementById("eVariant")?.value || "",
       material: document.getElementById("eMaterial")?.value || "",
       condition: document.getElementById("eCondition")?.value || "",
       url: document.getElementById("eUrl")?.value || "",
@@ -593,6 +594,7 @@ function restoreFormFromLocalStorage() {
     setVal("eBrand", data.brand);
     setVal("eVendor", data.vendor);
     setVal("eColor", data.color);
+    setVal("eVariant", data.variant);
     setVal("eMaterial", data.material);
     setVal("eCondition", data.condition);
     setVal("eUrl", data.url);
@@ -700,13 +702,16 @@ function renderQueue() {
   document.querySelectorAll(".lazy-img[data-src]").forEach(observeImage);
   
   if (state.lastViewedItemId) {
-    requestAnimationFrame(() => {
+    const scrollToItem = () => {
       const targetRow = document.querySelector(\`.item-row[data-item-id="\${state.lastViewedItemId}"]\`);
       if (targetRow) {
         targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       state.lastViewedItemId = null;
-    });
+    };
+      
+    // Double rAF ensures layout is fully settled regardless of prior scroll position
+    requestAnimationFrame(() => requestAnimationFrame(scrollToItem));
   }
 }
 
@@ -840,13 +845,14 @@ function renderItem() {
   }
 
   if (state.justEditedSId !== null) {
-    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`);
-    if (targetCard) {
-      requestAnimationFrame(() => {
+    const scrollToCard = () => {
+      const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.justEditedSId}"]\`);
+      if (targetCard) {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
-    state.justEditedSId = null;
+      }
+      state.justEditedSId = null;
+    };
+    requestAnimationFrame(() => requestAnimationFrame(scrollToCard));
   }
 }
 
@@ -969,6 +975,35 @@ function openSource(pIdx, sIdx) {
         <div class="field-row">
           <div class="field"><label>Color</label><input id="eColor" value="\${escapeHtml(s.color || "")}"></div>
           <div class="field"><label>Material</label><input id="eMaterial" value="\${escapeHtml(s.material || "")}"></div>
+        </div>
+        
+        <div class="field">
+          <label>Variant</label>
+          <select id="eVariant">
+            <option value="">All Variants</option>
+            \${(() => {
+              const variants = s.variants || [];
+              if (!variants.length) return '';
+              
+              // Collect unique non-empty colors, preserving first-seen order
+              const seen = new Set();
+              const uniqueColors = [];
+              variants.forEach(v => {
+                const c = (v.color || '').trim();
+                if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
+              });
+              
+              // Determine default: if all variants share the same non-empty color, use it
+              // Otherwise use first unique color (or "" if no colors at all)
+              const allColors = variants.map(v => (v.color || '').trim());
+              const allSame = allColors.every(c => c === allColors[0]) && allColors[0] !== '';
+              const defaultVal = s.variant !== undefined ? s.variant : (allSame ? allColors[0] : (uniqueColors[0] || ''));
+              
+              return uniqueColors.map(c => 
+                \`<option value="\${escapeHtml(c)}" \${defaultVal === c ? 'selected' : ''}>\${escapeHtml(c)}</option>\`
+              ).join('');
+            })()}
+          </select>
         </div>
 
         <div class="field">
@@ -1428,6 +1463,7 @@ async function saveSource(status = "completed") {
     brand: document.getElementById("eBrand").value,
     vendor: document.getElementById("eVendor").value,
     color: document.getElementById("eColor").value,
+    variant: document.getElementById("eVariant").value,
     material: document.getElementById("eMaterial").value,
     condition: document.getElementById("eCondition").value,
     url: document.getElementById("eUrl").value,
@@ -1475,6 +1511,7 @@ async function saveSource(status = "completed") {
     closeEditor();
   } catch(e) {
     toast("ERROR: " + e.message);
+  } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
   }
 }
@@ -1511,12 +1548,13 @@ function closeEditor() {
   
   // Re-scroll back to source card context instantly upon pressing cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
-    const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
-    if (targetCard) {
-      requestAnimationFrame(() => {
+    const scrollBack = () => {
+      const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
+      if (targetCard) {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(scrollBack));
   }
 }
 
@@ -1662,6 +1700,7 @@ function normalizeResponse(item) {
             s.variants = s.variants || [];
             s.images = s.images || [];
             s.color = s.color || "";
+            s.variant = s.variant || "";
             s.material = s.material || "";
             s.condition = s.condition || "";
             s.markup_type = s.markup_type || "percentage";
@@ -1864,6 +1903,7 @@ async function propagateReviewToSameSources(collection, docId, url, updatedSourc
                             setObj[`${pth}.availability`] = updatedSource.availability;
                             setObj[`${pth}.vendor`] = updatedSource.vendor;
                             setObj[`${pth}.color`] = updatedSource.color;
+                            setObj[`${pth}.variant`] = updatedSource.variant;
                             setObj[`${pth}.material`] = updatedSource.material;
                             setObj[`${pth}.condition`] = updatedSource.condition;
                             setObj[`${pth}.markup_type`] = updatedSource.markup_type;
@@ -2120,6 +2160,7 @@ async function main() {
                             [`${basePath}.brand`]: source.brand,
                             [`${basePath}.vendor`]: source.vendor,
                             [`${basePath}.color`]: source.color,
+                            [`${basePath}.variant`]: source.variant,
                             [`${basePath}.material`]: source.material,
                             [`${basePath}.condition`]: source.condition,
                             [`${basePath}.url`]: source.url,
