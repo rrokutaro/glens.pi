@@ -479,6 +479,19 @@ function getSafeNumber(val) {
   return isNaN(num) ? '' : num.toFixed(2);
 }
 
+function getHighestSourcePrice(src) {
+  const candidates = [];
+  if (src.price?.current != null) { const n = parseFloat(getSafeNumber(src.price.current)); if (!isNaN(n)) candidates.push(n); }
+  if (src.price?.original != null) { const n = parseFloat(getSafeNumber(src.price.original)); if (!isNaN(n)) candidates.push(n); }
+  if (src.compare_at_price != null) { const n = parseFloat(getSafeNumber(src.compare_at_price)); if (!isNaN(n)) candidates.push(n); }
+  if (Array.isArray(src.variants)) {
+    src.variants.forEach(v => {
+      if (v.price != null) { const n = parseFloat(getSafeNumber(v.price)); if (!isNaN(n)) candidates.push(n); }
+    });
+  }
+  return candidates.length ? Math.max(...candidates) : null;
+}
+
 function formatPrice(p, fallbackCurrency = "USD") {
   if (p == null || p === "") return "TBD";
   let num = '';
@@ -495,7 +508,7 @@ function formatPrice(p, fallbackCurrency = "USD") {
 }
 
 function computeFinalPriceDisplay(source) {
-    const base = source.price?.current != null ? parseFloat(source.price.current) : null;
+    const base = getHighestSourcePrice(source);
     if (base == null || isNaN(base)) return "N/A";
     
     const type = source.markup_type || "percentage";
@@ -937,13 +950,30 @@ function openSource(pIdx, sIdx) {
     state.currentSizeGuide = s.size_guide && Array.isArray(s.size_guide.headers) 
       ? JSON.parse(JSON.stringify(s.size_guide)) 
       : { headers: ["US", "EU", "UK"], rows: [] };
-
-    const safePriceVal = s.price?.current != null ? getSafeNumber(s.price.current) : "";
-    const safeCompareVal = getSafeNumber(s.compare_at_price || s.price?.original);
     
-    // Robust availability parser
-    let rawAvail = String(s.availability || "").toLowerCase().replace(/[^a-z]/g, '');
-    let mappedAvail = (rawAvail.includes('out') || rawAvail.includes('sold')) ? "OutOfStock" : (rawAvail.includes('pre') ? "PreOrder" : "InStock");
+    const highestPrice = getHighestSourcePrice(s);
+    const safePriceVal = highestPrice != null ? highestPrice.toFixed(2) : "";
+    const safeCompareVal = s.price?.original != null ? getSafeNumber(s.price.original) : (s.compare_at_price != null ? getSafeNumber(s.compare_at_price) : "");
+    
+    // Robust availability parser — scoped to selected variant color if set
+    function parseAvailStr(str) {
+      const raw = String(str || "").toLowerCase().replace(/[^a-z]/g, '');
+      return (raw.includes('out') || raw.includes('sold')) ? "OutOfStock" : (raw.includes('pre') ? "PreOrder" : "InStock");
+    }
+    const selectedVariantColor = (s.variant || '').trim();
+    let mappedAvail;
+    if (selectedVariantColor && Array.isArray(s.variants) && s.variants.length) {
+      const filteredVars = s.variants.filter(v => (v.color || '').trim() === selectedVariantColor);
+      if (filteredVars.length) {
+        // If any are InStock → InStock; else if any PreOrder → PreOrder; else OutOfStock
+        const avails = filteredVars.map(v => parseAvailStr(v.availability));
+        mappedAvail = avails.includes('InStock') ? 'InStock' : (avails.includes('PreOrder') ? 'PreOrder' : 'OutOfStock');
+      } else {
+        mappedAvail = parseAvailStr(s.availability);
+      }
+    } else {
+      mappedAvail = parseAvailStr(s.availability);
+    }
     
     // Robust features string parser to prevent crash
     const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
@@ -993,12 +1023,16 @@ function openSource(pIdx, sIdx) {
                 if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
               });
               
-              // Determine default: if all variants share the same non-empty color, use it
-              // Otherwise use first unique color (or "" if no colors at all)
+              // Auto-select: use saved s.variant if it matches a known color,
+              // else if all variants share the same color, auto-select it,
+              // else select the first unique color found.
               const allColors = variants.map(v => (v.color || '').trim());
               const allSame = allColors.every(c => c === allColors[0]) && allColors[0] !== '';
-              const defaultVal = s.variant !== undefined ? s.variant : (allSame ? allColors[0] : (uniqueColors[0] || ''));
-              
+              const savedVariant = (s.variant || '').trim();
+              const defaultVal = (savedVariant && uniqueColors.includes(savedVariant))
+                ? savedVariant
+                : (allSame ? allColors[0] : (uniqueColors[0] || ''));
+                
               return uniqueColors.map(c => 
                 \`<option value="\${escapeHtml(c)}" \${defaultVal === c ? 'selected' : ''}>\${escapeHtml(c)}</option>\`
               ).join('');
@@ -1035,29 +1069,27 @@ function openSource(pIdx, sIdx) {
           
           <div class="field" style="width:120px">
             <label>Currency</label>
-            <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase;" oninput="updateFinalPrice()">
+            <div style="display:flex; gap:0;">
+              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
+              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:36px; padding:0 4px; flex-shrink:0; font-size:11px; border-left:none;">
+                <option value="">▾</option>
+                <option>USD</option><option>EUR</option><option>GBP</option>
+                <option>CAD</option><option>AUD</option><option>CHF</option>
+                <option>JPY</option><option>CNY</option><option>SEK</option>
+                <option>NOK</option><option>DKK</option><option>PLN</option>
+                <option>SGD</option><option>HKD</option><option>NZD</option>
+                <option>MXN</option><option>KRW</option><option>INR</option>
+                <option>AED</option><option>SAR</option><option>ZAR</option>
+              </select>
+            </div>
             <datalist id="currencyList">
-              <option value="USD">
-              <option value="EUR">
-              <option value="GBP">
-              <option value="CAD">
-              <option value="AUD">
-              <option value="CHF">
-              <option value="JPY">
-              <option value="CNY">
-              <option value="SEK">
-              <option value="NOK">
-              <option value="DKK">
-              <option value="PLN">
-              <option value="SGD">
-              <option value="HKD">
-              <option value="NZD">
-              <option value="MXN">
-              <option value="KRW">
-              <option value="INR">
-              <option value="AED">
-              <option value="SAR">
-              <option value="ZAR">
+              <option value="USD"><option value="EUR"><option value="GBP">
+              <option value="CAD"><option value="AUD"><option value="CHF">
+              <option value="JPY"><option value="CNY"><option value="SEK">
+              <option value="NOK"><option value="DKK"><option value="PLN">
+              <option value="SGD"><option value="HKD"><option value="NZD">
+              <option value="MXN"><option value="KRW"><option value="INR">
+              <option value="AED"><option value="SAR"><option value="ZAR">
             </datalist>
           </div>
 
@@ -1084,9 +1116,16 @@ function openSource(pIdx, sIdx) {
         <summary>SIZE GUIDE</summary>
         <div class="details-content">
           <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
+          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
             <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
             <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px;">AI PROMPT</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px; color:var(--success);">PASTE JSON</button>
+          </div>
+          <div style="font-size:11px; color:var(--text-2); margin-top:8px; line-height:1.5;">
+            Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
           </div>
         </div>
       </details>
@@ -1100,20 +1139,21 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Return Policy</label><textarea id="eReturnPolicy">\${escapeHtml(s.return_policy || "")}</textarea></div>
         </div>
       </details>
-      <div class="card" style="background:var(--surface-2);">
-        <h3>DROPSHIP CONTEXT</h3>
-        <div style="font-size:13px; margin-bottom:8px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-        <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
-          <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
-          <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
-          <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
-          <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
-        </div>
-      </div>
 
       <details class="card">
         <summary>DROPSHIP PRICING</summary>
         <div class="details-content">
+          <div style="background:var(--surface-2); padding:12px; margin-bottom:16px; border:1px solid var(--border);">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-2); margin-bottom:8px;">DROPSHIP CONTEXT</div>
+            <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+            <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+              <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
+              <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
+              <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
+              <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
+            </div>
+            <div style="font-size:11px; color:var(--text-2); margin-top:8px;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
+          </div>
           <div class="field">
             <label>Markup Type</label>
             <select id="eMarkupType" onchange="updateFinalPrice()">
@@ -1427,6 +1467,141 @@ function delSizeGuideCol(cIdx) {
   renderSizeGuideTable();
   saveFormToLocalStorage();
 }
+
+function copySizeGuidePrompt() {
+  const pIdx = state.editingPIdx;
+  const sIdx = state.editingSIdx;
+  const s = state.current?.response?.products?.[pIdx]?.sources?.[sIdx];
+  if (!s) return toast("NO SOURCE LOADED");
+
+  const sourceData = {
+    name: s.name,
+    brand: s.brand,
+    vendor: s.vendor || s.store,
+    category: s.primary_category,
+    url: s.url,
+    description: s.description,
+    size_guide: s.size_guide,
+    features: s.features,
+    variants: (s.variants || []).map(v => ({ size: v.size, color: v.color }))
+  };
+
+  const currency = (s.price?.currency || s.currency || '').toUpperCase();
+
+  const systemPrompt = \`You are a senior e-commerce sizing analyst. Generate live, customer-facing size guides that reduce returns through clarity and accuracy.
+
+Rules:
+1. Only include data you have verified through web search.
+2. Label the source basis: "Official Brand Data" or "Synthesized Industry Consensus".
+3. Detect gender and product sub-type from the data to choose correct body measurements and proportions.
+4. Match the exact JSON schema. No markdown. No text outside the JSON object.
+5. This output will be displayed directly to shoppers. Be concise, scannable, and actionable.
+
+Example output for Women's Tops:
+{"headers":["Alpha","US","UK","EU","AU","Bust (cm)","Waist (cm)"],"rows":[["XS","0-2","4-6","32-34","6-8","78-82","60-64"],["S","4-6","8-10","36-38","8-10","84-88","66-70"],["M","8-10","12-14","40-42","10-12","90-94","72-76"]],"gender":"Women","product_type":"Women's Tops","research_summary":"Official Zara size chart","confidence":"high (official brand data)","fit_notes":"True to size. Slight taper at waist. Size up for oversized fit.","measurement_note":"Bust: measure around fullest part. Waist: measure around natural waistline. Allow 2-3cm ease.","how_to_measure":"Use a soft tape measure. Keep it level and snug but not tight. Measure over undergarments.","disclaimer":"Size guidance based on research. Fit may vary slightly by style and batch."}\`;
+
+  const userPrompt = \`Generate a live, customer-facing size guide for this product.
+
+PRODUCT DATA:
+\${JSON.stringify(sourceData, null, 2)}
+
+CURRENCY: \${currency}
+
+RESEARCH PROTOCOL:
+1. **Scraped Size Guide Check**: If \`size_guide\` is present in the product data above, evaluate it first. It may be raw HTML, plain text, or structured data. Extract what you can — but do NOT blindly trust it. It may be incomplete, poorly formatted, or for a different product variant. Use it as a starting point and cross-check against web research.
+2. **Web Verification**: Search for the brand's official size/fit chart for this exact product category and gender. If the scraped data conflicts with official brand data, prioritize the official source. If the scraped data is missing, garbled, or clearly wrong, ignore it and rely on web research.
+3. Infer the primary target market(s) from the currency, URL TLD, and brand origin country. Produce conversions relevant to those markets.
+4. Use the variant sizes as the primary column naming convention. Include all variant sizes plus logically adjacent standard sizes if typical for this category.
+5. If the product is "One Size" or has only a single variant, output a single row with available measurements and note it in fit_notes.
+6. Add body measurement columns (in cm) appropriate to the gender and product type:
+   - Tops/Dresses: Bust/Chest, Waist
+   - Bottoms: Waist, Hips, Inseam (and Rise if available)
+   - Footwear: Foot Length (cm), plus US/UK/EU/AU conversions
+   - Outerwear: Same as tops, possibly with Length
+7. If you cannot find reliable data for a conversion column, use an empty string "" in that cell — do NOT remove the column from headers. All rows must have the exact same number of cells as headers.
+8. If no official brand data exists, synthesize from 3+ high-authority sources for this category/gender and note the source count.
+
+LIVE DISPLAY REQUIREMENTS:
+- Use clean, scannable ranges (e.g., "78-82" not "78.5-82.3").
+- fit_notes must be specific to this product type (not generic). Mention if it runs small/large, has stretch, or is cropped/oversized.
+- how_to_measure must be 1-2 sentences telling the shopper exactly how to take the key measurement for this product.
+- measurement_note should clarify if numbers are body measurements or garment measurements.
+
+OUTPUT SCHEMA:
+{
+  "headers": ["<primary size system from variants>", "US", "UK", "EU", "AU", "<body measurements in cm>"],
+  "rows": [["<val>", "<val>", ...], ...],
+  "gender": "Women" | "Men" | "Kids" | "Unisex",
+  "product_type": "e.g. Women's Tops / Men's Footwear - Sneakers",
+  "research_summary": "Used official [Brand] chart" OR "No official data. Synthesized from [N] [category] sources.",
+  "confidence": "high (official brand data)" | "medium (synthesized consensus)" | "low (limited direct mapping)",
+  "fit_notes": "Specific to this product. E.g. Runs small in shoulders. Size up if between sizes. Stretch fabric allows some give.",
+  "measurement_note": "E.g. Body measurements in cm. Allow 2-3cm ease. These are garment measurements, not body measurements.",
+  "how_to_measure": "1-2 sentences instructing the shopper how to measure for this specific product.",
+  "disclaimer": "Brief, honest disclaimer."
+}
+
+Return ONLY valid JSON. No markdown. No backticks. No text before or after the JSON object.\`;
+
+  const fullPrompt = \`<system>
+\${systemPrompt}
+</system>
+
+<user>
+\${userPrompt}
+</user>\`;
+
+  navigator.clipboard.writeText(fullPrompt).then(() => {
+    toast("PROMPT COPIED — Live customer-facing size guide ready");
+  }).catch(() => toast("CLIPBOARD PERMISSION DENIED"));
+}
+
+async function pasteSizeGuideJson() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) return toast("CLIPBOARD EMPTY");
+
+    let parsed;
+    try {
+      const clean = text.trim().replace(/^\`\`\`[a-z]*\\n?/i, '').replace(/\\n?\`\`\`$/,'').trim();
+      parsed = JSON.parse(clean);
+    } catch(e) {
+      return toast("INVALID JSON — COULD NOT PARSE");
+    }
+
+    if (!Array.isArray(parsed.headers) || !Array.isArray(parsed.rows)) {
+      return toast("INVALID FORMAT — NEED {headers:[...], rows:[[...]]}");
+    }
+    if (!parsed.headers.length) return toast("HEADERS ARRAY IS EMPTY");
+    const colCount = parsed.headers.length;
+    const validRows = parsed.rows.filter(r => Array.isArray(r) && r.length === colCount);
+    if (validRows.length !== parsed.rows.length) {
+      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) HAD WRONG COLUMN COUNT AND WERE SKIPPED\`);
+    }
+    if (!validRows.length) return toast("NO VALID ROWS FOUND");
+
+    // FIX: Preserve all AI-returned metadata, not just headers/rows
+    state.currentSizeGuide = {
+      headers: parsed.headers.map(h => String(h)),
+      rows: validRows.map(r => r.map(c => String(c))),
+      gender: parsed.gender || "",
+      product_type: parsed.product_type || "",
+      research_summary: parsed.research_summary || "",
+      confidence: parsed.confidence || "",
+      fit_notes: parsed.fit_notes || "",
+      measurement_note: parsed.measurement_note || "",
+      how_to_measure: parsed.how_to_measure || "",
+      disclaimer: parsed.disclaimer || ""
+    };
+
+    renderSizeGuideTable();
+    saveFormToLocalStorage();
+    toast(\`SIZE GUIDE LOADED: \${parsed.headers.length} COLS, \${validRows.length} ROWS\`);
+  } catch(err) {
+    toast("CLIPBOARD PERMISSION DENIED");
+  }
+}
+
 
 /* --- Saving --- */
 async function saveSource(status = "completed") {
