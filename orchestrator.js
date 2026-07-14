@@ -2595,7 +2595,8 @@ async function runTextExtractorScript(urls, cfg) {
         cfg.scriptPath,
         '-u', urlsPath,
         '-o', outPath,
-        '--lazy-extraction'
+        '--lazy-extraction',
+        '--min-confidence', '0.0'
     ];
 
     const scriptDir = path.dirname(cfg.scriptPath);
