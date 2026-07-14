@@ -7,8 +7,9 @@
  * Env: ORCH_MONGODB_URI, ORCH_MONGODB_DB, ORCH_MONGODB_COLLECTION
  *      REVIEW_PORT (default 3456), ORCH_HF_TOKEN
  *
- * FINAL PRODUCTION v2.4.0 - Clean Minimal Dark UI, Helvetica, Sharp Corners,
- * Generous Whitespace, Tight Edges, No Rounded, Calm Interactions.
+ * FINAL PRODUCTION v2.3.0 - Mobile Table overflow, Collapsible sections,
+ * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
+ * UI/UX Updated: Minimalist, Sharp Corners, Clean Whitespace, Refined Dark Mode.
  */
 
 import http from 'http';
@@ -46,7 +47,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
+/* HTML UI (Minimalist / Clean Dark Mode / Sharp Corners)                     */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -55,37 +56,44 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#ffffff" id="metaThemeColor">
-<title>DropShip Review • v2.4</title>
+<meta name="theme-color" content="#f7f7f7" id="metaThemeColor">
+<title>DropShip Review • v2.3</title>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;border-radius:0}
-:root {
-  --bg: #0a0a0a;
-  --surface: #111111;
-  --surface-2: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #f5f5f5;
-  --text-2: #888888;
-  --focus: #ffffff;
-  --danger: #ff453a;
-  --success: #30d158;
-  --warning: #ffd60a;
+*,*::before,*::after{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+  -webkit-tap-highlight-color:transparent;
+  border-radius: 0 !important; /* Enforce sharp corners everywhere */
 }
-:root[data-theme="light"] {
-  --bg: #fafafa;
+
+:root {
+  --bg: #f7f7f7;
   --surface: #ffffff;
-  --surface-2: #f0f0f0;
-  --border: #e5e5e5;
+  --surface-2: #f2f2f2;
+  --border: #e2e2e2;
   --text: #111111;
   --text-2: #666666;
-  --focus: #000000;
-  --danger: #dc2626;
-  --success: #16a34a;
-  --warning: #ca8a04;
+  --focus: #111111;
+  --danger: #d93025;
+  --success: #1e8e3e;
+  --warning: #f29900;
+}
+:root[data-theme="dark"] {
+  --bg: #161616;
+  --surface: #1e1e1e;
+  --surface-2: #242424;
+  --border: #2c2c2c;
+  --text: #e5e5e5;
+  --text-2: #8a8a8a;
+  --focus: #ffffff;
+  --danger: #e25c5c;
+  --success: #5cb87a;
+  --warning: #d9a036;
 }
 
 body {
-  font-family: "Helvetica Neue", Helvetica, -apple-system, BlinkMacSystemFont, "SF Pro Text", Arial, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -96,84 +104,90 @@ body {
 }
 
 /* Typography Overrides */
-h1, h2, h3, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
-  font-weight: 700;
+h1, h2, h3, .product-group-title {
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
+  margin: 0;
 }
+h1 { font-size: 13px; }
+h2 { font-size: 11px; color: var(--text-2); }
+h3 { font-size: 11px; color: var(--text-2); }
+.empty { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); text-align: center; padding: 40px 16px; }
 
 /* Controls */
 button {
   cursor: pointer;
   border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 14px 18px;
-  font-size: 12px;
-  background: var(--bg);
+  padding: 14px 16px;
+  font-size: 11px;
+  background: transparent;
   color: var(--text);
-  min-height: 48px;
+  min-height: 44px;
   font-family: inherit;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  transition: opacity 0.1s ease;
+  letter-spacing: 0.05em;
+  transition: all 0.15s ease;
 }
+button:hover { background: var(--surface-2); }
 button:active { opacity: 0.6; }
-button:disabled { opacity: 0.35 !important; cursor: not-allowed; border-color: var(--border); }
+button:disabled { opacity: 0.3 !important; cursor: not-allowed; border-color: var(--border); background: transparent; }
 
-.btn-primary { background: var(--text); color: var(--bg); border: 1px solid var(--text); }
-.btn-danger { background: var(--bg); color: var(--danger); border: 1px solid var(--border); }
-.btn-ghost { border-color: transparent; background: transparent; color: var(--text); padding: 0; min-height: 0; border: none; }
-.btn-ghost:active { opacity: 0.5; }
+.btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
+.btn-primary:hover { background: var(--text); opacity: 0.9; }
+.btn-danger { color: var(--danger); border-color: var(--border); }
+.btn-danger:hover { background: rgba(217, 48, 37, 0.05); border-color: var(--danger); }
+.btn-ghost { border-color: transparent; padding: 0; min-height: 0; }
+.btn-ghost:hover { background: transparent; opacity: 0.7; }
 
 input, select, textarea {
-  background: var(--bg);
+  background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 14px 12px;
-  border-radius: 0;
-  font-size: 14px;
+  padding: 12px;
+  font-size: 13px;
   font-family: inherit;
   width: 100%;
   -webkit-appearance: none;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.2s ease;
 }
-input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.45; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--focus); }
-textarea { resize: vertical; min-height: 100px; }
+input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
+textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888888'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8a8a'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
 }
 
 /* Tables */
-.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 8px; }
-.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 14px; }
-.simple-table th { background: var(--surface-2); padding: 12px 8px; font-size: 12px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
-.simple-table td { border: 1px solid var(--border); padding: 0; }
-.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; font-size: 14px; width: 100%; }
-.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text); }
-.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; font-size: 18px; }
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 12px; }
+.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 13px; }
+.simple-table th { padding: 12px 8px; font-size: 10px; color: var(--text-2); text-transform: uppercase; font-weight: 500; letter-spacing: 0.05em; text-align: left; border-bottom: 1px solid var(--border); }
+.simple-table td { border-bottom: 1px solid var(--border); padding: 0; }
+.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; width: 100%; }
+.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-size: 16px; border: none; }
+.table-btn:hover { background: transparent; }
 
 img { max-width: 100%; display: block; }
-a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
-a:active { opacity: 0.7; }
+a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--text); font-weight: 500; transition: opacity 0.2s; }
+a:active, a:hover { opacity: 0.6; }
 
-/* Layout Screens */
-.screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+/* Layout Screens - Inner Edge Spacing Added */
+.screen { display: none; padding: 12px; padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
 .screen.active { display: block; }
 
 .topbar {
-  position: sticky; top: 0; z-index: 50;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  padding: 14px 12px;
-  padding-top: max(14px, env(safe-area-inset-top));
-  display: flex; align-items: center; gap: 8px;
+  position: sticky; top: 12px; z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 24px;
 }
-.topbar h1 { font-size: 13px; flex: 1; margin: 0; text-align: left; letter-spacing: 0.04em; }
+.topbar h1 { flex: 1; text-align: left; }
 
 .badge {
   font-size: 9px;
@@ -182,110 +196,93 @@ a:active { opacity: 0.7; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  color: var(--text);
-  background: var(--surface-2);
-  font-weight: 700;
+  border: 1px solid var(--text);
+  color: var(--bg);
+  background: var(--text);
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
-.badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.badge.src-status { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.badge.partial { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
-
-.theme-toggle {
-  font-size: 9px;
-  padding: 0 6px;
-  height: 20px;
-  min-height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  color: var(--text);
-  background: transparent;
-}
+.badge.pending, .badge.src-status { color: var(--text); background: transparent; border-color: var(--border); }
+.badge.partial { background: transparent; color: var(--text); border: 1px dashed var(--border); }
 
 /* Lists & Groups */
-.post-group { border-bottom: 1px solid var(--border); margin: 0; background: var(--bg); }
+.post-group { border: 1px solid var(--border); margin-bottom: 12px; background: var(--surface); }
 .post-header {
-  display: flex; align-items: center; gap: 12px;
-  padding: 22px 12px; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px; cursor: pointer; user-select: none;
 }
 .post-header:active { background: var(--surface-2); }
-.post-thumb {
-  width: 48px; height: 48px;
-  background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
-}
-.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.post-thumb { width: 44px; height: 44px; background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border); }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .post-info { flex: 1; min-width: 0; }
-.post-id { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.post-meta { font-size: 11px; color: var(--text-2); margin-top: 3px; font-weight: 600; }
-.post-chevron { width: 18px; height: 18px; color: var(--text-2); transition: transform 0.15s ease; }
+.post-id { font-size: 13px; font-weight: 500; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post-meta { font-size: 11px; color: var(--text-2); margin-top: 4px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.05em; }
+.post-chevron { width: 16px; height: 16px; color: var(--text-2); transition: transform 0.2s ease; }
 .post-group.open .post-chevron { transform: rotate(180deg); }
 
-.post-items { display: none; padding: 0 12px 20px; border-top: 1px solid var(--border); }
-.post-group.open .post-items { display: block; margin-top: 0; padding-top: 16px; background: var(--surface-2); }
+.post-items { display: none; padding: 0 16px 16px; border-top: 1px dashed var(--border); }
+.post-group.open .post-items { display: block; margin-top: 0; padding-top: 16px; }
 
-.item-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 0; border-bottom: 1px solid var(--border); cursor: pointer;
-}
-.item-row:active { background: var(--surface-2); }
+.item-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity 0.1s; }
+.item-row:active { opacity: 0.6; }
 .item-row:last-child { border-bottom: none; padding-bottom: 0; }
-.item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
-.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.item-thumb { width: 40px; height: 56px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; }
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .item-info { flex: 1; min-width: 0; }
-.item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
+.item-type { font-size: 11px; font-weight: 500; letter-spacing: 0.05em; }
+.item-status { font-size: 9px; color: var(--text-2); margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Hero (Review Main Image) */
-.hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
-.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; background: #fff; }
-.hero-meta { padding: 16px 12px; display: flex; gap: 6px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
+.hero { width: 100%; border: 1px solid var(--border); background: var(--surface); margin-bottom: 24px; position: relative; }
+.hero img { width: 100%; height: 60vh; object-fit: cover; cursor: pointer; transition: object-fit 0.2s; }
+.hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); }
 
 /* Section & Cards */
-.section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
-.section h2 { font-size: 12px; padding: 24px 12px 12px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
+.section { padding: 0; margin-bottom: 24px; }
+.section h2 { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
 
-.product-group-title { font-size: 10px; padding: 16px 12px 8px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
+.product-group-title { font-size: 10px; color: var(--text-2); margin: 24px 0 12px; padding-bottom: 4px; border-bottom: 1px dashed var(--border); }
 
 .p-card {
-  padding: 20px 12px; display: flex; gap: 16px; cursor: pointer;
-  border-bottom: 1px solid var(--border); background: var(--bg);
+  padding: 16px; display: flex; gap: 16px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); margin-bottom: 8px;
+  transition: opacity 0.2s, filter 0.2s;
 }
 .p-card:active { background: var(--surface-2); }
-.p-card.rejected { opacity: 0.45; filter: grayscale(100%); }
-.p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
-.p-img img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
-.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
+.p-img { width: 72px; height: 96px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
+.p-img img { width: 100%; height: 100%; object-fit: cover; }
+.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 9px; font-weight: 500; text-transform: uppercase; }
 .p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-.p-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.p-brand { font-size: 12px; color: var(--text-2); margin-bottom: 8px; font-weight: 500; }
-.p-status { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-top: 4px; }
+.p-title { font-size: 14px; font-weight: 500; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-brand { font-size: 12px; color: var(--text-2); margin-bottom: 10px; font-weight: 400; letter-spacing: 0.02em; }
+.p-status { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 500; text-transform: uppercase; margin-top: 4px; }
 
 /* Modal / Editor */
-.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
+.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; padding: 12px; }
 .modal.active { display: flex; }
-.modal-header { padding: 14px 12px; padding-top: max(14px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; background: var(--bg); }
-.modal-header h2 { font-size: 13px; flex: 1; text-align: center; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
+.modal-header { padding: 12px 16px; border: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.modal-header h2 { font-size: 13px; flex: 1; text-align: center; color: var(--text); }
+.modal-body { flex: 1; overflow-y: auto; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
 
 /* Video Modal */
-#videoModal { background: #000; z-index: 200; cursor: pointer; }
+#videoModal { padding: 0; background: #000; z-index: 200; cursor: pointer; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
-.card { padding: 24px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
-.card h3 { font-size: 12px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+.card { padding: 24px 16px; border: 1px solid var(--border); background: var(--surface); margin-bottom: 12px; }
+.card h3 { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 
 details.card { padding: 0; }
-details.card > summary { padding: 20px 12px; font-size: 12px; color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.card > summary { padding: 20px 16px; font-size: 11px; color: var(--text); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.card > summary::after { content: '+'; font-size: 16px; font-weight: 400; color: var(--text-2); }
 details[open].card > summary { border-bottom: 1px solid var(--border); }
-details[open].card > summary::after { content: '−'; font-size: 14px; font-weight: 400; }
-details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(--border); }
+details[open].card > summary::after { content: '−'; }
+details.card > .details-content { padding: 20px 16px; }
 
 /* 3:4 Carousel Images - Taller (75%) */
 .carousel { 
-  display: flex; overflow-x: auto; gap: 10px; padding-bottom: 4px; 
+  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
   scroll-snap-type: x mandatory; margin-bottom: 16px;
   -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
@@ -298,19 +295,19 @@ details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(
   flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
   position: relative; cursor: pointer; 
   border: 1px solid var(--border); background: var(--surface-2);
+  transition: border-color 0.15s ease;
 }
-.img-cell:active { background: var(--bg); }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.45; transition: opacity 0.15s ease; background: #fff; }
-.img-cell.on { border-color: var(--focus); }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; transition: opacity 0.2s ease; }
+.img-cell.on { border-color: var(--text); }
 .img-cell.on img { opacity: 1; }
 
 .img-cell .check { 
-  position: absolute; top: 10px; right: 10px; 
-  width: 22px; height: 22px; border: 1px solid var(--text); background: transparent;
+  position: absolute; top: 12px; right: 12px; 
+  width: 20px; height: 20px; border: 1px solid var(--text); background: transparent;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: transparent;
+  font-size: 10px; font-weight: 500; color: transparent;
 }
-.img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
+.img-cell.on .check { background: var(--text); color: var(--bg); }
 
 @keyframes pulse-extract {
   0% { opacity: 1; }
@@ -320,41 +317,44 @@ details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(
 .extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
 
 /* Form fields */
-.field { margin-bottom: 18px; }
-.field label { display: block; font-size: 10px; margin-bottom: 6px; color: var(--text-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-.field-row { display: flex; gap: 10px; }
+.field { margin-bottom: 20px; }
+.field label { display: block; font-size: 10px; margin-bottom: 8px; color: var(--text-2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.field-row { display: flex; gap: 16px; }
 .field-row .field { flex: 1; }
 
-/* Actions Bar */
-.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 10px; z-index: 50; }
-.actions-bar button { flex: 1; min-height: 46px; padding: 12px 14px; font-size: 12px; }
-
-.empty { padding: 60px 12px; text-align: center; color: var(--text-2); font-size: 12px; font-weight: 600; }
+/* Floating Actions Bar */
+.actions-bar { 
+  position: fixed; 
+  bottom: 12px; 
+  left: 12px; 
+  right: 12px; 
+  padding: 12px; 
+  background: var(--surface); 
+  border: 1px solid var(--border); 
+  display: flex; gap: 12px; z-index: 50; 
+  margin-bottom: env(safe-area-inset-bottom);
+}
+.actions-bar button { flex: 1; }
 
 /* Loading & Utils */
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:20px;color:var(--text)}
-.spinner{width:26px;height:26px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .7s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg)}}
+.loading { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100dvh; gap:24px; color:var(--text); }
+.spinner { width:24px; height:24px; border:1px solid var(--border); border-top-color:var(--text); border-radius:50% !important; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg) } }
 
-.toast { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -140px); background: var(--text); color: var(--bg); padding: 12px 20px; font-size: 11px; text-transform: uppercase; z-index: 300; transition: transform 0.25s cubic-bezier(0.2, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 700; white-space: nowrap; }
+.toast { position: fixed; top: max(24px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px); background: var(--text); color: var(--surface); padding: 12px 20px; font-size: 11px; text-transform: uppercase; z-index: 300; transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 500; letter-spacing: 0.05em; white-space: nowrap; }
 .toast.show { transform: translate(-50%, 0); }
 
-.lazy-img { opacity: 0; transition: opacity 0.25s ease; }
+.lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
 
-/* Performance */
-.post-group, .p-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 180px;
-}
-
+.post-group, .p-card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
+    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text-2);">LOADING QUEUE</p></div>
   </div>
   
   <!-- QUEUE SCREEN -->
@@ -362,8 +362,8 @@ details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(
     <div class="topbar">
       <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
-      <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
-      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:0 10px; font-size:10px; min-height:24px; height:24px;">REFRESH</button>
+      <button class="btn-ghost" onclick="toggleTheme()" style="font-size:10px; letter-spacing:0.05em; color:var(--text-2); margin-left:auto; border:1px solid var(--border); padding:6px 10px; min-height:0;">THEME</button>
+      <button class="btn-ghost" onclick="loadQueue()" style="font-size:10px; letter-spacing:0.05em; border:1px solid var(--border); padding:6px 10px; min-height:0;">REFRESH</button>
     </div>
     <div id="qList"></div>
   </div>
@@ -371,20 +371,20 @@ details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(
   <!-- REVIEW SCREEN (Item Level) -->
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
+      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:6px 12px; font-size:10px; min-height:0;">BACK</button>
       <h1 id="rTitle" style="text-align:center;">ITEM</h1>
-      <div id="rTopRight" style="width:70px; text-align:right;"></div>
+      <div id="rTopRight" style="width:60px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>SOURCES <span class="badge" id="pCount">0</span></h2>
+      <h2>SOURCES <span class="badge" id="pCount" style="margin-left:8px;">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">DISCARD ITEM</button>
+      <button class="btn-danger" onclick="deleteItem()">DISCARD</button>
       <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
@@ -392,17 +392,17 @@ details.card > .details-content { padding: 16px 12px; border-top: 1px solid var(
   <!-- EDITOR MODAL (Source Level) -->
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:6px 12px; font-size:10px; min-height:0;">CANCEL</button>
       <h2 id="eModalTitle">EDIT SOURCE</h2>
-      <button class="btn-primary" onclick="saveSource('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
+      <button class="btn-primary" onclick="saveSource('completed')" style="padding:6px 12px; font-size:10px; min-height:0;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
   
   <!-- Fullscreen Video Modal -->
-  <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
-    <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
-      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
+  <div id="videoModal" class="modal" onclick="if(event.target === this) closeVideo()">
+    <div style="position:absolute; top:max(24px, env(safe-area-inset-top)); right:24px; z-index:210;">
+      <button class="btn-ghost" onclick="closeVideo()" style="background:var(--surface); color:var(--text); border:1px solid var(--border); width:40px; height:40px; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
     </div>
     <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh; pointer-events:none;">
       <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto;"></video>
@@ -435,12 +435,12 @@ function toggleTheme() {
   const current = root.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', newTheme);
-  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
+  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#161616' : '#f7f7f7');
   localStorage.setItem('theme', newTheme);
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
+  document.getElementById('metaThemeColor')?.setAttribute('content', '#161616');
 }
 
 function showScreen(id) {
@@ -688,7 +688,7 @@ function renderQueue() {
             <div class="post-id">\${escapeHtml(pid)}</div>
             <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
           </div>
-          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
@@ -760,13 +760,13 @@ function renderItem() {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
   
-  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
+  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank" style="border-bottom:none;">\${escapeHtml(item.postId)}</a>\`;
   
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     const watchBtn = document.createElement('button');
     watchBtn.className = 'btn-ghost';
-    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);');
+    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:6px 12px; min-height:0; font-size:10px;');
     watchBtn.textContent = 'WATCH';
     watchBtn.onclick = () => openVideo(proxyUrl);
     rTopRight.innerHTML = '';
@@ -802,7 +802,6 @@ function renderItem() {
           let rejectedClass = "";
           let statusBadge = "";
 
-          // All indicator badges on the listing page remain a uniform grey color for a clean UI
           if (s.reviewStatus === "rejected") {
             statusColor = "var(--text-2)";
             rejectedClass = "rejected";
@@ -977,17 +976,17 @@ function openSource(pIdx, sIdx) {
     const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
 
     let html = \`
-      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
+      <div class="card" style="margin-top:0;">
         <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
           IMAGES 
-          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:11px;">
             <span id="selCount">\${state.currentSelected.length}</span> SELECTED
           </span>
         </h3>
         <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:8px; margin-bottom:16px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
+        <div style="display:flex; gap:12px; margin-bottom:4px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px solid var(--border);">+ PASTE URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px solid var(--border); color:var(--danger);">CLEAR SELECTION</button>
         </div>
       </div>
       
@@ -1021,9 +1020,6 @@ function openSource(pIdx, sIdx) {
                 if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
               });
               
-              // Auto-select: use saved s.variant if it matches a known color,
-              // else if all variants share the same color, auto-select it,
-              // else select the first unique color found.
               const allColors = variants.map(v => (v.color || '').trim());
               const allSame = allColors.every(c => c === allColors[0]) && allColors[0] !== '';
               const savedVariant = (s.variant || '').trim();
@@ -1051,13 +1047,13 @@ function openSource(pIdx, sIdx) {
 
         <div class="field" style="margin-bottom:24px;">
           <label>Supplier URL</label>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:12px;">
             <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:11px; text-decoration:none;">VISIT</a>\` : ''}
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
           </div>
         </div>
 
@@ -1065,11 +1061,11 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}" oninput="updateFinalPrice()"></div>
           <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
           
-          <div class="field" style="width:120px">
+          <div class="field" style="width:100px">
             <label>Currency</label>
             <div style="display:flex; gap:0;">
-              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
-              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:36px; padding:0 4px; flex-shrink:0; font-size:11px; border-left:none;">
+              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1; border-right:none;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
+              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:32px; padding:0 4px; flex-shrink:0; font-size:11px;">
                 <option value="">▾</option>
                 <option>USD</option><option>EUR</option><option>GBP</option>
                 <option>CAD</option><option>AUD</option><option>CHF</option>
@@ -1106,7 +1102,7 @@ function openSource(pIdx, sIdx) {
         <summary>VARIANTS</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px solid var(--border); margin-top:12px;">+ ADD SIZE</button>
         </div>
       </details>
 
@@ -1114,15 +1110,15 @@ function openSource(pIdx, sIdx) {
         <summary>SIZE GUIDE</summary>
         <div class="details-content">
           <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
+          <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px solid var(--border);">+ ADD ROW</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px solid var(--border);">+ ADD COL</button>
           </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px;">AI PROMPT</button>
-            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px; color:var(--success);">PASTE JSON</button>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border);">AI PROMPT</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); color:var(--success);">PASTE JSON</button>
           </div>
-          <div style="font-size:11px; color:var(--text-2); margin-top:8px; line-height:1.5;">
+          <div style="font-size:10px; color:var(--text-2); margin-top:12px; line-height:1.5; text-transform:uppercase; letter-spacing:0.02em;">
             Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
           </div>
         </div>
@@ -1141,16 +1137,15 @@ function openSource(pIdx, sIdx) {
       <details class="card">
         <summary>DROPSHIP PRICING</summary>
         <div class="details-content">
-          <div style="background:var(--surface-2); padding:12px; margin-bottom:16px; border:1px solid var(--border);">
-            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-2); margin-bottom:8px;">DROPSHIP CONTEXT</div>
-            <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-            <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
+          <div style="background:var(--surface-2); padding:16px; margin-bottom:20px; border:1px solid var(--border);">
+            <div style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-2); margin-bottom:12px;">DROPSHIP CONTEXT</div>
+            <div style="font-size:13px; margin-bottom:12px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+            <div style="display:flex; gap:20px; font-size:13px; flex-wrap:wrap;">
               <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
               <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
               <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
               <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
             </div>
-            <div style="font-size:11px; color:var(--text-2); margin-top:8px;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
           </div>
           <div class="field">
             <label>Markup Type</label>
@@ -1182,10 +1177,9 @@ function openSource(pIdx, sIdx) {
         </div>
       </details>
 
-      <div class="card" style="border-bottom:none;">
-        <h3>ACTIONS</h3>
+      <div class="card" style="border:none; background:transparent; padding:0; margin-top:24px;">
         <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
+          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
         </div>
         <div style="display:flex; gap:12px">
           <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
@@ -1252,7 +1246,7 @@ function renderImgGrid(urls) {
     const isOn = selIdx > -1;
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23242424%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23888%22 font-family=%22sans-serif%22 font-size=%2210%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
       </div>\`;
   }).join("");
@@ -1398,7 +1392,6 @@ function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
   const sg = state.currentSizeGuide || { headers: [], rows: [] };
   
-  // Ensure rows always exists
   if (!sg.rows) sg.rows = [];
   
   if (!sg.headers || !sg.headers.length) { 
@@ -1410,8 +1403,8 @@ function renderSizeGuideTable() {
   sg.headers.forEach((h, cIdx) => {
     html += \`<th>
       <div style="display:flex; align-items:center;">
-        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
-        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:18px; min-height:0;">&times;</button>
+        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:500; background:transparent; border:none; padding:4px;">
+        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:24px; font-size:16px; min-height:0;">&times;</button>
       </div>
     </th>\`;
   });
@@ -1557,7 +1550,7 @@ Return ONLY valid JSON. No markdown. No backticks. No text before or after the J
 </user>\`;
 
   navigator.clipboard.writeText(fullPrompt).then(() => {
-    toast("PROMPT COPIED — Live customer-facing size guide ready");
+    toast("PROMPT COPIED");
   }).catch(() => toast("CLIPBOARD PERMISSION DENIED"));
 }
 
@@ -1581,11 +1574,10 @@ async function pasteSizeGuideJson() {
     const colCount = parsed.headers.length;
     const validRows = parsed.rows.filter(r => Array.isArray(r) && r.length === colCount);
     if (validRows.length !== parsed.rows.length) {
-      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) HAD WRONG COLUMN COUNT AND WERE SKIPPED\`);
+      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) SKIPPED\`);
     }
     if (!validRows.length) return toast("NO VALID ROWS FOUND");
 
-    // FIX: Preserve all AI-returned metadata, not just headers/rows
     state.currentSizeGuide = {
       headers: parsed.headers.map(h => String(h)),
       rows: validRows.map(r => r.map(c => String(c))),
@@ -1606,7 +1598,6 @@ async function pasteSizeGuideJson() {
     toast("CLIPBOARD PERMISSION DENIED");
   }
 }
-
 
 /* --- Saving --- */
 async function saveSource(status = "completed") {
@@ -1681,7 +1672,6 @@ async function saveSource(status = "completed") {
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
 
-    // Only mutate in-memory state after confirmed server success
     state.current.response.products[pIdx].sources[sIdx] = payload;
 
     clearFormPersist(state.formPersistKey);
@@ -1723,10 +1713,8 @@ async function deleteSource() {
 }
 
 function closeEditor() { 
-  // clearFormPersist(state.formPersistKey);
   showScreen("review");
   
-  // Re-scroll back to source card context instantly upon pressing cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
     const scrollBack = () => {
       const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
@@ -1799,7 +1787,6 @@ function initKeyboard() {
       if (videoModal.classList.contains('active')) closeVideo();
       else if (editorModal.classList.contains('active')) closeEditor();
       else if (document.getElementById('review').classList.contains('active')) {
-        // Preserve lastViewedItemId so renderQueue scrolls to it
         showQueue();
       }
     }
@@ -1815,7 +1802,7 @@ function initSwipeNavigation() {
   let didSwipe = false;
   const SWIPE_TIME = 500; // ms
 
-  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150); // 30vw, capped at 150px
+  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150);
 
   const onStart = (x, y) => { startX = x; startY = y; startTime = Date.now(); didSwipe = false; };
   const onEnd = (x, y) => {
@@ -1887,7 +1874,6 @@ function normalizeResponse(item) {
             s.markup_fixed = s.markup_fixed != null ? s.markup_fixed : null;
             s.markup_percentage = s.markup_percentage != null ? s.markup_percentage : null;
 
-            // Robust price normalization to handle raw python extractor numbers
             if (typeof s.price === 'number' || typeof s.price === 'string') {
                 s.price = {
                     current: s.price,
@@ -1945,7 +1931,7 @@ function getItemStatus(item) {
         });
     });
 
-    if (totalSources === 0) return 'done'; // Empty arrays can be committed safely to clear from queue
+    if (totalSources === 0) return 'done';
     if (reviewedSources === totalSources) return 'done';
     if (reviewedSources > 0) return 'partial';
     return 'pending';
