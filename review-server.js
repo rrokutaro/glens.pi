@@ -55,220 +55,146 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#f8f8f7" id="metaThemeColor">
+<meta name="theme-color" content="#ffffff" id="metaThemeColor">
 <title>DropShip Review • v2.3</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-
-/* ─── TOKENS ─────────────────────────────────────────────────────────────── */
 :root {
-  --bg:        #f8f8f7;
-  --surface:   #ffffff;
-  --surface-2: #efefed;
-  --border:    #e0dedd;
-  --text:      #111110;
-  --text-2:    #8a8a86;
-  --text-3:    #b8b8b4;
-  --danger:    #c0392b;
-  --success:   #2e7d32;
-  --warning:   #a07800;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f5f5f5;
+  --border: #e5e5e5;
+  --text: #000000;
+  --text-2: #737373;
+  --focus: #000000;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #ca8a04;
 }
 :root[data-theme="dark"] {
-  --bg:        #0f0f0e;
-  --surface:   #161615;
-  --surface-2: #1e1e1c;
-  --border:    #2a2a28;
-  --text:      #e8e8e5;
-  --text-2:    #6a6a66;
-  --text-3:    #3a3a38;
-  --danger:    #e05c52;
-  --success:   #4caf50;
-  --warning:   #d4a017;
+  --bg: #121212;
+  --surface: #121212;
+  --surface-2: #1e1e1e;
+  --border: #333333;
+  --text: #ffffff;
+  --text-2: #a3a3a3;
+  --focus: #ffffff;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #eab308;
 }
 
-/* ─── BASE ───────────────────────────────────────────────────────────────── */
 body {
-  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
-  line-height: 1.45;
+  line-height: 1.4;
   min-height: 100dvh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-size: 14px;
-  letter-spacing: -0.01em;
 }
 
-img { max-width: 100%; display: block; }
-a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
-a:active { opacity: 0.6; }
-
-/* ─── TYPOGRAPHY ─────────────────────────────────────────────────────────── */
-h1, h2, h3 {
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-}
-label {
-  font-size: 10px;
-  font-weight: 500;
+/* Typography Overrides */
+h1, h2, h3, label, .item-type, .p-brand, .post-id, .src-row .name, .empty {
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-2);
-}
-.mono {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 12px;
+  letter-spacing: 0.03em;
 }
 
-/* ─── CONTROLS ───────────────────────────────────────────────────────────── */
+/* Controls */
 button {
   cursor: pointer;
   border: 1px solid var(--border);
   border-radius: 0;
-  padding: 10px 14px;
-  font-size: 11px;
-  font-weight: 500;
+  padding: 12px 16px;
+  font-size: 13px;
   background: var(--bg);
   color: var(--text);
-  min-height: 40px;
+  min-height: 48px;
   font-family: inherit;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  transition: opacity 0.12s, background 0.12s;
-  white-space: nowrap;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s ease, transform 0.1s ease;
 }
-button:active { opacity: 0.55; }
-button:disabled { opacity: 0.28 !important; cursor: not-allowed; transform: none !important; }
+button:active { opacity: 0.7; transform: scale(0.98); }
+button:disabled { opacity: 0.4 !important; cursor: not-allowed; border-color: var(--border); transform: none !important; }
 
-.btn-primary {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
-  font-weight: 600;
-}
-.btn-primary:active { opacity: 0.75; }
-.btn-danger {
-  background: transparent;
-  color: var(--danger);
-  border-color: var(--border);
-}
-.btn-ghost {
-  border: none;
-  background: transparent;
-  color: var(--text-2);
-  padding: 0;
-  min-height: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 11px;
-}
-.btn-ghost:active { opacity: 0.45; }
+.btn-primary { background: var(--text); color: var(--bg); border: 1px solid var(--text); }
+.btn-danger { background: var(--bg); color: var(--danger); border: 1px solid var(--border); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--text); padding: 0; min-height: 0; border: none; }
+.btn-ghost:active { opacity: 0.5; transform: scale(0.96); }
 
 input, select, textarea {
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 10px 12px;
+  padding: 14px;
   border-radius: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   width: 100%;
   -webkit-appearance: none;
-  letter-spacing: -0.01em;
+  transition: border-color 0.2s ease;
 }
-input::placeholder, textarea::placeholder { color: var(--text-3); }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--text-2);
-  background: var(--surface);
-}
-textarea { resize: vertical; min-height: 88px; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
+textarea { resize: vertical; min-height: 100px; }
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236a6a66' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23737373'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 28px;
+  background-position: right 14px center;
+  padding-right: 32px;
 }
 
-/* ─── TABLES ─────────────────────────────────────────────────────────────── */
-.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; margin-top: 8px; }
-.simple-table { min-width: 480px; width: 100%; border-collapse: collapse; font-size: 12px; }
-.simple-table th {
-  background: var(--surface-2);
-  padding: 8px 8px;
-  font-size: 10px;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 500;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-.simple-table td { border-bottom: 1px solid var(--border); padding: 0; }
-.simple-table tr:last-child td { border-bottom: none; }
-.simple-table input, .simple-table select {
-  border: none;
-  min-height: 40px;
-  padding: 8px 8px;
-  font-size: 12px;
-  width: 100%;
-  background: transparent;
-}
-.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text-2); }
-.table-btn { width: 40px; min-height: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); border: none; background: transparent; font-size: 16px; transition: color 0.12s; }
-.table-btn:hover { color: var(--danger); }
+/* Tables */
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; margin-top: 8px; }
+.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 14px; }
+.simple-table th { background: var(--surface-2); padding: 12px 8px; font-size: 12px; color: var(--text-2); text-transform: uppercase; font-weight: 600; text-align: left; }
+.simple-table td { border: 1px solid var(--border); padding: 0; }
+.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; font-size: 14px; width: 100%; }
+.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text); }
+.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-weight: bold; border: none; background: transparent; font-size: 18px; }
 
-/* ─── SCREEN LAYOUT ──────────────────────────────────────────────────────── */
-.screen { display: none; min-height: 100dvh; padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+img { max-width: 100%; display: block; }
+a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; font-weight: 600; }
+a:active { opacity: 0.7; }
+
+/* Layout Screens */
+.screen { display: none; min-height: 100dvh; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .screen.active { display: block; }
 
-/* ─── TOPBAR ─────────────────────────────────────────────────────────────── */
 .topbar {
   position: sticky; top: 0; z-index: 50;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding: 0 14px;
-  padding-top: env(safe-area-inset-top);
-  height: calc(48px + env(safe-area-inset-top));
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  display: flex; align-items: center; gap: 12px;
 }
-.topbar h1 {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text);
-  flex: 1;
-}
+.topbar h1 { font-size: 14px; flex: 1; margin: 0; text-align: left; }
 
-/* ─── BADGE ──────────────────────────────────────────────────────────────── */
 .badge {
   font-size: 10px;
-  padding: 0 7px;
-  height: 20px;
+  padding: 0 8px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  background: var(--surface-2);
-  font-weight: 500;
+  border: 1px solid var(--text);
+  color: var(--bg);
+  background: var(--text);
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
+  letter-spacing: 0.03em;
 }
-.badge.pending { color: var(--warning); border-color: var(--warning); background: transparent; }
-.badge.src-status { color: var(--text-2); background: transparent; border-color: var(--border); }
-.badge.partial { color: var(--text-2); background: transparent; border-color: var(--border); }
+.badge.pending { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+.badge.src-status { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+.badge.partial { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
 
-/* ─── THEME TOGGLE ───────────────────────────────────────────────────────── */
 .theme-toggle {
   font-size: 10px;
-  letter-spacing: 0.05em;
   padding: 0 8px;
   height: 24px;
   min-height: 24px;
@@ -276,238 +202,94 @@ select {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  color: var(--text-2);
+  color: var(--text);
   background: transparent;
-  text-transform: uppercase;
 }
 
-/* ─── QUEUE LIST ─────────────────────────────────────────────────────────── */
-.post-group { border-bottom: 1px solid var(--border); background: var(--bg); }
+/* Lists & Groups */
+.post-group { border-bottom: 1px solid var(--border); margin: 0; background: var(--bg); }
 .post-header {
   display: flex; align-items: center; gap: 12px;
-  padding: 14px 14px; cursor: pointer; user-select: none;
+  padding: 20px 16px; cursor: pointer; user-select: none;
 }
 .post-header:active { background: var(--surface-2); }
 .post-thumb {
-  width: 40px; height: 40px;
-  background: var(--surface-2); flex-shrink: 0;
-  overflow: hidden;
+  width: 48px; height: 48px;
+  background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
 }
-.post-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
 .post-info { flex: 1; min-width: 0; }
-.post-id {
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: 0;
-}
-.post-meta {
-  font-size: 10px;
-  color: var(--text-2);
-  margin-top: 2px;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.post-chevron { width: 16px; height: 16px; color: var(--text-3); transition: transform 0.18s ease; flex-shrink: 0; }
+.post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 600; }
+.post-chevron { width: 20px; height: 20px; color: var(--text); transition: transform 0.2s ease; }
 .post-group.open .post-chevron { transform: rotate(180deg); }
 
-.post-items { display: none; border-top: 1px solid var(--border); background: var(--surface-2); }
-.post-group.open .post-items { display: block; }
+.post-items { display: none; padding: 0 16px 16px; border-top: 1px dashed var(--border); }
+.post-group.open .post-items { display: block; margin-top: 0; padding-top: 16px; background: var(--surface-2); }
 
 .item-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: transform 0.1s ease;
 }
-.item-row:active { background: var(--surface); }
-.item-row:last-child { border-bottom: none; }
-.item-thumb { width: 32px; height: 44px; background: var(--surface); flex-shrink: 0; overflow: hidden; }
-.item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.item-row:active { transform: scale(0.98); }
+.item-row:last-child { border-bottom: none; padding-bottom: 0; }
+.item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
 .item-info { flex: 1; min-width: 0; }
-.item-type {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.item-status { font-size: 10px; color: var(--text-2); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
 
-/* ─── HERO ───────────────────────────────────────────────────────────────── */
-.hero { width: 100%; background: var(--surface-2); position: relative; border-bottom: 1px solid var(--border); }
-.hero img { width: 100%; height: 60vh; object-fit: cover; cursor: pointer; background: var(--surface-2); }
-.hero-meta {
-  padding: 10px 14px;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  background: var(--bg);
-  border-top: 1px solid var(--border);
-}
+/* Hero (Review Main Image) */
+.hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
+.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; background: #fff; }
+.hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
 
-/* ─── SECTION & CARDS ────────────────────────────────────────────────────── */
-.section { padding: 0; padding-bottom: calc(90px + env(safe-area-inset-bottom)); background: var(--bg); }
-.section h2 {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  padding: 14px 14px;
-  border-bottom: 1px solid var(--border);
-  margin: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg);
-}
+/* Section & Cards */
+.section { padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); background: var(--bg); }
+.section h2 { font-size: 14px; padding: 20px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
 
-.product-group-title {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  padding: 10px 14px 8px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
+.product-group-title { font-size: 11px; padding: 16px 16px 8px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
 
-/* ─── PRODUCT CARDS ──────────────────────────────────────────────────────── */
 .p-card {
-  padding: 14px;
-  display: flex;
-  gap: 14px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  transition: background 0.1s;
+  padding: 16px; display: flex; gap: 16px; cursor: pointer;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  transition: transform 0.1s ease, opacity 0.2s, filter 0.2s;
 }
-.p-card:active { background: var(--surface-2); }
-.p-card.rejected { opacity: 0.32; filter: grayscale(100%); }
-.p-img {
-  width: 64px; height: 86px;
-  background: var(--surface-2);
-  flex-shrink: 0;
-  position: relative;
-  overflow: hidden;
-}
-.p-img img { width: 100%; height: 100%; object-fit: cover; }
-.p-img .no-img {
-  width: 100%; height: 100%;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-3);
-  font-size: 9px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
-.p-title {
-  font-size: 13px;
-  font-weight: 400;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-.p-brand {
-  font-size: 11px;
-  color: var(--text-2);
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-}
-.p-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.p-card:active { background: var(--surface-2); transform: scale(0.98); }
+.p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
+.p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
+.p-img img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.p-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-brand { font-size: 13px; color: var(--text-2); margin-bottom: 8px; font-weight: 500; }
+.p-status { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-top: 4px; }
 
-/* ─── MODAL / EDITOR ─────────────────────────────────────────────────────── */
+/* Modal / Editor */
 .modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
 .modal.active { display: flex; }
-.modal-header {
-  padding: 0 14px;
-  padding-top: env(safe-area-inset-top);
-  height: calc(48px + env(safe-area-inset-top));
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--bg);
-  flex-shrink: 0;
-}
-.modal-header h2 {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  flex: 1;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-2);
-}
-.modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
-  -webkit-overflow-scrolling: touch;
-}
+.modal-header { padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg); }
+.modal-header h2 { font-size: 14px; flex: 1; text-align: center; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-body { flex: 1; overflow-y: auto; padding: 0; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch;}
 
 /* Video Modal */
 #videoModal { background: #000; z-index: 200; cursor: pointer; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
-/* ─── EDITOR CARDS ───────────────────────────────────────────────────────── */
-.card {
-  padding: 18px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-.card h3 {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  display: block;
-  border-bottom: 1px solid var(--border);
-}
+.card { padding: 24px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.card h3 { font-size: 13px; color: var(--text); margin-bottom: 16px; padding-bottom: 12px; display: block; border-bottom: 1px dashed var(--border); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 700; }
 
 details.card { padding: 0; }
-details.card > summary {
-  padding: 16px 14px;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  cursor: pointer;
-  list-style: none;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-details.card > summary::after { content: '+'; font-size: 14px; font-weight: 300; color: var(--text-3); }
-details[open].card > summary { border-bottom: 1px solid var(--border); color: var(--text); }
+details.card > summary { padding: 24px 16px; font-size: 13px; color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.card > summary::after { content: '+'; font-size: 16px; font-weight: 400; }
+details[open].card > summary { border-bottom: 1px dashed var(--border); }
 details[open].card > summary::after { content: '−'; }
-details.card > .details-content { padding: 14px; }
+details.card > .details-content { padding: 16px; border-top: 1px solid var(--border); }
 
-/* ─── IMAGE CAROUSEL ─────────────────────────────────────────────────────── */
-.carousel {
-  display: flex;
-  overflow-x: auto;
-  gap: 8px;
-  padding-bottom: 0;
-  scroll-snap-type: x mandatory;
-  margin-bottom: 14px;
+/* 3:4 Carousel Images - Taller (75%) */
+.carousel { 
+  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
+  scroll-snap-type: x mandatory; margin-bottom: 16px;
   -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -515,120 +297,78 @@ details.card > .details-content { padding: 14px; }
 }
 .carousel::-webkit-scrollbar { display: none; }
 
-.img-cell {
-  flex: 0 0 72%;
-  aspect-ratio: 3/4;
-  scroll-snap-align: center;
-  position: relative;
-  cursor: pointer;
-  background: var(--surface-2);
-  overflow: hidden;
-  transition: opacity 0.15s;
+.img-cell { 
+  flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
+  position: relative; cursor: pointer; 
+  border: 1px solid var(--border); background: var(--surface-2);
+  transition: border-color 0.15s ease, transform 0.1s ease;
 }
-.img-cell:active { opacity: 0.75; }
-.img-cell img {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  opacity: 0.45;
-  transition: opacity 0.18s;
-}
+.img-cell:active { transform: scale(0.98); }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; background: #fff; }
+.img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
-.img-cell.on { outline: 2px solid var(--text); outline-offset: -2px; }
 
-.img-cell .check {
-  position: absolute; top: 8px; right: 8px;
-  width: 20px; height: 20px;
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.5);
+.img-cell .check { 
+  position: absolute; top: 12px; right: 12px; 
+  width: 24px; height: 24px; border: 1px solid var(--text); background: transparent;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 600; color: transparent;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  font-size: 12px; font-weight: 700; color: transparent;
+  transition: background 0.1s, color 0.1s;
 }
 .img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
-/* ─── EXTRACT ANIMATION ──────────────────────────────────────────────────── */
 @keyframes pulse-extract {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; filter: grayscale(100%); }
+  0% { opacity: 1; }
+  50% { opacity: 0.3; filter: grayscale(100%); }
+  100% { opacity: 1; }
 }
-.extracting { animation: pulse-extract 1.4s infinite ease-in-out; pointer-events: none; }
+.extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
 
-/* ─── FORM FIELDS ────────────────────────────────────────────────────────── */
-.field { margin-bottom: 14px; }
-.field label { display: block; margin-bottom: 6px; }
-.field-row { display: flex; gap: 10px; }
+/* Form fields */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 11px; margin-bottom: 8px; color: var(--text-2); font-weight: 600; text-transform: uppercase; }
+.field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
-/* ─── ACTIONS BAR ────────────────────────────────────────────────────────── */
-.actions-bar {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  padding: 12px 14px;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
-  background: var(--bg);
-  border-top: 1px solid var(--border);
-  display: flex; gap: 8px;
-  z-index: 50;
-}
+/* Actions Bar */
+.actions-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); display: flex; gap: 12px; z-index: 50; }
 .actions-bar button { flex: 1; }
 
-/* ─── EMPTY STATE ────────────────────────────────────────────────────────── */
-.empty {
-  padding: 48px 14px;
-  text-align: center;
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+.empty { padding: 40px 16px; text-align: center; color: var(--text-2); font-size: 13px; font-weight: 600; }
 
-/* ─── LOADING ────────────────────────────────────────────────────────────── */
-.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; gap: 20px; color: var(--text-2); }
-.spinner { width: 24px; height: 24px; border: 1.5px solid var(--border); border-top-color: var(--text-2); border-radius: 50%; animation: spin .7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* Loading & Utils */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;color:var(--text)}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-/* ─── TOAST ──────────────────────────────────────────────────────────────── */
-.toast {
-  position: fixed;
-  top: max(14px, env(safe-area-inset-top));
-  left: 50%;
-  transform: translate(-50%, -120px);
-  background: var(--text);
-  color: var(--bg);
-  padding: 10px 20px;
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  z-index: 300;
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  white-space: nowrap;
-}
+.toast { position: fixed; top: max(16px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px); background: var(--text); color: var(--bg); padding: 14px 24px; font-size: 12px; text-transform: uppercase; z-index: 300; transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 700; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,0.15);}
 .toast.show { transform: translate(-50%, 0); }
 
-/* ─── LAZY IMAGES ────────────────────────────────────────────────────────── */
-.lazy-img { opacity: 0; transition: opacity 0.25s; }
+.lazy-img { opacity: 0; transition: opacity 0.3s ease; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
 
-/* ─── PERFORMANCE ────────────────────────────────────────────────────────── */
-.post-group, .p-card { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+/* Performance: isolate off-screen cards from layout/paint */
+.post-group, .p-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
 
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p style="font-size:10px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-2);">Loading</p></div>
+    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text);">LOADING QUEUE...</p></div>
   </div>
   
   <!-- QUEUE SCREEN -->
   <div id="queue" class="screen">
     <div class="topbar">
-      <h1>Queue</h1>
+      <h1>REVIEW QUEUE</h1>
       <span class="badge" id="qCount">0</span>
-      <button class="theme-toggle" onclick="toggleTheme()">Theme</button>
-      <button class="theme-toggle" onclick="loadQueue()">Refresh</button>
+      <button class="theme-toggle" onclick="toggleTheme()">THEME</button>
+      <button class="btn-ghost" onclick="loadQueue()" style="border:1px solid var(--border); padding:0 10px; font-size:10px; min-height:24px; height:24px;">REFRESH</button>
     </div>
     <div id="qList"></div>
   </div>
@@ -636,30 +376,30 @@ details.card > .details-content { padding: 14px; }
   <!-- REVIEW SCREEN (Item Level) -->
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="theme-toggle" onclick="showQueue()">← Back</button>
-      <h1 id="rTitle" style="text-align:center; color:var(--text-2);"></h1>
-      <div id="rTopRight" style="min-width:60px; text-align:right;"></div>
+      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:8px 12px; font-size:12px;">BACK</button>
+      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
+      <div id="rTopRight" style="width:70px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>Sources <span class="badge" id="pCount">0</span></h2>
+      <h2>SOURCES <span class="badge" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">Discard</button>
-      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">Commit Item</button>
+      <button class="btn-danger" onclick="deleteItem()">DISCARD ITEM</button>
+      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
     </div>
   </div>
 
   <!-- EDITOR MODAL (Source Level) -->
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="theme-toggle" onclick="closeEditor()">Cancel</button>
-      <h2 id="eModalTitle">Edit Source</h2>
-      <button class="btn-primary" onclick="saveSource('completed')" style="padding:0 14px; font-size:10px; min-height:28px; height:28px;">Save</button>
+      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:8px 14px; font-size:12px; min-height:36px;">CANCEL</button>
+      <h2 id="eModalTitle">EDIT SOURCE</h2>
+      <button class="btn-primary" onclick="saveSource('completed')" style="padding:8px 14px; font-size:12px; min-height:36px;">SAVE</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
@@ -700,12 +440,12 @@ function toggleTheme() {
   const current = root.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', newTheme);
-  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#0f0f0e' : '#f8f8f7');
+  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#121212' : '#ffffff');
   localStorage.setItem('theme', newTheme);
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#0f0f0e');
+  document.getElementById('metaThemeColor')?.setAttribute('content', '#121212');
 }
 
 function showScreen(id) {
@@ -931,7 +671,7 @@ function renderQueue() {
   const postIds = Object.keys(state.posts);
   
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">Queue complete<br><span style="font-size:10px; opacity:0.5; display:block; margin-top:6px;">All items reviewed</span></div>';
+    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; opacity:0.5; display:block; margin-top:8px;">All items have been reviewed</span></div>';
     document.getElementById("qCount").textContent = "0";
     return;
   }
@@ -1031,7 +771,7 @@ function renderItem() {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     const watchBtn = document.createElement('button');
     watchBtn.className = 'btn-ghost';
-    watchBtn.setAttribute('style', 'font-size:10px; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-2); border:1px solid var(--border); padding:0 10px; height:24px; min-height:24px; background:transparent;');
+    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:8px 12px; min-height:0; font-size:12px; color:var(--text);');
     watchBtn.textContent = 'WATCH';
     watchBtn.onclick = () => openVideo(proxyUrl);
     rTopRight.innerHTML = '';
@@ -1049,7 +789,7 @@ function renderItem() {
   let listHtml = "";
 
   if (!prods.length) {
-    listHtml = '<div class="empty">No products identified</div>';
+    listHtml = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
   } else {
     prods.forEach((p, pIdx) => {
       listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
@@ -1058,7 +798,7 @@ function renderItem() {
       totalSources += sources.length;
       
       if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px;">No sources found</div>';
+        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
       } else {
         sources.forEach((s, sIdx) => {
           if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
@@ -1244,20 +984,20 @@ function openSource(pIdx, sIdx) {
     let html = \`
       <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
         <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-          Images
-          <span style="color:var(--text-3); font-weight:400; text-transform:none; font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
-            <span id="selCount">\${state.currentSelected.length}</span> selected
+          IMAGES 
+          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:12px;">
+            <span id="selCount">\${state.currentSelected.length}</span> SELECTED
           </span>
         </h3>
         <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:8px; margin-bottom:14px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Paste URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--danger);">Clear</button>
+        <div style="display:flex; gap:8px; margin-bottom:16px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ PASTE IMAGE URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px dashed var(--border); min-height:48px; color:var(--danger);">CLEAR SELECTION</button>
         </div>
       </div>
       
       <div class="card">
-        <h3>Basic Info</h3>
+        <h3>BASIC INFO</h3>
         <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
         
         <div class="field-row">
@@ -1318,11 +1058,11 @@ function openSource(pIdx, sIdx) {
           <label>Supplier URL</label>
           <div style="display:flex; gap:8px;">
             <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 12px; display:flex; align-items:center; justify-content:center; font-size:10px; text-decoration:none; color:var(--text-2); white-space:nowrap; min-height:40px; flex-shrink:0; letter-spacing:0.05em; text-transform:uppercase;">Visit</a>\` : ''}
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:12px; text-decoration:none;">VISIT</a>\` : ''}
           </div>
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);" onclick="extractImages('lazy')">Extract (Quick)</button>
-            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);" onclick="extractImages('full')">Extract (Full)</button>
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:11px; min-height:48px; padding:0; background:var(--surface-2); border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
           </div>
         </div>
 
@@ -1368,33 +1108,33 @@ function openSource(pIdx, sIdx) {
       </div>
       
       <details class="card">
-        <summary>Variants</summary>
+        <summary>VARIANTS</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px solid var(--border); margin-top:8px; min-height:36px; font-size:10px; color:var(--text-2);">+ Add Size</button>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px dashed var(--border); margin-top:8px; min-height:48px;">+ ADD SIZE</button>
         </div>
       </details>
 
       <details class="card">
-        <summary>Size Guide</summary>
+        <summary>SIZE GUIDE</summary>
         <div class="details-content">
           <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
           <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Row</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Col</button>
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD ROW</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px dashed var(--border); min-height:48px;">+ ADD COL</button>
           </div>
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">AI Prompt</button>
-            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--success);">Paste JSON</button>
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px;">AI PROMPT</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:48px; font-size:11px; color:var(--success);">PASTE JSON</button>
           </div>
-          <div style="font-size:10px; color:var(--text-3); margin-top:10px; line-height:1.6; text-transform:uppercase; letter-spacing:0.04em;">
-            Copy AI prompt → run in any AI with web search → paste JSON result here
+          <div style="font-size:11px; color:var(--text-2); margin-top:8px; line-height:1.5;">
+            Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
           </div>
         </div>
       </details>
 
       <details class="card">
-        <summary>Details & Policies</summary>
+        <summary>DETAILS & POLICIES</summary>
         <div class="details-content">
           <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
           <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
@@ -1404,10 +1144,10 @@ function openSource(pIdx, sIdx) {
       </details>
 
       <details class="card">
-        <summary>Dropship Pricing</summary>
+        <summary>DROPSHIP PRICING</summary>
         <div class="details-content">
-          <div style="background:var(--surface-2); padding:12px; margin-bottom:14px; border:1px solid var(--border);">
-            <div style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-2); margin-bottom:8px;">Context</div>
+          <div style="background:var(--surface-2); padding:12px; margin-bottom:16px; border:1px solid var(--border);">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-2); margin-bottom:8px;">DROPSHIP CONTEXT</div>
             <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
             <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
               <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
@@ -1448,13 +1188,13 @@ function openSource(pIdx, sIdx) {
       </details>
 
       <div class="card" style="border-bottom:none;">
-        <h3>Actions</h3>
-        <div style="display:flex; gap:8px; margin-bottom:10px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:40px; font-size:10px;">Delete Source</button>
+        <h3>ACTIONS</h3>
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:48px;">DELETE SOURCE</button>
         </div>
-        <div style="display:flex; gap:8px;">
-          <button class="btn-danger" onclick="rejectSource()" style="flex:1; min-height:44px;">Reject</button>
-          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1; min-height:44px;">Save</button>
+        <div style="display:flex; gap:12px">
+          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
+          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
         </div>
       </div>
     \`;
@@ -1557,8 +1297,8 @@ async function extractImages(mode) {
   const btnFull = document.getElementById("btnExtractFull");
 
   if (carousel) carousel.classList.add("extracting");
-  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "Extracting..."; }
-  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "Extracting..."; }
+  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "EXTRACTING..."; }
+  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "EXTRACTING..."; }
   
   try {
     const r = await fetch("/api/extract", {
@@ -1593,8 +1333,8 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "Extract (Quick)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "Extract (Full)"; }
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
   }
 }
 
@@ -1932,7 +1672,7 @@ async function saveSource(status = "completed") {
   };
 
   const saveBtn = document.querySelector('.modal-header .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
   try {
     const body = {
       docId: state.current._id,
@@ -1957,7 +1697,7 @@ async function saveSource(status = "completed") {
   } catch(e) {
     toast("ERROR: " + e.message);
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
   }
 }
 
