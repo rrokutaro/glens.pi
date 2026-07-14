@@ -217,7 +217,7 @@ a:active { opacity: 0.7; }
   width: 48px; height: 48px;
   background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border);
 }
-.post-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .post-info { flex: 1; min-width: 0; }
 .post-id { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .post-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 600; }
@@ -235,13 +235,13 @@ a:active { opacity: 0.7; }
 .item-row:active { transform: scale(0.98); }
 .item-row:last-child { border-bottom: none; padding-bottom: 0; }
 .item-thumb { width: 40px; height: 56px; background: var(--bg); border: 1px solid var(--border); flex-shrink: 0; }
-.item-thumb img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.item-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .item-info { flex: 1; min-width: 0; }
 .item-status { font-size: 10px; color: var(--text-2); margin-top: 4px; font-weight: 700; text-transform: uppercase; }
 
 /* Hero (Review Main Image) */
 .hero { width: 100%; border-bottom: 1px solid var(--border); background: var(--surface-2); position: relative; }
-.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; background: #fff; }
+.hero img { width: 100%; height: 65vh; object-fit: cover; cursor: pointer; transition: object-fit 0.1s; }
 .hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--border); }
 
 /* Section & Cards */
@@ -258,7 +258,7 @@ a:active { opacity: 0.7; }
 .p-card:active { background: var(--surface-2); transform: scale(0.98); }
 .p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
 .p-img { width: 80px; height: 106px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
-.p-img img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.p-img img { width: 100%; height: 100%; object-fit: cover; }
 .p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .p-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -304,7 +304,7 @@ details.card > .details-content { padding: 16px; border-top: 1px solid var(--bor
   transition: border-color 0.15s ease, transform 0.1s ease;
 }
 .img-cell:active { transform: scale(0.98); }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; background: #fff; }
+.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.2s ease; }
 .img-cell.on { border-color: transparent; box-shadow: inset 0 0 0 2px var(--text); }
 .img-cell.on img { opacity: 1; }
 
