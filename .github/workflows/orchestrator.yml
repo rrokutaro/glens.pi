@@ -261,6 +261,10 @@ jobs:
           ORCH_AUDIT_ENABLED: ${{ github.event.inputs.audit_enabled || github.event.client_payload.audit_enabled || 'true' }}
           ORCH_AUDIT_LIMIT: ${{ github.event.inputs.audit_limit || github.event.client_payload.audit_limit || '40' }}
           ORCH_AUDIT_SAVE_CHANGES: ${{ github.event.inputs.audit_save_changes || github.event.client_payload.audit_save_changes || 'false' }}
+          ORCH_GLENS_TRIGGER_ENABLED: ${{ github.event.inputs.glens_trigger_enabled || github.event.client_payload.glens_trigger_enabled || 'true' }}
+          ORCH_GLENS_INSTANCES: ${{ github.event.inputs.glens_instances || github.event.client_payload.glens_instances || '10' }}
+          ORCH_GLENS_MONGODB_LIMIT: ${{ github.event.inputs.glens_mongodb_limit || github.event.client_payload.glens_mongodb_limit || '15' }}
+          ORCH_GITHUB_TOKEN: ${{ secrets.ORCHESTRATOR_GITHUB_TOKEN || '' }}
           ORCH_RUN_ID: ${{ github.run_id }}
         run: node orchestrator.js
 
