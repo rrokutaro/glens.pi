@@ -9,7 +9,6 @@
  *
  * FINAL PRODUCTION v2.3.0 - Mobile Table overflow, Collapsible sections,
  * Direct Clipboard URL pasting, Scoped rejections, Robust state mapping.
- * UI/UX Updated: Minimalist, Sharp Corners, Clean Whitespace, Refined Dark Mode.
  */
 
 import http from 'http';
@@ -47,7 +46,7 @@ function log(level, ...args) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTML UI (Minimalist / Clean Dark Mode / Sharp Corners)                     */
+/* HTML UI (Premium Native Aesthetic + Dark Mode + UX Polish)                 */
 /* -------------------------------------------------------------------------- */
 const REVIEW_UI_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -56,234 +55,459 @@ const REVIEW_UI_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#f7f7f7" id="metaThemeColor">
+<meta name="theme-color" content="#f8f8f7" id="metaThemeColor">
 <title>DropShip Review • v2.3</title>
 <style>
-*,*::before,*::after{
-  box-sizing:border-box;
-  margin:0;
-  padding:0;
-  -webkit-tap-highlight-color:transparent;
-  border-radius: 0 !important; /* Enforce sharp corners everywhere */
-}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 
+/* ─── TOKENS ─────────────────────────────────────────────────────────────── */
 :root {
-  --bg: #f7f7f7;
-  --surface: #ffffff;
-  --surface-2: #f2f2f2;
-  --border: #e2e2e2;
-  --text: #111111;
-  --text-2: #666666;
-  --focus: #111111;
-  --danger: #d93025;
-  --success: #1e8e3e;
-  --warning: #f29900;
+  --bg:        #f8f8f7;
+  --surface:   #ffffff;
+  --surface-2: #efefed;
+  --border:    #e0dedd;
+  --text:      #111110;
+  --text-2:    #8a8a86;
+  --text-3:    #b8b8b4;
+  --danger:    #c0392b;
+  --success:   #2e7d32;
+  --warning:   #a07800;
 }
 :root[data-theme="dark"] {
-  --bg: #161616;
-  --surface: #1e1e1e;
-  --surface-2: #242424;
-  --border: #2c2c2c;
-  --text: #e5e5e5;
-  --text-2: #8a8a8a;
-  --focus: #ffffff;
-  --danger: #e25c5c;
-  --success: #5cb87a;
-  --warning: #d9a036;
+  --bg:        #0f0f0e;
+  --surface:   #161615;
+  --surface-2: #1e1e1c;
+  --border:    #2a2a28;
+  --text:      #e8e8e5;
+  --text-2:    #6a6a66;
+  --text-3:    #3a3a38;
+  --danger:    #e05c52;
+  --success:   #4caf50;
+  --warning:   #d4a017;
 }
 
+/* ─── BASE ───────────────────────────────────────────────────────────────── */
 body {
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.45;
   min-height: 100dvh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  letter-spacing: -0.01em;
 }
 
-/* Typography Overrides */
-h1, h2, h3, .product-group-title {
+img { max-width: 100%; display: block; }
+a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+a:active { opacity: 0.6; }
+
+/* ─── TYPOGRAPHY ─────────────────────────────────────────────────────────── */
+h1, h2, h3 {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+label {
+  font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
 }
-h1 { font-size: 13px; }
-h2 { font-size: 11px; color: var(--text-2); }
-h3 { font-size: 11px; color: var(--text-2); }
-.empty { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); text-align: center; padding: 40px 16px; }
+.mono {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+}
 
-/* Controls */
+/* ─── CONTROLS ───────────────────────────────────────────────────────────── */
 button {
   cursor: pointer;
   border: 1px solid var(--border);
-  padding: 14px 16px;
+  border-radius: 0;
+  padding: 10px 14px;
   font-size: 11px;
-  background: transparent;
-  color: var(--text);
-  min-height: 44px;
-  font-family: inherit;
   font-weight: 500;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 40px;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: opacity 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+button:active { opacity: 0.55; }
+button:disabled { opacity: 0.28 !important; cursor: not-allowed; transform: none !important; }
+
+.btn-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+  font-weight: 600;
+}
+.btn-primary:active { opacity: 0.75; }
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--border);
+}
+.btn-ghost {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  padding: 0;
+  min-height: 0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition: all 0.15s ease;
+  font-size: 11px;
 }
-button:hover { background: var(--surface-2); }
-button:active { opacity: 0.6; }
-button:disabled { opacity: 0.3 !important; cursor: not-allowed; border-color: var(--border); background: transparent; }
-
-.btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
-.btn-primary:hover { background: var(--text); opacity: 0.9; }
-.btn-danger { color: var(--danger); border-color: var(--border); }
-.btn-danger:hover { background: rgba(217, 48, 37, 0.05); border-color: var(--danger); }
-.btn-ghost { border-color: transparent; padding: 0; min-height: 0; }
-.btn-ghost:hover { background: transparent; opacity: 0.7; }
+.btn-ghost:active { opacity: 0.45; }
 
 input, select, textarea {
-  background: transparent;
+  background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 12px;
+  padding: 10px 12px;
+  border-radius: 0;
   font-size: 13px;
   font-family: inherit;
   width: 100%;
   -webkit-appearance: none;
-  transition: border-color 0.2s ease;
+  letter-spacing: -0.01em;
 }
-input::placeholder, textarea::placeholder { color: var(--text-2); opacity: 0.5; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text); }
-textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--text-2);
+  background: var(--surface);
+}
+textarea { resize: vertical; min-height: 88px; line-height: 1.5; }
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8a8a'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236a6a66' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
-  padding-right: 32px;
+  padding-right: 28px;
 }
 
-/* Tables */
-.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 12px; }
-.simple-table { min-width: 500px; width: 100%; border-collapse: collapse; font-size: 13px; }
-.simple-table th { padding: 12px 8px; font-size: 10px; color: var(--text-2); text-transform: uppercase; font-weight: 500; letter-spacing: 0.05em; text-align: left; border-bottom: 1px solid var(--border); }
+/* ─── TABLES ─────────────────────────────────────────────────────────────── */
+.simple-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; margin-top: 8px; }
+.simple-table { min-width: 480px; width: 100%; border-collapse: collapse; font-size: 12px; }
+.simple-table th {
+  background: var(--surface-2);
+  padding: 8px 8px;
+  font-size: 10px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
 .simple-table td { border-bottom: 1px solid var(--border); padding: 0; }
-.simple-table input, .simple-table select { border: none; min-height: 48px; padding: 12px 8px; width: 100%; }
-.table-btn { width: 48px; min-height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--danger); font-size: 16px; border: none; }
-.table-btn:hover { background: transparent; }
+.simple-table tr:last-child td { border-bottom: none; }
+.simple-table input, .simple-table select {
+  border: none;
+  min-height: 40px;
+  padding: 8px 8px;
+  font-size: 12px;
+  width: 100%;
+  background: transparent;
+}
+.simple-table input:focus, .simple-table select:focus { box-shadow: inset 0 0 0 1px var(--text-2); }
+.table-btn { width: 40px; min-height: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); border: none; background: transparent; font-size: 16px; transition: color 0.12s; }
+.table-btn:hover { color: var(--danger); }
 
-img { max-width: 100%; display: block; }
-a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--text); font-weight: 500; transition: opacity 0.2s; }
-a:active, a:hover { opacity: 0.6; }
-
-/* Layout Screens - Inner Edge Spacing Added */
-.screen { display: none; padding: 12px; padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+/* ─── SCREEN LAYOUT ──────────────────────────────────────────────────────── */
+.screen { display: none; min-height: 100dvh; padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
 .screen.active { display: block; }
 
+/* ─── TOPBAR ─────────────────────────────────────────────────────────────── */
 .topbar {
-  position: sticky; top: 12px; z-index: 50;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 12px 16px;
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 24px;
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+  padding-top: env(safe-area-inset-top);
+  height: calc(48px + env(safe-area-inset-top));
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.topbar h1 { flex: 1; text-align: left; }
+.topbar h1 {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+  flex: 1;
+}
 
+/* ─── BADGE ──────────────────────────────────────────────────────────────── */
 .badge {
-  font-size: 9px;
-  padding: 0 6px;
+  font-size: 10px;
+  padding: 0 7px;
   height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--text);
-  color: var(--bg);
-  background: var(--text);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface-2);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
 }
-.badge.pending, .badge.src-status { color: var(--text); background: transparent; border-color: var(--border); }
-.badge.partial { background: transparent; color: var(--text); border: 1px dashed var(--border); }
+.badge.pending { color: var(--warning); border-color: var(--warning); background: transparent; }
+.badge.src-status { color: var(--text-2); background: transparent; border-color: var(--border); }
+.badge.partial { color: var(--text-2); background: transparent; border-color: var(--border); }
 
-/* Lists & Groups */
-.post-group { border: 1px solid var(--border); margin-bottom: 12px; background: var(--surface); }
+/* ─── THEME TOGGLE ───────────────────────────────────────────────────────── */
+.theme-toggle {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 0 8px;
+  height: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: transparent;
+  text-transform: uppercase;
+}
+
+/* ─── QUEUE LIST ─────────────────────────────────────────────────────────── */
+.post-group { border-bottom: 1px solid var(--border); background: var(--bg); }
 .post-header {
-  display: flex; align-items: center; gap: 16px;
-  padding: 16px; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 14px; cursor: pointer; user-select: none;
 }
 .post-header:active { background: var(--surface-2); }
-.post-thumb { width: 44px; height: 44px; background: var(--surface-2); flex-shrink: 0; border: 1px solid var(--border); }
+.post-thumb {
+  width: 40px; height: 40px;
+  background: var(--surface-2); flex-shrink: 0;
+  overflow: hidden;
+}
 .post-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .post-info { flex: 1; min-width: 0; }
-.post-id { font-size: 13px; font-weight: 500; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.post-meta { font-size: 11px; color: var(--text-2); margin-top: 4px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.05em; }
-.post-chevron { width: 16px; height: 16px; color: var(--text-2); transition: transform 0.2s ease; }
+.post-id {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.post-meta {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 2px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.post-chevron { width: 16px; height: 16px; color: var(--text-3); transition: transform 0.18s ease; flex-shrink: 0; }
 .post-group.open .post-chevron { transform: rotate(180deg); }
 
-.post-items { display: none; padding: 0 16px 16px; border-top: 1px dashed var(--border); }
-.post-group.open .post-items { display: block; margin-top: 0; padding-top: 16px; }
+.post-items { display: none; border-top: 1px solid var(--border); background: var(--surface-2); }
+.post-group.open .post-items { display: block; }
 
-.item-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity 0.1s; }
-.item-row:active { opacity: 0.6; }
-.item-row:last-child { border-bottom: none; padding-bottom: 0; }
-.item-thumb { width: 40px; height: 56px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; }
+.item-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.item-row:active { background: var(--surface); }
+.item-row:last-child { border-bottom: none; }
+.item-thumb { width: 32px; height: 44px; background: var(--surface); flex-shrink: 0; overflow: hidden; }
 .item-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .item-info { flex: 1; min-width: 0; }
-.item-type { font-size: 11px; font-weight: 500; letter-spacing: 0.05em; }
-.item-status { font-size: 9px; color: var(--text-2); margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.item-type {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.item-status { font-size: 10px; color: var(--text-2); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
 
-/* Hero (Review Main Image) */
-.hero { width: 100%; border: 1px solid var(--border); background: var(--surface); margin-bottom: 24px; position: relative; }
-.hero img { width: 100%; height: 60vh; object-fit: cover; cursor: pointer; transition: object-fit 0.2s; }
-.hero-meta { padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+/* ─── HERO ───────────────────────────────────────────────────────────────── */
+.hero { width: 100%; background: var(--surface-2); position: relative; border-bottom: 1px solid var(--border); }
+.hero img { width: 100%; height: 60vh; object-fit: cover; cursor: pointer; background: var(--surface-2); }
+.hero-meta {
+  padding: 10px 14px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
 
-/* Section & Cards */
-.section { padding: 0; margin-bottom: 24px; }
-.section h2 { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+/* ─── SECTION & CARDS ────────────────────────────────────────────────────── */
+.section { padding: 0; padding-bottom: calc(90px + env(safe-area-inset-bottom)); background: var(--bg); }
+.section h2 {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+}
 
-.product-group-title { font-size: 10px; color: var(--text-2); margin: 24px 0 12px; padding-bottom: 4px; border-bottom: 1px dashed var(--border); }
+.product-group-title {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 10px 14px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
 
+/* ─── PRODUCT CARDS ──────────────────────────────────────────────────────── */
 .p-card {
-  padding: 16px; display: flex; gap: 16px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--surface); margin-bottom: 8px;
-  transition: opacity 0.2s, filter 0.2s;
+  padding: 14px;
+  display: flex;
+  gap: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  transition: background 0.1s;
 }
 .p-card:active { background: var(--surface-2); }
-.p-card.rejected { opacity: 0.4; filter: grayscale(100%); }
-.p-img { width: 72px; height: 96px; background: var(--surface-2); border: 1px solid var(--border); flex-shrink: 0; position: relative;}
+.p-card.rejected { opacity: 0.32; filter: grayscale(100%); }
+.p-img {
+  width: 64px; height: 86px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
 .p-img img { width: 100%; height: 100%; object-fit: cover; }
-.p-img .no-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 9px; font-weight: 500; text-transform: uppercase; }
-.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
-.p-title { font-size: 14px; font-weight: 500; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.p-brand { font-size: 12px; color: var(--text-2); margin-bottom: 10px; font-weight: 400; letter-spacing: 0.02em; }
-.p-status { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 500; text-transform: uppercase; margin-top: 4px; }
+.p-img .no-img {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.p-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.p-title {
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.p-brand {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.p-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
 
-/* Modal / Editor */
-.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; padding: 12px; }
+/* ─── MODAL / EDITOR ─────────────────────────────────────────────────────── */
+.modal { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: none; flex-direction: column; }
 .modal.active { display: flex; }
-.modal-header { padding: 12px 16px; border: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.modal-header h2 { font-size: 13px; flex: 1; text-align: center; color: var(--text); }
-.modal-body { flex: 1; overflow-y: auto; padding-bottom: calc(100px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+.modal-header {
+  padding: 0 14px;
+  padding-top: env(safe-area-inset-top);
+  height: calc(48px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.modal-header h2 {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
 
 /* Video Modal */
-#videoModal { padding: 0; background: #000; z-index: 200; cursor: pointer; }
+#videoModal { background: #000; z-index: 200; cursor: pointer; }
 #vPlayer { width: 100%; height: 100%; object-fit: contain; }
 
-.card { padding: 24px 16px; border: 1px solid var(--border); background: var(--surface); margin-bottom: 12px; }
-.card h3 { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+/* ─── EDITOR CARDS ───────────────────────────────────────────────────────── */
+.card {
+  padding: 18px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.card h3 {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  display: block;
+  border-bottom: 1px solid var(--border);
+}
 
 details.card { padding: 0; }
-details.card > summary { padding: 20px 16px; font-size: 11px; color: var(--text); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
-details.card > summary::after { content: '+'; font-size: 16px; font-weight: 400; color: var(--text-2); }
-details[open].card > summary { border-bottom: 1px solid var(--border); }
+details.card > summary {
+  padding: 16px 14px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+details.card > summary::after { content: '+'; font-size: 14px; font-weight: 300; color: var(--text-3); }
+details[open].card > summary { border-bottom: 1px solid var(--border); color: var(--text); }
 details[open].card > summary::after { content: '−'; }
-details.card > .details-content { padding: 20px 16px; }
+details.card > .details-content { padding: 14px; }
 
-/* 3:4 Carousel Images - Taller (75%) */
-.carousel { 
-  display: flex; overflow-x: auto; gap: 12px; padding-bottom: 0px; 
-  scroll-snap-type: x mandatory; margin-bottom: 16px;
+/* ─── IMAGE CAROUSEL ─────────────────────────────────────────────────────── */
+.carousel {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  padding-bottom: 0;
+  scroll-snap-type: x mandatory;
+  margin-bottom: 14px;
   -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -291,79 +515,120 @@ details.card > .details-content { padding: 20px 16px; }
 }
 .carousel::-webkit-scrollbar { display: none; }
 
-.img-cell { 
-  flex: 0 0 75%; aspect-ratio: 3/4; scroll-snap-align: center; 
-  position: relative; cursor: pointer; 
-  border: 1px solid var(--border); background: var(--surface-2);
-  transition: border-color 0.15s ease;
+.img-cell {
+  flex: 0 0 72%;
+  aspect-ratio: 3/4;
+  scroll-snap-align: center;
+  position: relative;
+  cursor: pointer;
+  background: var(--surface-2);
+  overflow: hidden;
+  transition: opacity 0.15s;
 }
-.img-cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; transition: opacity 0.2s ease; }
-.img-cell.on { border-color: var(--text); }
+.img-cell:active { opacity: 0.75; }
+.img-cell img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0.45;
+  transition: opacity 0.18s;
+}
 .img-cell.on img { opacity: 1; }
+.img-cell.on { outline: 2px solid var(--text); outline-offset: -2px; }
 
-.img-cell .check { 
-  position: absolute; top: 12px; right: 12px; 
-  width: 20px; height: 20px; border: 1px solid var(--text); background: transparent;
+.img-cell .check {
+  position: absolute; top: 8px; right: 8px;
+  width: 20px; height: 20px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.5);
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 500; color: transparent;
+  font-size: 10px; font-weight: 600; color: transparent;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.img-cell.on .check { background: var(--text); color: var(--bg); }
+.img-cell.on .check { background: var(--text); border-color: var(--text); color: var(--bg); }
 
+/* ─── EXTRACT ANIMATION ──────────────────────────────────────────────────── */
 @keyframes pulse-extract {
-  0% { opacity: 1; }
-  50% { opacity: 0.3; filter: grayscale(100%); }
-  100% { opacity: 1; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; filter: grayscale(100%); }
 }
-.extracting { animation: pulse-extract 1.5s infinite ease-in-out; pointer-events: none; }
+.extracting { animation: pulse-extract 1.4s infinite ease-in-out; pointer-events: none; }
 
-/* Form fields */
-.field { margin-bottom: 20px; }
-.field label { display: block; font-size: 10px; margin-bottom: 8px; color: var(--text-2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
-.field-row { display: flex; gap: 16px; }
+/* ─── FORM FIELDS ────────────────────────────────────────────────────────── */
+.field { margin-bottom: 14px; }
+.field label { display: block; margin-bottom: 6px; }
+.field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
 
-/* Floating Actions Bar */
-.actions-bar { 
-  position: fixed; 
-  bottom: 12px; 
-  left: 12px; 
-  right: 12px; 
-  padding: 12px; 
-  background: var(--surface); 
-  border: 1px solid var(--border); 
-  display: flex; gap: 12px; z-index: 50; 
-  margin-bottom: env(safe-area-inset-bottom);
+/* ─── ACTIONS BAR ────────────────────────────────────────────────────────── */
+.actions-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 12px 14px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  display: flex; gap: 8px;
+  z-index: 50;
 }
 .actions-bar button { flex: 1; }
 
-/* Loading & Utils */
-.loading { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100dvh; gap:24px; color:var(--text); }
-.spinner { width:24px; height:24px; border:1px solid var(--border); border-top-color:var(--text); border-radius:50% !important; animation:spin .8s linear infinite; }
-@keyframes spin { to { transform:rotate(360deg) } }
+/* ─── EMPTY STATE ────────────────────────────────────────────────────────── */
+.empty {
+  padding: 48px 14px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 
-.toast { position: fixed; top: max(24px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -150px); background: var(--text); color: var(--surface); padding: 12px 20px; font-size: 11px; text-transform: uppercase; z-index: 300; transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); border: 1px solid var(--text); font-weight: 500; letter-spacing: 0.05em; white-space: nowrap; }
+/* ─── LOADING ────────────────────────────────────────────────────────────── */
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; gap: 20px; color: var(--text-2); }
+.spinner { width: 24px; height: 24px; border: 1.5px solid var(--border); border-top-color: var(--text-2); border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── TOAST ──────────────────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translate(-50%, -120px);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 20px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  z-index: 300;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
 .toast.show { transform: translate(-50%, 0); }
 
-.lazy-img { opacity: 0; transition: opacity 0.3s ease; }
+/* ─── LAZY IMAGES ────────────────────────────────────────────────────────── */
+.lazy-img { opacity: 0; transition: opacity 0.25s; }
 .lazy-img.loaded { opacity: 1; }
 .placeholder { background: var(--surface-2); }
 
-.post-group, .p-card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
+/* ─── PERFORMANCE ────────────────────────────────────────────────────────── */
+.post-group, .p-card { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+
 </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="screen active">
-    <div class="loading"><div class="spinner"></div><p class="empty" style="color:var(--text-2);">LOADING QUEUE</p></div>
+    <div class="loading"><div class="spinner"></div><p style="font-size:10px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-2);">Loading</p></div>
   </div>
   
   <!-- QUEUE SCREEN -->
   <div id="queue" class="screen">
     <div class="topbar">
-      <h1>REVIEW QUEUE</h1>
+      <h1>Queue</h1>
       <span class="badge" id="qCount">0</span>
-      <button class="btn-ghost" onclick="toggleTheme()" style="font-size:10px; letter-spacing:0.05em; color:var(--text-2); margin-left:auto; border:1px solid var(--border); padding:6px 10px; min-height:0;">THEME</button>
-      <button class="btn-ghost" onclick="loadQueue()" style="font-size:10px; letter-spacing:0.05em; border:1px solid var(--border); padding:6px 10px; min-height:0;">REFRESH</button>
+      <button class="theme-toggle" onclick="toggleTheme()">Theme</button>
+      <button class="theme-toggle" onclick="loadQueue()">Refresh</button>
     </div>
     <div id="qList"></div>
   </div>
@@ -371,38 +636,38 @@ details.card > .details-content { padding: 20px 16px; }
   <!-- REVIEW SCREEN (Item Level) -->
   <div id="review" class="screen">
     <div class="topbar">
-      <button class="btn-ghost" onclick="showQueue()" style="border:1px solid var(--border); padding:6px 12px; font-size:10px; min-height:0;">BACK</button>
-      <h1 id="rTitle" style="text-align:center;">ITEM</h1>
-      <div id="rTopRight" style="width:60px; text-align:right;"></div>
+      <button class="theme-toggle" onclick="showQueue()">← Back</button>
+      <h1 id="rTitle" style="text-align:center; color:var(--text-2);"></h1>
+      <div id="rTopRight" style="min-width:60px; text-align:right;"></div>
     </div>
     <div class="hero">
       <img id="rImage" src="" alt="" loading="lazy" onclick="this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain'">
       <div class="hero-meta" id="rMeta"></div>
     </div>
     <div class="section">
-      <h2>SOURCES <span class="badge" id="pCount" style="margin-left:8px;">0</span></h2>
+      <h2>Sources <span class="badge" id="pCount">0</span></h2>
       <div id="pList"></div>
     </div>
     <div class="actions-bar">
-      <button class="btn-danger" onclick="deleteItem()">DISCARD</button>
-      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">COMMIT ITEM</button>
+      <button class="btn-danger" onclick="deleteItem()">Discard</button>
+      <button class="btn-primary" id="btnCommitItem" onclick="commitItem()">Commit Item</button>
     </div>
   </div>
 
   <!-- EDITOR MODAL (Source Level) -->
   <div id="editor" class="modal">
     <div class="modal-header">
-      <button class="btn-ghost" onclick="closeEditor()" style="border:1px solid var(--border); padding:6px 12px; font-size:10px; min-height:0;">CANCEL</button>
-      <h2 id="eModalTitle">EDIT SOURCE</h2>
-      <button class="btn-primary" onclick="saveSource('completed')" style="padding:6px 12px; font-size:10px; min-height:0;">SAVE</button>
+      <button class="theme-toggle" onclick="closeEditor()">Cancel</button>
+      <h2 id="eModalTitle">Edit Source</h2>
+      <button class="btn-primary" onclick="saveSource('completed')" style="padding:0 14px; font-size:10px; min-height:28px; height:28px;">Save</button>
     </div>
     <div class="modal-body" id="eBody"></div>
   </div>
   
   <!-- Fullscreen Video Modal -->
-  <div id="videoModal" class="modal" onclick="if(event.target === this) closeVideo()">
-    <div style="position:absolute; top:max(24px, env(safe-area-inset-top)); right:24px; z-index:210;">
-      <button class="btn-ghost" onclick="closeVideo()" style="background:var(--surface); color:var(--text); border:1px solid var(--border); width:40px; height:40px; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
+  <div id="videoModal" class="modal" style="background:#000;" onclick="if(event.target === this) closeVideo()">
+    <div style="position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px; z-index:210;">
+      <button class="btn-ghost" onclick="closeVideo()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0;">X</button>
     </div>
     <div style="flex:1; display:flex; align-items:center; justify-content:center; height:100dvh; pointer-events:none;">
       <video id="vPlayer" controls playsinline style="max-width:100%; max-height:100%; outline:none; pointer-events:auto;"></video>
@@ -435,12 +700,12 @@ function toggleTheme() {
   const current = root.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', newTheme);
-  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#161616' : '#f7f7f7');
+  document.getElementById('metaThemeColor').setAttribute('content', newTheme === 'dark' ? '#0f0f0e' : '#f8f8f7');
   localStorage.setItem('theme', newTheme);
 }
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.setAttribute('data-theme', 'dark');
-  document.getElementById('metaThemeColor')?.setAttribute('content', '#161616');
+  document.getElementById('metaThemeColor')?.setAttribute('content', '#0f0f0e');
 }
 
 function showScreen(id) {
@@ -666,7 +931,7 @@ function renderQueue() {
   const postIds = Object.keys(state.posts);
   
   if (!postIds.length) {
-    list.innerHTML = '<div class="empty">QUEUE COMPLETE<br><span style="font-size:11px; font-weight:400; text-transform:none; opacity:0.5; display:block; margin-top:8px;">All items have been reviewed</span></div>';
+    list.innerHTML = '<div class="empty">Queue complete<br><span style="font-size:10px; opacity:0.5; display:block; margin-top:6px;">All items reviewed</span></div>';
     document.getElementById("qCount").textContent = "0";
     return;
   }
@@ -688,7 +953,7 @@ function renderQueue() {
             <div class="post-id">\${escapeHtml(pid)}</div>
             <div class="post-meta">\${items.length} ITEM(S) &middot; \${pending} PENDING</div>
           </div>
-          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9l6 6 6-6"/></svg>
+          <svg class="post-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <div class="post-items" onclick="event.stopPropagation()">
           \${items.map(it => \`
@@ -760,13 +1025,13 @@ function renderItem() {
     igLink = 'https://www.instagram.com/p/' + item.postId + '/';
   }
   
-  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank" style="border-bottom:none;">\${escapeHtml(item.postId)}</a>\`;
+  rTitle.innerHTML = \`<a href="\${escapeHtml(igLink)}" target="_blank">\${escapeHtml(item.postId)}</a>\`;
   
   if (item.type === 'frame' && item.parentUrl) {
     const proxyUrl = "/api/video?url=" + encodeURIComponent(item.parentUrl);
     const watchBtn = document.createElement('button');
     watchBtn.className = 'btn-ghost';
-    watchBtn.setAttribute('style', 'border:1px solid var(--border); padding:6px 12px; min-height:0; font-size:10px;');
+    watchBtn.setAttribute('style', 'font-size:10px; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-2); border:1px solid var(--border); padding:0 10px; height:24px; min-height:24px; background:transparent;');
     watchBtn.textContent = 'WATCH';
     watchBtn.onclick = () => openVideo(proxyUrl);
     rTopRight.innerHTML = '';
@@ -784,7 +1049,7 @@ function renderItem() {
   let listHtml = "";
 
   if (!prods.length) {
-    listHtml = '<div class="empty">NO PRODUCTS IDENTIFIED</div>';
+    listHtml = '<div class="empty">No products identified</div>';
   } else {
     prods.forEach((p, pIdx) => {
       listHtml += \`<div class="product-group-title">\${escapeHtml(p.title || 'UNKNOWN PRODUCT')}</div>\`;
@@ -793,7 +1058,7 @@ function renderItem() {
       totalSources += sources.length;
       
       if (!sources.length) {
-        listHtml += '<div class="empty" style="padding:16px;">NO SOURCES FOUND</div>';
+        listHtml += '<div class="empty" style="padding:16px;">No sources found</div>';
       } else {
         sources.forEach((s, sIdx) => {
           if (s.reviewStatus !== "completed" && s.reviewStatus !== "rejected") pendingSources++;
@@ -802,6 +1067,7 @@ function renderItem() {
           let rejectedClass = "";
           let statusBadge = "";
 
+          // All indicator badges on the listing page remain a uniform grey color for a clean UI
           if (s.reviewStatus === "rejected") {
             statusColor = "var(--text-2)";
             rejectedClass = "rejected";
@@ -976,22 +1242,22 @@ function openSource(pIdx, sIdx) {
     const featuresRaw = Array.isArray(s.features) ? s.features.join("\\n") : (typeof s.features === "string" ? s.features : "");
 
     let html = \`
-      <div class="card" style="margin-top:0;">
+      <div class="card" style="padding-bottom: 0; margin-top:0; border-top:none;">
         <h3 style="display:flex; justify-content:space-between; align-items:center; border:none; margin-bottom:12px; gap:12px;">
-          IMAGES 
-          <span style="color:var(--text-2); font-weight:normal; text-transform:none; font-size:11px;">
-            <span id="selCount">\${state.currentSelected.length}</span> SELECTED
+          Images
+          <span style="color:var(--text-3); font-weight:400; text-transform:none; font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
+            <span id="selCount">\${state.currentSelected.length}</span> selected
           </span>
         </h3>
         <div class="carousel" id="eImgGrid"></div>
-        <div style="display:flex; gap:12px; margin-bottom:4px;">
-          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px solid var(--border);">+ PASTE URL</button>
-          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px solid var(--border); color:var(--danger);">CLEAR SELECTION</button>
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button class="btn-ghost" onclick="addImage()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Paste URL</button>
+          <button class="btn-ghost" onclick="clearSelection()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--danger);">Clear</button>
         </div>
       </div>
       
       <div class="card">
-        <h3>BASIC INFO</h3>
+        <h3>Basic Info</h3>
         <div class="field"><label>Product Name</label><input id="eTitle" value="\${escapeHtml(s.name || product.title || "")}"></div>
         
         <div class="field-row">
@@ -1020,6 +1286,9 @@ function openSource(pIdx, sIdx) {
                 if (c && !seen.has(c)) { seen.add(c); uniqueColors.push(c); }
               });
               
+              // Auto-select: use saved s.variant if it matches a known color,
+              // else if all variants share the same color, auto-select it,
+              // else select the first unique color found.
               const allColors = variants.map(v => (v.color || '').trim());
               const allSame = allColors.every(c => c === allColors[0]) && allColors[0] !== '';
               const savedVariant = (s.variant || '').trim();
@@ -1047,13 +1316,13 @@ function openSource(pIdx, sIdx) {
 
         <div class="field" style="margin-bottom:24px;">
           <label>Supplier URL</label>
-          <div style="display:flex; gap:12px;">
+          <div style="display:flex; gap:8px;">
             <input id="eUrl" type="url" value="\${escapeHtml(s.url || "")}" style="flex:1;">
-            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:center; font-size:11px; text-decoration:none;">VISIT</a>\` : ''}
+            \${s.url ? \`<a href="\${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-ghost" style="border:1px solid var(--border); padding:0 12px; display:flex; align-items:center; justify-content:center; font-size:10px; text-decoration:none; color:var(--text-2); white-space:nowrap; min-height:40px; flex-shrink:0; letter-spacing:0.05em; text-transform:uppercase;">Visit</a>\` : ''}
           </div>
-          <div style="display:flex; gap:12px; margin-top:12px;">
-            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; border:1px solid var(--border);" onclick="extractImages('lazy')">EXTRACT (LAZY)</button>
-            <button id="btnExtractFull" class="btn-ghost" style="flex:1; border:1px solid var(--border);" onclick="extractImages('full')">EXTRACT (FULL)</button>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="btnExtractLazy" class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);" onclick="extractImages('lazy')">Extract (Quick)</button>
+            <button id="btnExtractFull" class="btn-ghost" style="flex:1; font-size:10px; min-height:36px; padding:0; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);" onclick="extractImages('full')">Extract (Full)</button>
           </div>
         </div>
 
@@ -1061,11 +1330,11 @@ function openSource(pIdx, sIdx) {
           <div class="field"><label>Price</label><input id="ePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safePriceVal)}" oninput="updateFinalPrice()"></div>
           <div class="field"><label>Compare At</label><input id="eComparePrice" type="number" step="0.01" inputmode="decimal" value="\${escapeHtml(safeCompareVal)}"></div>
           
-          <div class="field" style="width:100px">
+          <div class="field" style="width:120px">
             <label>Currency</label>
             <div style="display:flex; gap:0;">
-              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1; border-right:none;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
-              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:32px; padding:0 4px; flex-shrink:0; font-size:11px;">
+              <input id="eCurrency" list="currencyList" value="\${escapeHtml(s.price?.currency || s.currency || 'USD')}" style="text-transform:uppercase; flex:1;" oninput="this.value=this.value.toUpperCase(); updateFinalPrice()">
+              <select onchange="document.getElementById('eCurrency').value=this.value; updateFinalPrice(); this.value='';" style="width:36px; padding:0 4px; flex-shrink:0; font-size:11px; border-left:none;">
                 <option value="">▾</option>
                 <option>USD</option><option>EUR</option><option>GBP</option>
                 <option>CAD</option><option>AUD</option><option>CHF</option>
@@ -1099,33 +1368,33 @@ function openSource(pIdx, sIdx) {
       </div>
       
       <details class="card">
-        <summary>VARIANTS</summary>
+        <summary>Variants</summary>
         <div class="details-content">
           <div id="variantsContainer" class="simple-table-wrapper"></div>
-          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px solid var(--border); margin-top:12px;">+ ADD SIZE</button>
+          <button class="btn-ghost" onclick="addVariantRow()" style="width:100%; border:1px solid var(--border); margin-top:8px; min-height:36px; font-size:10px; color:var(--text-2);">+ Add Size</button>
         </div>
       </details>
 
       <details class="card">
-        <summary>SIZE GUIDE</summary>
+        <summary>Size Guide</summary>
         <div class="details-content">
           <div id="sizeGuideContainer" class="simple-table-wrapper"></div>
-          <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
-            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px solid var(--border);">+ ADD ROW</button>
-            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px solid var(--border);">+ ADD COL</button>
+          <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+            <button class="btn-ghost" onclick="addSizeGuideRow()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Row</button>
+            <button class="btn-ghost" onclick="addSizeGuideCol()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">+ Col</button>
           </div>
-          <div style="display:flex; gap:12px; margin-top:12px;">
-            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border);">AI PROMPT</button>
-            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); color:var(--success);">PASTE JSON</button>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn-ghost" onclick="copySizeGuidePrompt()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--text-2);">AI Prompt</button>
+            <button class="btn-ghost" onclick="pasteSizeGuideJson()" style="flex:1; border:1px solid var(--border); min-height:36px; font-size:10px; color:var(--success);">Paste JSON</button>
           </div>
-          <div style="font-size:10px; color:var(--text-2); margin-top:12px; line-height:1.5; text-transform:uppercase; letter-spacing:0.02em;">
-            Copy the AI prompt → paste into any AI with web search → copy the JSON result → Paste JSON here.
+          <div style="font-size:10px; color:var(--text-3); margin-top:10px; line-height:1.6; text-transform:uppercase; letter-spacing:0.04em;">
+            Copy AI prompt → run in any AI with web search → paste JSON result here
           </div>
         </div>
       </details>
 
       <details class="card">
-        <summary>DETAILS & POLICIES</summary>
+        <summary>Details & Policies</summary>
         <div class="details-content">
           <div class="field"><label>Description</label><textarea id="eDesc">\${escapeHtml(s.description || product.description || "")}</textarea></div>
           <div class="field"><label>Features (One per line)</label><textarea id="eFeatures">\${escapeHtml(featuresRaw)}</textarea></div>
@@ -1135,17 +1404,18 @@ function openSource(pIdx, sIdx) {
       </details>
 
       <details class="card">
-        <summary>DROPSHIP PRICING</summary>
+        <summary>Dropship Pricing</summary>
         <div class="details-content">
-          <div style="background:var(--surface-2); padding:16px; margin-bottom:20px; border:1px solid var(--border);">
-            <div style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-2); margin-bottom:12px;">DROPSHIP CONTEXT</div>
-            <div style="font-size:13px; margin-bottom:12px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
-            <div style="display:flex; gap:20px; font-size:13px; flex-wrap:wrap;">
+          <div style="background:var(--surface-2); padding:12px; margin-bottom:14px; border:1px solid var(--border);">
+            <div style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-2); margin-bottom:8px;">Context</div>
+            <div style="font-size:13px; margin-bottom:6px;"><strong>Advisory:</strong> \${escapeHtml(s.dropship_advisory || "None")}</div>
+            <div style="display:flex; gap:16px; font-size:13px; flex-wrap:wrap;">
               <div><strong>Base:</strong> \${s.base_price_for_markup || "N/A"}</div>
               <div><strong>Markup:</strong> \${s.recommended_markup_percentage ? s.recommended_markup_percentage + "%" : "N/A"}</div>
               <div><strong>Resell:</strong> \${s.suggested_resell_price || "N/A"}</div>
               <div><strong>Rating:</strong> \${s.rating || "?"}★ (\${s.review_count || 0})</div>
             </div>
+            <div style="font-size:11px; color:var(--text-2); margin-top:8px;">Context fields: <code>dropship_advisory</code>, <code>base_price_for_markup</code>, <code>recommended_markup_percentage</code>, <code>suggested_resell_price</code>, <code>rating</code>, <code>review_count</code></div>
           </div>
           <div class="field">
             <label>Markup Type</label>
@@ -1177,13 +1447,14 @@ function openSource(pIdx, sIdx) {
         </div>
       </details>
 
-      <div class="card" style="border:none; background:transparent; padding:0; margin-top:24px;">
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border);">DELETE SOURCE</button>
+      <div class="card" style="border-bottom:none;">
+        <h3>Actions</h3>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <button class="btn-ghost" onclick="deleteSource()" style="flex:1; color:var(--danger); border:1px solid var(--border); min-height:40px; font-size:10px;">Delete Source</button>
         </div>
-        <div style="display:flex; gap:12px">
-          <button class="btn-danger" onclick="rejectSource()" style="flex:1">REJECT</button>
-          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1">SAVE</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-danger" onclick="rejectSource()" style="flex:1; min-height:44px;">Reject</button>
+          <button class="btn-primary" onclick="saveSource('completed')" style="flex:1; min-height:44px;">Save</button>
         </div>
       </div>
     \`;
@@ -1246,7 +1517,7 @@ function renderImgGrid(urls) {
     const isOn = selIdx > -1;
     return \`
       <div class="img-cell \${isOn ? 'on' : ''}" onclick="toggleImageSelection('\${escapeHtml(url)}')">
-        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23242424%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23888%22 font-family=%22sans-serif%22 font-size=%2210%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
+        <img src="\${escapeHtml(url)}" loading="lazy" alt="" onload="this.classList.add('loaded')" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23f5f5f5%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2212%22 text-anchor=%22middle%22 dy=%22.3em%22>BROKEN URL</text></svg>'">
         <div class="check">\${isOn ? (selIdx + 1) : ''}</div>
       </div>\`;
   }).join("");
@@ -1286,8 +1557,8 @@ async function extractImages(mode) {
   const btnFull = document.getElementById("btnExtractFull");
 
   if (carousel) carousel.classList.add("extracting");
-  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "EXTRACTING..."; }
-  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "EXTRACTING..."; }
+  if (btnLazy) { btnLazy.disabled = true; btnLazy.innerText = "Extracting..."; }
+  if (btnFull) { btnFull.disabled = true; btnFull.innerText = "Extracting..."; }
   
   try {
     const r = await fetch("/api/extract", {
@@ -1322,8 +1593,8 @@ async function extractImages(mode) {
     toast("ERROR: " + e.message);
   } finally {
     if (carousel) carousel.classList.remove("extracting");
-    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "EXTRACT (LAZY)"; }
-    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "EXTRACT (FULL)"; }
+    if (btnLazy) { btnLazy.disabled = false; btnLazy.innerText = "Extract (Quick)"; }
+    if (btnFull) { btnFull.disabled = false; btnFull.innerText = "Extract (Full)"; }
   }
 }
 
@@ -1392,6 +1663,7 @@ function renderSizeGuideTable() {
   const container = document.getElementById("sizeGuideContainer");
   const sg = state.currentSizeGuide || { headers: [], rows: [] };
   
+  // Ensure rows always exists
   if (!sg.rows) sg.rows = [];
   
   if (!sg.headers || !sg.headers.length) { 
@@ -1403,8 +1675,8 @@ function renderSizeGuideTable() {
   sg.headers.forEach((h, cIdx) => {
     html += \`<th>
       <div style="display:flex; align-items:center;">
-        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:500; background:transparent; border:none; padding:4px;">
-        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:24px; font-size:16px; min-height:0;">&times;</button>
+        <input type="text" class="sg-header" data-cidx="\${cIdx}" value="\${escapeHtml(h)}" style="flex:1; font-size:11px; font-weight:bold; background:transparent; border:none; padding:4px;">
+        <button class="table-btn" onclick="delSizeGuideCol(\${cIdx})" style="width:20px; font-size:18px; min-height:0;">&times;</button>
       </div>
     </th>\`;
   });
@@ -1550,7 +1822,7 @@ Return ONLY valid JSON. No markdown. No backticks. No text before or after the J
 </user>\`;
 
   navigator.clipboard.writeText(fullPrompt).then(() => {
-    toast("PROMPT COPIED");
+    toast("PROMPT COPIED — Live customer-facing size guide ready");
   }).catch(() => toast("CLIPBOARD PERMISSION DENIED"));
 }
 
@@ -1574,10 +1846,11 @@ async function pasteSizeGuideJson() {
     const colCount = parsed.headers.length;
     const validRows = parsed.rows.filter(r => Array.isArray(r) && r.length === colCount);
     if (validRows.length !== parsed.rows.length) {
-      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) SKIPPED\`);
+      toast(\`WARNING: \${parsed.rows.length - validRows.length} ROW(S) HAD WRONG COLUMN COUNT AND WERE SKIPPED\`);
     }
     if (!validRows.length) return toast("NO VALID ROWS FOUND");
 
+    // FIX: Preserve all AI-returned metadata, not just headers/rows
     state.currentSizeGuide = {
       headers: parsed.headers.map(h => String(h)),
       rows: validRows.map(r => r.map(c => String(c))),
@@ -1598,6 +1871,7 @@ async function pasteSizeGuideJson() {
     toast("CLIPBOARD PERMISSION DENIED");
   }
 }
+
 
 /* --- Saving --- */
 async function saveSource(status = "completed") {
@@ -1658,7 +1932,7 @@ async function saveSource(status = "completed") {
   };
 
   const saveBtn = document.querySelector('.modal-header .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING...'; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
   try {
     const body = {
       docId: state.current._id,
@@ -1672,6 +1946,7 @@ async function saveSource(status = "completed") {
     const r = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error("Save failed");
 
+    // Only mutate in-memory state after confirmed server success
     state.current.response.products[pIdx].sources[sIdx] = payload;
 
     clearFormPersist(state.formPersistKey);
@@ -1682,7 +1957,7 @@ async function saveSource(status = "completed") {
   } catch(e) {
     toast("ERROR: " + e.message);
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'SAVE'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
   }
 }
 
@@ -1713,8 +1988,10 @@ async function deleteSource() {
 }
 
 function closeEditor() { 
+  // clearFormPersist(state.formPersistKey);
   showScreen("review");
   
+  // Re-scroll back to source card context instantly upon pressing cancel
   if (state.editingPIdx !== null && state.editingSIdx !== null) {
     const scrollBack = () => {
       const targetCard = document.querySelector(\`.p-card[data-source-id="\${state.editingPIdx}-\${state.editingSIdx}"]\`);
@@ -1787,6 +2064,7 @@ function initKeyboard() {
       if (videoModal.classList.contains('active')) closeVideo();
       else if (editorModal.classList.contains('active')) closeEditor();
       else if (document.getElementById('review').classList.contains('active')) {
+        // Preserve lastViewedItemId so renderQueue scrolls to it
         showQueue();
       }
     }
@@ -1802,7 +2080,7 @@ function initSwipeNavigation() {
   let didSwipe = false;
   const SWIPE_TIME = 500; // ms
 
-  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150);
+  const getThreshold = () => Math.min(window.innerWidth * 0.3, 150); // 30vw, capped at 150px
 
   const onStart = (x, y) => { startX = x; startY = y; startTime = Date.now(); didSwipe = false; };
   const onEnd = (x, y) => {
@@ -1874,6 +2152,7 @@ function normalizeResponse(item) {
             s.markup_fixed = s.markup_fixed != null ? s.markup_fixed : null;
             s.markup_percentage = s.markup_percentage != null ? s.markup_percentage : null;
 
+            // Robust price normalization to handle raw python extractor numbers
             if (typeof s.price === 'number' || typeof s.price === 'string') {
                 s.price = {
                     current: s.price,
@@ -1931,7 +2210,7 @@ function getItemStatus(item) {
         });
     });
 
-    if (totalSources === 0) return 'done';
+    if (totalSources === 0) return 'done'; // Empty arrays can be committed safely to clear from queue
     if (reviewedSources === totalSources) return 'done';
     if (reviewedSources > 0) return 'partial';
     return 'pending';
