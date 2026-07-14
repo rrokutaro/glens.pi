@@ -111,6 +111,13 @@ const CONFIG = {
     runId:     process.env.ORCH_RUN_ID    || 'local',
     outputDir: path.join(process.cwd(), 'orchestrator-output'),
     tmpDir:    path.join(process.cwd(), 'orchestrator-tmp'),
+    glensTrigger: {
+        enabled:      process.env.ORCH_GLENS_TRIGGER_ENABLED !== 'false',
+        numInstances: parseInt(process.env.ORCH_GLENS_INSTANCES || '5', 10),
+        mongodbLimit: parseInt(process.env.ORCH_GLENS_MONGODB_LIMIT || '15', 10),
+        githubToken:  process.env.ORCH_GITHUB_TOKEN || '',
+        repo:         process.env.ORCH_GLENS_REPO || 'rrokutaro/glens.pi',
+    },
 };
 
 const RECORDINGS_DIR = path.join(CONFIG.outputDir, 'recordings');
@@ -139,6 +146,74 @@ function chunkArray(arr, size) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── GLENS TRIGGER HELPERS (Step 9 — fire multiple parallel glens-run dispatches) ──
+async function triggerGlensInstance(instanceNum, limit) {
+    const token = CONFIG.glensTrigger.githubToken;
+    if (!token) {
+        log('warn', `No ORCH_GITHUB_TOKEN provided — cannot trigger GLENS instance #${instanceNum}`);
+        return false;
+    }
+    const repo = CONFIG.glensTrigger.repo;
+    const url = `https://api.github.com/repos/${repo}/dispatches`;
+
+    const clientPayload = {
+        mongodb_limit: String(limit),
+        recording: 'false',
+    };
+
+    const body = {
+        event_type: 'glens-run',
+        client_payload: clientPayload,
+    };
+
+    try {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/vnd.github+json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (resp.status === 204) {
+            log('info', `✅ [\( {instanceNum}/ \){CONFIG.glensTrigger.numInstances}] Dispatched glens-run (mongodb_limit=${limit})`);
+            return true;
+        } else {
+            const text = await resp.text().catch(() => '');
+            log('warn', `⚠️  GLENS trigger #${instanceNum} returned HTTP ${resp.status}: ${text.slice(0, 200)}`);
+            return false;
+        }
+    } catch (err) {
+        log('error', `❌ Failed to dispatch GLENS instance #${instanceNum}: ${err.message}`);
+        return false;
+    }
+}
+
+async function triggerMultipleGlensInstances() {
+    const num = CONFIG.glensTrigger.numInstances || 0;
+    const limit = CONFIG.glensTrigger.mongodbLimit || 15;
+
+    if (num <= 0) {
+        log('info', 'GLENS trigger: numInstances=0 — skipping.');
+        return { triggered: 0, attempted: 0 };
+    }
+
+    log('info', `── Step 9: Triggering \( {num} parallel GLENS instances (each with mongodb_limit= \){limit}) ──`);
+
+    let triggered = 0;
+    for (let i = 1; i <= num; i++) {
+        const ok = await triggerGlensInstance(i, limit);
+        if (ok) triggered++;
+        if (i < num) await sleep(250);
+    }
+
+    log('info', `GLENS trigger complete: \( {triggered}/ \){num} instances successfully dispatched.`);
+    return { triggered, attempted: num };
+}
 
 // ─── PYTHON SCRIPT FOR EXTRACTING VIDEO FRAMES ────────────────────────────────
 const EXTRACT_FRAMES_PY = `
@@ -4139,6 +4214,18 @@ async function main() {
         log('info', 'Product image extraction stage disabled (ORCH_PRODUCT_IMG_ENABLED=false) — skipping.');
     }
 
+    // ── Step 9: Trigger parallel GLENS instances (fire-and-forget, last stage) ──
+    let glensTriggerResults = { triggered: 0, attempted: 0 };
+    if (CONFIG.glensTrigger.enabled) {
+        try {
+            glensTriggerResults = await triggerMultipleGlensInstances();
+        } catch (err) {
+            log('error', `GLENS trigger stage failed: ${err.message}`);
+        }
+    } else {
+        log('info', 'GLENS trigger stage disabled (ORCH_GLENS_TRIGGER_ENABLED=false) — skipping.');
+    }
+
     await mongoClient.close();
 
     // ── Summary ──────────────────────────────────────────────────────────────
@@ -4152,6 +4239,7 @@ async function main() {
     if (CONFIG.audit.enabled) log('info', `  Audit:    ${auditResults.audited} audited | ${auditResults.fixed} fixed | ${auditResults.discarded} discarded | ${auditResults.failed} failed`);
     if (CONFIG.textExtraction.enabled) log('info', `  Data Enrich: ${dataEnrichmentResults.processed} processed | ${dataEnrichmentResults.succeeded} succeeded | ${dataEnrichmentResults.failed} failed | ${dataEnrichmentResults.updatedPosts} post(s) updated`);
     if (CONFIG.productImageExtraction.enabled) log('info', `  Image FB: ${productImageResults.processed} processed | ${productImageResults.succeeded} succeeded | ${productImageResults.failed} failed | ${productImageResults.updatedPosts} post(s) updated`);
+    if (CONFIG.glensTrigger.enabled) log('info', `  GLENS:    triggered \( {glensTriggerResults.triggered}/ \){glensTriggerResults.attempted} parallel instances (limit=${CONFIG.glensTrigger.mongodbLimit} each)`);
     log('info', '═══════════════════════════════════════════════════════════════');
 
     fs.writeFileSync(
