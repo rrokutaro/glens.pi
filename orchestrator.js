@@ -12,6 +12,7 @@
  *  6.5 JSON Audit & Repair (Gemini)
  *  7. Data Enrichment (Text Extraction + LLM Structuring) — runs ecom-text-extractor.py
  *     and Gemini LLM on sources to fetch actual product data, replaces sources in MongoDB.
+ *     Features smart max-retry resilience for transient failures.
  *  8. Product Source Image Extraction — Fallback logic if Step 7 misses images.
  */
 
@@ -1237,7 +1238,7 @@ async function extractDataBatchWithGemini(db, batch) {
 
             const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
             
-            // 👇 NEW: Try JSON parse, fallback to jsonrepair
+            // 👇 Try JSON parse, fallback to jsonrepair
             let parsed;
             try {
                 parsed = JSON.parse(cleaned);
@@ -1251,7 +1252,6 @@ async function extractDataBatchWithGemini(db, batch) {
                     throw new Error('Data Extraction: JSON parse and repair both failed');
                 }
             }
-            // 👆 END NEW
 
             if (!Array.isArray(parsed)) throw new Error('Data Extraction: Gemini response was not a JSON array');
             return parsed;
@@ -1962,9 +1962,6 @@ async function auditBatchWithGemini(db, batchItems) {
                                 { text: payload },
                             ],
                         }],
-                        // systemInstruction: {
-                        //    parts: AUDIT_PROMPT_INSTRUCTIONS
-                        // },
                         generationConfig: {
                             temperature: 0.1,
                             maxOutputTokens: 65536, // <-- Prevent JSON cutoff
@@ -1998,7 +1995,7 @@ async function auditBatchWithGemini(db, batchItems) {
 
             const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
             
-            // 👇 NEW: Try JSON parse, fallback to jsonrepair
+            // 👇 Try JSON parse, fallback to jsonrepair
             let parsed;
             try {
                 parsed = JSON.parse(cleaned);
@@ -2017,7 +2014,7 @@ async function auditBatchWithGemini(db, batchItems) {
                 throw new Error('Audit: Gemini response missing "results" array');
             }
             
-            // 👇 NEW: Validate completeness — detect truncated responses
+            // 👇 Validate completeness — detect truncated responses
             const expectedSeqs = new Set(batchItems.map(b => b.seq));
             const actualSeqs = new Set(parsed.results.map(r => r.seq).filter(s => typeof s === 'number'));
             const missingSeqs = [...expectedSeqs].filter(s => !actualSeqs.has(s));
@@ -2058,7 +2055,6 @@ async function runAuditStage(db, collection) {
     const batches = chunkAuditBatches(allItems, CONFIG.audit.targetBatchTokens);
     log('info', `Audit: ${allItems.length} item(s) split into ${batches.length} batch(es).`);
 
-    // 👇 Process concurrently across available keys
     const auditConcurrency = Math.max(1, CONFIG.review.apiKeys.length);
     const bulkOps = []; // Collect all database updates
 
@@ -2078,7 +2074,6 @@ async function runAuditStage(db, collection) {
                     if (err.message?.includes('Incomplete results') && batch.length > 1) {
                         // Don't mark as failed — they'll be retried on next run as smaller batches
                         log('warn', `Audit: batch ${batchNum} incomplete (${batch.length} items), leaving for next run with smaller batches.`);
-                        // Items remain un-audited (no auditStatus set), so they'll be re-fetched next run
                     } else {
                         log('error', `❌ Audit: Gemini call failed for batch ${batchNum} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err.message}. Left for next run.`);
                         results.failed += batch.length;
@@ -2173,10 +2168,9 @@ async function runAuditStage(db, collection) {
             }
         }));
 
-        await sleep(2000); // Brief pause before the next concurrent wave
+        await sleep(2000); 
     }
 
-    // Execute all MongoDB updates cleanly at the end
     if (bulkOps.length > 0) {
         try {
             await collection.bulkWrite(bulkOps, { ordered: false });
@@ -2199,7 +2193,6 @@ async function runAuditStage(db, collection) {
             let allTrulyEmpty = true;
 
             const check = (f) => {
-                // 👇 If item hasn't been explicitly audited yet, do NOT discard the post
                 if (!f.auditStatus) { allProcessed = false; return; }
                 const hasProducts = f.response && Array.isArray(f.response.products) && f.response.products.length > 0;
                 if (hasProducts) { allTrulyEmpty = false; }
@@ -2243,7 +2236,6 @@ async function runLazyAuditStage(db, collection) {
             const rawResponse = item.response;
             let responseObj;
 
-            // Parse if stored as string
             if (typeof rawResponse === 'string') {
                 try {
                     responseObj = JSON.parse(rawResponse);
@@ -2296,7 +2288,6 @@ async function runLazyAuditStage(db, collection) {
         }
     }
 
-    // Discard posts where all items are now empty/audited with no products
     const affectedPostIds = [...new Set(allItems.map(i => String(i.postObjectId)))];
     for (const postObjIdStr of affectedPostIds) {
         try {
@@ -2417,8 +2408,7 @@ function parseGlensPrice(priceStr) {
     return match ? parseFloat(match[0].replace(/,/g, '')) : null;
 }
 
-function createFallbackSource(oldSource, errorMsg, rawData) {
-    // Prefer extracted raw data price over GLens price
+function createFallbackSource(oldSource, errorMsg, rawData, failCount = 0) {
     const rawPrice = rawData?.price?.current || rawData?.price || rawData?.schema_org?.price || null;
     const rawCurrency = rawData?.price?.currency || rawData?.currency || rawData?.schema_org?.priceCurrency || null;
     
@@ -2469,7 +2459,8 @@ function createFallbackSource(oldSource, errorMsg, rawData) {
         dropship_advisory: "Data extraction failed: " + errorMsg,
         textExtraction: {
             status: 'failed',
-            error: errorMsg
+            error: errorMsg,
+            failCount: failCount
         }
     };
 }
@@ -2487,7 +2478,7 @@ function gatherPendingTextSources(post) {
             
             for (let s = 0; s < product.sources.length; s++) {
                 const source = product.sources[s];
-                if (source && source.url && (!source.textExtraction || source.textExtraction.status !== 'completed' && source.textExtraction.status !== 'failed')) {
+                if (source && source.url && (!source.textExtraction || (source.textExtraction.status !== 'completed' && source.textExtraction.status !== 'failed'))) {
                     pending.push({
                         docId: post._id,
                         fileUrlIndex: i,
@@ -2496,7 +2487,10 @@ function gatherPendingTextSources(post) {
                         sourceIndex: s,
                         url: source.url,
                         source_id: `src_${post._id}_${i}_${frameIndex}_${p}_${s}`,
-                        oldSource: { ...source, productTitle: product.title } // Retained so we can map fallback fields
+                        oldSource: { ...source, productTitle: product.title },
+                        dbPath: frameIndex === -1
+                            ? `file_urls.${i}.response.products.${p}.sources.${s}`
+                            : `file_urls.${i}.frames.${frameIndex}.response.products.${p}.sources.${s}`
                     });
                 }
             }
@@ -2541,7 +2535,6 @@ async function runTextExtractorScript(urls, cfg) {
             reject(new Error(`Text extraction timed out after ${cfg.timeoutMs}ms`));
         }, cfg.timeoutMs);
 
-        // Stream logs directly to the console in real-time
         proc.stdout.on('data', d => process.stdout.write(`[TEXT-EXTRACTOR] ${d}`));
         proc.stderr.on('data', d => { 
             stderr += d; 
@@ -2633,7 +2626,6 @@ async function runDataEnrichmentStage(db, collection) {
     let allPending = [];
     for (const post of posts) {
         allPending.push(...gatherPendingTextSources(post));
-        // Hard limit on how many sources we process per run to avoid pipeline timeouts
         if (allPending.length >= CONFIG.textExtraction.sourceLimit) {
             log('info', `Source limit reached (${CONFIG.textExtraction.sourceLimit}). Halting further source discovery for this run.`);
             allPending = allPending.slice(0, CONFIG.textExtraction.sourceLimit);
@@ -2649,7 +2641,6 @@ async function runDataEnrichmentStage(db, collection) {
     log('info', `Running text extraction on ${uniqueUrls.length} unique URL(s) from ${allPending.length} source(s)...`);
 
     let pythonResults = {};
-    // Chunk URLs into batches of 30 to prevent the Python script from timing out
     const urlBatches = chunkArray(uniqueUrls, 30);
     
     for (let b = 0; b < urlBatches.length; b++) {
@@ -2659,14 +2650,11 @@ async function runDataEnrichmentStage(db, collection) {
             Object.assign(pythonResults, batchResults);
         } catch (err) {
             log('error', `Text extraction batch ${b + 1} failed: ${err.message}`);
-            // If a batch fails (e.g. timeout), we gracefully catch it. 
-            // Missing URLs will be flagged as failed further down the loop.
         }
     }
 
     if (Object.keys(pythonResults).length === 0) {
         log('error', 'All text extraction batches failed. Skipping LLM structuring.');
-        // We will process them anyway down below to ensure they get fallback schemas and are marked as failed.
     }
 
     const bulkOps = [];
@@ -2675,27 +2663,38 @@ async function runDataEnrichmentStage(db, collection) {
     let failed = 0;
 
     for (const item of allPending) {
-        const dbPath = item.frameIndex === -1
-            ? `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`
-            : `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`;
-
         const rawData = pythonResults[item.url];
         
         if (!rawData || !rawData.success) {
-            log('warn', `Text extraction failed for ${item.url}: ${rawData?.error || 'No data returned'}`);
-            bulkOps.push({
-                updateOne: {
-                    filter: { _id: item.docId },
-                    update: { $set: { [dbPath]: createFallbackSource(item.oldSource, rawData?.error || 'Unknown error', rawData) } }
-                }
-            });
+            const errorMsg = rawData?.error || (pythonResults[item.url] === undefined ? 'Python script crashed or timed out' : 'Unknown error');
+            const currentFailCount = (item.oldSource.textExtraction?.failCount || 0) + 1;
+            const is404 = errorMsg.includes('404');
+            const isRetryable = !is404 && currentFailCount <= 2; // Allow up to 2 retries
+            
+            if (isRetryable) {
+                log('warn', `Text extraction failed for ${item.url} (Attempt ${currentFailCount}/3): ${errorMsg}. Retrying next run.`);
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'pending_retry', failCount: currentFailCount, lastError: errorMsg } } }
+                    }
+                });
+            } else {
+                log('warn', `Text extraction failed permanently for ${item.url}: ${errorMsg}. Applying fallback.`);
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: item.docId },
+                        update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, errorMsg, rawData, currentFailCount) } }
+                    }
+                });
+            }
             failed++;
             continue;
         }
 
         llmBatchQueue.push({
             source_id: item.source_id,
-            dbPath,
+            dbPath: item.dbPath,
             docId: item.docId,
             oldSource: item.oldSource,
             payload: {
@@ -2713,16 +2712,34 @@ async function runDataEnrichmentStage(db, collection) {
         log('info', `Gemini LLM Structuring: processing batches ${c + 1} to ${c + concurrentChunks.length} of ${llmChunks.length} concurrently...`);
 
         await Promise.all(concurrentChunks.map(async (chunk, chunkIdx) => {
-            try { // 👇 Top-level safety to prevent cascading DB close
+            try { 
                 const batchNum = c + chunkIdx + 1;
                 const t0 = Date.now();
                 let cleanResults = [];
-                let batchSuccessCount = 0; // 👈 Fixed: Variable defined here
+                let batchSuccessCount = 0;
                 
                 try {
                     cleanResults = await extractDataBatchWithGemini(db, chunk.map(i => i.payload));
                 } catch (err) {
-                    log('error', `❌ Gemini batch ${batchNum} failed: ${err.message}. Sources left for next run.`);
+                    log('error', `❌ Gemini batch ${batchNum} failed: ${err.message}. Marking items for retry if eligible.`);
+                    for (const item of chunk) {
+                        const currentFailCount = (item.oldSource.textExtraction?.failCount || 0) + 1;
+                        if (currentFailCount <= 2) {
+                            bulkOps.push({
+                                updateOne: {
+                                    filter: { _id: item.docId },
+                                    update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'pending_retry', failCount: currentFailCount, lastError: 'Gemini batch failed: ' + err.message } } }
+                                }
+                            });
+                        } else {
+                            bulkOps.push({
+                                updateOne: {
+                                    filter: { _id: item.docId },
+                                    update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini batch failed: ' + err.message, null, currentFailCount) } }
+                                }
+                            });
+                        }
+                    }
                     failed += chunk.length;
                     return; 
                 }
@@ -2730,40 +2747,44 @@ async function runDataEnrichmentStage(db, collection) {
                 for (const item of chunk) {
                     const cleanJson = cleanResults.find(r => r.source_id === item.source_id);
                     if (!cleanJson) {
-                        log('warn', `⚠️ Gemini missed source_id ${item.source_id} in batch ${batchNum}. Leaving for next run.`);
+                        log('warn', `⚠️ Gemini missed source_id ${item.source_id} in batch ${batchNum}.`);
+                        const currentFailCount = (item.oldSource.textExtraction?.failCount || 0) + 1;
+                        if (currentFailCount <= 2) {
+                            bulkOps.push({
+                                updateOne: { filter: { _id: item.docId }, update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'pending_retry', failCount: currentFailCount, lastError: 'Gemini omitted source' } } } }
+                            });
+                        } else {
+                            bulkOps.push({
+                                updateOne: { filter: { _id: item.docId }, update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Gemini omitted source', null, currentFailCount) } } }
+                            });
+                        }
                         failed++;
                         continue; 
                     }
 
                     try {
-                        // 1. Maintain original URL
                         cleanJson.url = cleanJson.url || item.oldSource.url;
     
-                        // 2. Fallback basic text details to GLENS if extracted empty
                         const glensStore = item.oldSource.store || item.oldSource.vendor || item.oldSource.brand || "Unknown";
                         cleanJson.name = cleanJson.name || "Unknown Product";
                         cleanJson.brand = cleanJson.brand || cleanJson.vendor || glensStore;
                         cleanJson.vendor = cleanJson.vendor || cleanJson.brand || glensStore;
     
-                        // 3. Fallback availability to GLENS
                         const availabilityMap = { 'InStock': 'In stock', 'OutOfStock': 'Out of stock', 'PreOrder': 'Pre-order' };
                         const rawAvail = cleanJson.availability;
                         const mappedAvailability = availabilityMap[rawAvail] || rawAvail;
                         cleanJson.availability = mappedAvailability || item.oldSource.availability || "Unknown";
     
-                        // 4. Price: trust LLM-extracted data; only fall back to GLens if LLM found nothing at all
                         const oldGlensPriceStr = item.oldSource.price ? String(item.oldSource.price).replace(/[^0-9.]/g, '') : "";
                         const oldGlensCurrency = item.oldSource.currency || item.oldSource.price?.currency || "USD";
                         
                         if (!cleanJson.price || typeof cleanJson.price !== 'object') {
-                            // LLM returned no price object at all — use GLens as last resort
                             cleanJson.price = {
                                 current: oldGlensPriceStr || null,
                                 original: null,
                                 currency: cleanJson.currency || oldGlensCurrency
                             };
                         } else {
-                            // LLM returned a price object: trust it, only fill in missing pieces from GLens
                             const llmCurrent = cleanJson.price.current;
                             const hasLlmPrice = llmCurrent != null && String(llmCurrent).trim() !== "" && String(llmCurrent).trim() !== "0" && String(llmCurrent).trim() !== "0.00";
                             
@@ -2774,7 +2795,6 @@ async function runDataEnrichmentStage(db, collection) {
                             cleanJson.price.currency = cleanJson.price.currency || cleanJson.currency || oldGlensCurrency;
                         }
     
-                        // 5. Fallback markup properties to GLENS price if LLM failed math
                         if (cleanJson.base_price_for_markup == null && oldGlensPriceStr) {
                             const parsedGlens = parseFloat(oldGlensPriceStr);
                             if (!isNaN(parsedGlens)) {
@@ -2786,20 +2806,17 @@ async function runDataEnrichmentStage(db, collection) {
                             }
                         }
     
-                        // 6. Flatten image objects to URL strings
                         if (Array.isArray(cleanJson.images)) {
                             cleanJson.images = cleanJson.images.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
                         }
     
-                        // Fallback to old images if LLM found none
                         if (!cleanJson.images || cleanJson.images.length === 0) {
                             const oldImgs = Array.isArray(item.oldSource.images) ? item.oldSource.images : [];
                             cleanJson.images = oldImgs.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
                         }
     
-                        cleanJson.textExtraction = { status: 'completed' };
+                        cleanJson.textExtraction = { status: 'completed', failCount: item.oldSource.textExtraction?.failCount || 0 };
     
-                        // Replace the entire source object with the clean schema
                         bulkOps.push({
                             updateOne: {
                                 filter: { _id: item.docId },
@@ -2810,12 +2827,22 @@ async function runDataEnrichmentStage(db, collection) {
                         batchSuccessCount++;
                     } catch (err) {
                         log('error', `Failed processing clean result for ${item.source_id}: ${err.message}`);
-                        bulkOps.push({
-                            updateOne: {
-                                filter: { _id: item.docId },
-                                update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed', null) } }
-                            }
-                        });
+                        const currentFailCount = (item.oldSource.textExtraction?.failCount || 0) + 1;
+                        if (currentFailCount <= 2) {
+                            bulkOps.push({
+                                updateOne: {
+                                    filter: { _id: item.docId },
+                                    update: { $set: { [`${item.dbPath}.textExtraction`]: { status: 'pending_retry', failCount: currentFailCount, lastError: err.message } } }
+                                }
+                            });
+                        } else {
+                            bulkOps.push({
+                                updateOne: {
+                                    filter: { _id: item.docId },
+                                    update: { $set: { [item.dbPath]: createFallbackSource(item.oldSource, 'Result processing failed', null, currentFailCount) } }
+                                }
+                            });
+                        }
                         failed++;
                     }
                 }
@@ -2862,10 +2889,9 @@ function gatherPendingImageSources(post) {
             for (let s = 0; s < product.sources.length; s++) {
                 const source = product.sources[s];
                 
-                const hasImages = Array.isArray(source.images) && source.images.length > 0;
-                const textExtractionCompleted = source.textExtraction?.status === 'completed';
+                const imageExtractionDone = source.imageExtraction?.status === 'completed' || source.imageExtraction?.status === 'failed';
                 
-                if (source && source.url && !hasImages && textExtractionCompleted) {
+                if (source && source.url && !imageExtractionDone && source.textExtraction?.status === 'completed') {
                     pending.push({
                         docId: post._id,
                         fileUrlIndex: i,
@@ -2873,8 +2899,9 @@ function gatherPendingImageSources(post) {
                         productIndex: p,
                         sourceIndex: s,
                         url: source.url,
-                        // Pull from the new schema vendor/brand if store is missing
                         store: source.store || source.vendor || source.brand || '',
+                        oldImages: source.images || [],
+                        oldImageExtraction: source.imageExtraction || {}
                     });
                 }
             }
@@ -2906,13 +2933,11 @@ async function fetchPostsWithPendingImages(collection, limit) {
                                 sources: {
                                     $elemMatch: {
                                         url: { $exists: true },
+                                        'textExtraction.status': 'completed',
                                         $or: [
-                                            { images: { $exists: false } },
-                                            { images: { $size: 0 } },
-                                            { images: { $size: 1 } },
-                                            { images: { $size: 2 } }
-                                        ],
-                                        'textExtraction.status': 'completed'
+                                            { imageExtraction: { $exists: false } },
+                                            { 'imageExtraction.status': { $nin: ['completed', 'failed'] } }
+                                        ]
                                     }
                                 }
                             }
@@ -2929,13 +2954,11 @@ async function fetchPostsWithPendingImages(collection, limit) {
                                 sources: {
                                     $elemMatch: {
                                         url: { $exists: true },
+                                        'textExtraction.status': 'completed',
                                         $or: [
-                                            { images: { $exists: false } },
-                                            { images: { $size: 0 } },
-                                            { images: { $size: 1 } },
-                                            { images: { $size: 2 } }
-                                        ],
-                                        'textExtraction.status': 'completed'
+                                            { imageExtraction: { $exists: false } },
+                                            { 'imageExtraction.status': { $nin: ['completed', 'failed'] } }
+                                        ]
                                     }
                                 }
                             }
@@ -3090,7 +3113,6 @@ async function runProductImageExtractionStage(db, collection) {
         for (const item of pending) {
             if (!urlToImages.has(item.url)) continue;
 
-            // 👇 NEW: Flatten incoming Python objects and merge with existing URL strings
             const existingImages = (item.oldImages || []).map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
             const extractedRaw = urlToImages.get(item.url) || [];
             const extractedUrls = extractedRaw.map(img => typeof img === 'object' ? img.url : img).filter(Boolean);
@@ -3098,10 +3120,22 @@ async function runProductImageExtractionStage(db, collection) {
             const combinedImages = [...new Set([...existingImages, ...extractedUrls])];
 
             let dbPath = item.frameIndex === -1
-                ? `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`
-                : `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}.images`;
+                ? `file_urls.${item.fileUrlIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`
+                : `file_urls.${item.fileUrlIndex}.frames.${item.frameIndex}.response.products.${item.productIndex}.sources.${item.sourceIndex}`;
             
-            $set[dbPath] = combinedImages;
+            $set[`${dbPath}.images`] = combinedImages;
+            
+            const wasSuccessful = extractedUrls.length > 0;
+            const currentFailCount = (item.oldImageExtraction?.failCount || 0) + 1;
+            
+            if (wasSuccessful) {
+                $set[`${dbPath}.imageExtraction`] = { status: 'completed', failCount: currentFailCount - 1 };
+            } else if (currentFailCount <= 2) {
+                $set[`${dbPath}.imageExtraction`] = { status: 'pending_retry', failCount: currentFailCount };
+            } else {
+                $set[`${dbPath}.imageExtraction`] = { status: 'failed', failCount: currentFailCount };
+            }
+
             hasUpdates = true;
         }
 
@@ -3957,7 +3991,17 @@ async function ensureIndexes(collection) {
         await collection.createIndex({ post_id: 1 }, { unique: true });
         log('debug', 'MongoDB: unique index on post_id confirmed.');
     } catch (e) {
-        log('warn', 'MongoDB index: ' + e.message);
+        log('warn', 'MongoDB index post_id: ' + e.message);
+    }
+    
+    try {
+        await collection.createIndex({ downloaded: 1, discarded: 1 });
+        await collection.createIndex({ discarded: 1, "file_urls.reviewed": 1, "file_urls.frames.reviewed": 1 });
+        await collection.createIndex({ discarded: 1, "file_urls.auditStatus": 1, "file_urls.frames.auditStatus": 1 });
+        await collection.createIndex({ discarded: 1, "file_urls.humanReviewed": 1, "file_urls.frames.humanReviewed": 1 });
+        log('debug', 'MongoDB: auxiliary pipeline indexes confirmed.');
+    } catch (e) {
+        log('warn', 'MongoDB auxiliary index creation: ' + e.message);
     }
 }
 
