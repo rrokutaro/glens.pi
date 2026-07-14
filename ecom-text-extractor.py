@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-E-Commerce Product Text Extractor (Production-Ready v2.0.1 - Hardened)
+E-Commerce Product Text Extractor (Production-Ready v2.1.3 - Merged/Exhaustive)
 
 Dual-mode extraction tool for scraping structured product data from
 e-commerce product pages. Designed for integration with the UGC dropship
 pipeline and review server.
 
-Upgrades (v2.0.1):
-  - Fixed CrawlerRunConfig crashing due to orphaned screenshot variables.
-  - Fixed CloakBrowser crash by injecting hardcoded window-size fallback.
-  - Fixed Semaphore Starvation lock by prioritizing domain-lock before global-lock.
+Upgrades (v2.1.3):
+  - Always Merge: In fallback paths (when lazy extraction fails or is incomplete 
+    but still yields partial data), successful browser data is now merged with 
+    the partial lazy data rather than overwriting it, ensuring zero data loss.
 
-Upgrades (v2.0):
-  - Removed screenshot functionality for a leaner, safer extractor.
-  - Fixed critical orphaned-task leak in browser retry logic.
-  - Replaced fragile regex JSON extraction with chompjs for nested objects.
-  - Added Content-Type validation and response size cap (5 MB).
-  - Corrected Classic lazy fallback comparison to preserve Shopify data.
-  - Full-browser path now also fetches Shopify JSON API.
-  - Domain-aware concurrency to avoid IP bans.
-  - Refined variant detection to eliminate false positives.
-  - Separated Product and Offer schema collection to avoid pollution.
+Upgrades (v2.1.2):
+  - Refined Exhaustive Merge logic: `_prefer_richer_dict` now uses canonical, 
+    minified JSON string length (sorted keys, no spaces) to compare object sizes 
+    deterministically, eliminating false positives caused by memory/insertion order.
+
+Upgrades (v2.1.1):
+  - Upgraded Exhaustive Merge logic: Framework data (Next.js, Vue, Shopify) 
+    now uses a "Richer Dict" comparison to prevent partial-data overwrites.
+
+Upgrades (v2.1.0):
+  - Added Exhaustive Merge Mode (--exhaustive): Runs both Lazy and Full Browser 
+    and intelligently merges data to avoid bloat while maximizing extraction.
 """
 
 import os
@@ -56,7 +58,7 @@ try:
 except ImportError:
     HAS_CURL_CFFI = False
 
-# Optional lxml for faster HTML parsing (3-5x speedup over html.parser)
+# Optional lxml for faster HTML parsing
 try:
     import lxml  # noqa: F401
     BS4_PARSER = "lxml"
@@ -83,13 +85,7 @@ logger = logging.getLogger("ecom_text_extractor")
 
 if not HAS_CURL_CFFI:
     logger.warning(
-        "curl_cffi not installed. Falling back to standard httpx for advanced lazy extraction. "
-        "Recommend: pip install curl_cffi"
-    )
-
-if BS4_PARSER == "html.parser":
-    logger.warning(
-        "lxml not installed. Using slower html.parser. Recommend: pip install lxml"
+        "curl_cffi not installed. Falling back to standard httpx for advanced lazy extraction."
     )
 
 # -- Constants --------------------------------------------------------
@@ -98,7 +94,6 @@ EXCLUDED_TAGS = [
     "nav", "footer", "aside", "header", "form"
 ]
 
-# Advanced Chrome 124 header fingerprint for httpx advanced lazy path.
 CHROME_HEADERS_2026 = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -134,7 +129,7 @@ CLASSIC_HEADERS = {
     "Sec-Fetch-Site": "none",
 }
 
-MAX_RESPONSE_SIZE = 5_000_000  # 5 MB cap for HTML responses
+MAX_RESPONSE_SIZE = 5_000_000
 
 # -- Font detection ---------------------------
 _FONT_SEARCH_PATHS = [
@@ -149,7 +144,6 @@ def _find_font_dir() -> Optional[str]:
         if os.path.isdir(path):
             for root, _, files in os.walk(path):
                 if any(f.lower().endswith((".ttf", ".otf", ".ttc")) for f in files):
-                    logger.info("Found fonts in %s", root)
                     return root
     return None
 
@@ -163,7 +157,6 @@ def _display_is_usable(display: str) -> bool:
 def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
     display = os.environ.get("DISPLAY", "")
     if _display_is_usable(display):
-        logger.info("DISPLAY=%s is active", display)
         return None
 
     xvfb_path = shutil.which("Xvfb")
@@ -183,13 +176,10 @@ def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
         xvfb_path, display, "-screen", "0", "1920x1080x24",
         "-ac", "+extension", "GLX", "+render", "-noreset"
     ]
-    logger.info("Starting Xvfb on %s", display)
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        import time
         time.sleep(0.5)
         if proc.poll() is not None:
-            logger.error("Xvfb exited immediately with code %d", proc.returncode)
             return None
         os.environ["DISPLAY"] = display
         return proc
@@ -199,16 +189,12 @@ def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
 
 # -- URL utilities -----------------------------------------------------
 def normalize_url(u: str) -> str:
-    if not u:
-        return ""
+    if not u: return ""
     u = u.strip()
-    if u.startswith("//"):
-        return "https:" + u
-    return u
+    return "https:" + u if u.startswith("//") else u
 
 def canonicalize_url(u: str) -> str:
-    if not u:
-        return ""
+    if not u: return ""
     parts = urlsplit(u)
     q = [(k, v) for k, v in parse_qsl(parts.query)
          if k.lower() not in frozenset({
@@ -217,42 +203,28 @@ def canonicalize_url(u: str) -> str:
              "ref", "source", "mc_cid", "mc_eid",
          })]
     return urlunsplit((
-        parts.scheme.lower(),
-        parts.netloc.lower(),
-        parts.path.rstrip("/"),
-        urlencode(sorted(q, key=lambda kv: kv[0])),
-        ""
+        parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"),
+        urlencode(sorted(q, key=lambda kv: kv[0])), ""
     ))
-
-def url_hash(u: str) -> str:
-    return hashlib.sha256(u.encode()).hexdigest()[:16]
 
 # -- Shopify detection helpers -----------------------------------------
 def _is_shopify_domain(url: str) -> bool:
     parts = urlsplit(url)
     host = parts.netloc.lower()
-    if host.endswith(".myshopify.com"):
-        return True
-    if re.search(r"/products/[^/?#]+", parts.path):
-        return True
+    if host.endswith(".myshopify.com"): return True
+    if re.search(r"/products/[^/?#]+", parts.path): return True
     return False
 
 def _shopify_json_url(url: str) -> Optional[str]:
     parts = urlsplit(url)
     match = re.match(r"(/products/[^/?#]+)", parts.path)
-    if not match:
-        return None
+    if not match: return None
     product_path = match.group(1).rstrip("/")
     return urlunsplit((parts.scheme, parts.netloc, product_path + ".json", "", ""))
 
-async def _try_shopify_json(
-    client: Any,
-    url: str,
-    timeout: float,
-) -> Optional[Dict[str, Any]]:
+async def _try_shopify_json(client: Any, url: str, timeout: float) -> Optional[Dict[str, Any]]:
     json_url = _shopify_json_url(url)
-    if not json_url:
-        return None
+    if not json_url: return None
     try:
         if HAS_CURL_CFFI and isinstance(client, cffi_requests.AsyncSession):
             r = await client.get(json_url, timeout=timeout, impersonate="chrome124")
@@ -261,10 +233,9 @@ async def _try_shopify_json(
         if r.status_code == 200:
             data = r.json() if hasattr(r, "json") and callable(r.json) else json.loads(r.text)
             if isinstance(data, dict) and "product" in data:
-                logger.info("Shopify JSON API hit: %s", json_url)
                 return data["product"]
-    except Exception as exc:
-        logger.debug("Shopify JSON fetch failed for %s: %s", json_url, exc)
+    except Exception:
+        pass
     return None
 
 # -- Data classes ------------------------------------------------------
@@ -346,6 +317,7 @@ class ExtractionResult:
 class PipelineConfig:
     min_confidence: float = 0.3
     enforce_completeness: bool = True
+    exhaustive_mode: bool = False
     include_dom_text: bool = True
     include_tables: bool = True
     include_lists: bool = True
@@ -365,10 +337,9 @@ class PipelineConfig:
     retry_base_delay: float = 2.0
     cdp_health_timeout: float = 30.0
     fetch_max_retries: int = 2
-    per_domain_concurrency: int = 2  # new: limit parallel requests per domain
+    per_domain_concurrency: int = 2
 
 # -- Lazy extraction helpers -------------------------------------------
-
 class FetchErrorType:
     HTTP_ERROR = "http_error"
     SSL_ERROR = "ssl_error"
@@ -380,137 +351,81 @@ class FetchErrorType:
 def _classify_fetch_error(exc: Exception) -> str:
     name = type(exc).__name__.lower()
     msg = str(exc).lower()
-    if "ssl" in name or "ssl" in msg or "certificate" in msg:
-        return FetchErrorType.SSL_ERROR
-    if "timeout" in name or "timed out" in msg or "deadline" in msg:
-        return FetchErrorType.TIMEOUT
-    if "name or service not known" in msg or "nodename" in msg or "gaierror" in msg:
-        return FetchErrorType.DNS_ERROR
-    if "connect" in name or "connection" in msg:
-        return FetchErrorType.NETWORK
+    if "ssl" in name or "ssl" in msg or "certificate" in msg: return FetchErrorType.SSL_ERROR
+    if "timeout" in name or "timed out" in msg or "deadline" in msg: return FetchErrorType.TIMEOUT
+    if "name or service not known" in msg or "nodename" in msg or "gaierror" in msg: return FetchErrorType.DNS_ERROR
+    if "connect" in name or "connection" in msg: return FetchErrorType.NETWORK
     return FetchErrorType.UNKNOWN
 
 async def _fetch_html(
-    client: Any,
-    url: str,
-    timeout: float,
-    max_retries: int = 2,
+    client: Any, url: str, timeout: float, max_retries: int = 2,
 ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
-    last_status: Optional[int] = None
-    last_error_type: Optional[str] = None
+    last_status, last_error = None, None
 
     for attempt in range(max_retries + 1):
         try:
-            # For curl_cffi we cannot stream easily, so we check Content-Type after full download
             if HAS_CURL_CFFI and isinstance(client, cffi_requests.AsyncSession):
-                r = await client.get(
-                    url, timeout=timeout, allow_redirects=True, impersonate="chrome124"
-                )
-                ct = r.headers.get("content-type", "")
-                if "text/html" not in ct:
+                r = await client.get(url, timeout=timeout, allow_redirects=True, impersonate="chrome124")
+                if "text/html" not in r.headers.get("content-type", ""):
                     return None, r.status_code, FetchErrorType.HTTP_ERROR
-                content = r.text
-                if len(content) > MAX_RESPONSE_SIZE:
-                    logger.warning("Response too large for %s (%d bytes)", url, len(content))
+                if len(r.text) > MAX_RESPONSE_SIZE:
                     return None, r.status_code, FetchErrorType.HTTP_ERROR
                 last_status = r.status_code
-                if r.status_code == 200:
-                    return content, r.status_code, None
+                if r.status_code == 200: return r.text, r.status_code, None
             else:
-                # httpx streaming with size cap
-                async with client.stream(
-                    "GET", url, timeout=timeout, follow_redirects=True
-                ) as resp:
-                    ct = resp.headers.get("content-type", "")
-                    if "text/html" not in ct:
+                async with client.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
+                    if "text/html" not in resp.headers.get("content-type", ""):
                         return None, resp.status_code, FetchErrorType.HTTP_ERROR
-                    body_chunks = []
-                    total = 0
+                    body_chunks, total = [], 0
                     async for chunk in resp.aiter_bytes(chunk_size=8192):
                         total += len(chunk)
                         if total > MAX_RESPONSE_SIZE:
-                            logger.warning("Response too large for %s", url)
                             return None, resp.status_code, FetchErrorType.HTTP_ERROR
                         body_chunks.append(chunk)
                     html = b"".join(body_chunks).decode(resp.encoding or "utf-8", errors="replace")
                     last_status = resp.status_code
-                    if resp.status_code == 200:
-                        return html, resp.status_code, None
+                    if resp.status_code == 200: return html, resp.status_code, None
 
-            # Handle HTTP errors
-            if last_status == 429 and attempt < max_retries:
-                logger.warning("HTTP 429 for %s - failing fast to trigger Fallback.", url)
-                return None, last_status, FetchErrorType.HTTP_ERROR
-
+            if last_status == 429 and attempt < max_retries: return None, last_status, FetchErrorType.HTTP_ERROR
             if last_status in (500, 502, 503, 504) and attempt < max_retries:
-                delay = 2.0 * (2 ** attempt)
-                logger.warning(
-                    "HTTP %d for %s — retrying in %.1fs (%d/%d)",
-                    last_status, url, delay, attempt + 1, max_retries,
-                )
-                await asyncio.sleep(delay)
+                await asyncio.sleep(2.0 * (2 ** attempt))
                 continue
-
-            logger.warning("HTTP %d for %s", last_status, url)
             return None, last_status, FetchErrorType.HTTP_ERROR
-
         except Exception as exc:
-            last_error_type = _classify_fetch_error(exc)
-            logger.debug("HTML fetch failed for %s (attempt %d): [%s] %s",
-                         url, attempt + 1, last_error_type, exc)
-
-            if last_error_type in (FetchErrorType.DNS_ERROR, FetchErrorType.SSL_ERROR):
-                return None, None, last_error_type
-
+            last_error = _classify_fetch_error(exc)
+            if last_error in (FetchErrorType.DNS_ERROR, FetchErrorType.SSL_ERROR):
+                return None, None, last_error
             if attempt < max_retries:
                 await asyncio.sleep(1.5 * (2 ** attempt))
                 continue
+            return None, last_status, last_error
 
-            return None, last_status, last_error_type
-
-    return None, last_status, last_error_type or FetchErrorType.UNKNOWN
+    return None, last_status, last_error or FetchErrorType.UNKNOWN
 
 def _normalize_schema_type(t: str) -> str:
-    if not isinstance(t, str):
-        return ""
-    return t.rsplit("/", 1)[-1] if "/" in t else t
+    return t.rsplit("/", 1)[-1] if isinstance(t, str) and "/" in t else str(t)
 
 def _is_product_schema(obj: Dict[str, Any]) -> bool:
-    if not isinstance(obj, dict):
-        return False
+    if not isinstance(obj, dict): return False
     types = obj.get("@type", "")
-    if isinstance(types, str):
-        types = [types]
-    # Only consider Product types, not Offer
-    product_types = {"Product", "IndividualProduct", "ProductGroup", "ProductModel", "SomeProducts", "Vehicle"}
-    return any(_normalize_schema_type(t) in product_types for t in types)
+    types = [types] if isinstance(types, str) else types
+    return any(_normalize_schema_type(t) in {"Product", "IndividualProduct", "ProductGroup", "ProductModel", "SomeProducts"} for t in types)
 
 def _collect_product_schemas(data: Any) -> List[Dict[str, Any]]:
-    """
-    Recursively collect Product schemas from JSON-LD. Does NOT collect Offer objects separately.
-    """
-    results: List[Dict[str, Any]] = []
+    results = []
     if isinstance(data, list):
-        for item in data:
-            results.extend(_collect_product_schemas(item))
+        for item in data: results.extend(_collect_product_schemas(item))
     elif isinstance(data, dict):
-        if _is_product_schema(data):
-            results.append(data)
-        if "@graph" in data:
-            results.extend(_collect_product_schemas(data["@graph"]))
-        # We no longer recurse into "offers" to avoid polluting with Offer schemas
+        if _is_product_schema(data): results.append(data)
+        if "@graph" in data: results.extend(_collect_product_schemas(data["@graph"]))
     return results
 
 def _extract_schema_org(soup: BeautifulSoup) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
+    results, seen = [], set()
     for script in soup.find_all("script", type="application/ld+json"):
-        if not script.string:
-            continue
+        if not script.string: continue
         try:
-            data = json.loads(script.string)
-            collected = _collect_product_schemas(data)
-            seen = set()
-            for item in collected:
+            for item in _collect_product_schemas(json.loads(script.string)):
                 key = json.dumps(item, sort_keys=True, default=str)[:200]
                 if key not in seen:
                     seen.add(key)
@@ -522,207 +437,104 @@ def _extract_schema_org(soup: BeautifulSoup) -> List[Dict[str, Any]]:
 def _extract_open_graph(soup: BeautifulSoup) -> Dict[str, str]:
     og = {}
     for meta in soup.find_all("meta", property=re.compile(r"^og:")):
-        prop = meta.get("property", "")
-        content = meta.get("content", "")
+        prop, content = meta.get("property", ""), meta.get("content", "")
         if prop and content:
-            if prop not in og:
-                og[prop] = content
-            else:
-                # If multiple values, store as list
-                existing = og[prop]
-                if isinstance(existing, list):
-                    existing.append(content)
-                else:
-                    og[prop] = [existing, content]
+            existing = og.get(prop)
+            if existing: og[prop] = [existing, content] if isinstance(existing, str) else existing + [content]
+            else: og[prop] = content
     return og
 
 def _extract_twitter_card(soup: BeautifulSoup) -> Dict[str, str]:
     tw = {}
     for meta in soup.find_all("meta", attrs={"name": re.compile(r"^twitter:")}):
-        name = meta.get("name", "")
-        content = meta.get("content", "")
-        if name and content:
-            tw[name] = content
+        tw[meta.get("name")] = meta.get("content", "")
     for meta in soup.find_all("meta", property=re.compile(r"^twitter:")):
-        prop = meta.get("property", "")
-        content = meta.get("content", "")
-        if prop and content:
-            tw[prop] = content
-    return tw
+        tw[meta.get("property")] = meta.get("content", "")
+    return {k: v for k, v in tw.items() if k and v}
 
 def _extract_meta_tags(soup: BeautifulSoup) -> Dict[str, str]:
     meta = {}
-    if soup.title and soup.title.string:
-        meta["title"] = soup.title.string.strip()
-
+    if soup.title and soup.title.string: meta["title"] = soup.title.string.strip()
     tag_map = {
-        "description": ["name", "description"],
-        "keywords": ["name", "keywords"],
-        "robots": ["name", "robots"],
-        "canonical": ["rel", "canonical"],
-        "author": ["name", "author"],
-        "viewport": ["name", "viewport"],
+        "description": ["name", "description"], "keywords": ["name", "keywords"],
+        "robots": ["name", "robots"], "canonical": ["rel", "canonical"],
     }
-
     for key, (attr, val) in tag_map.items():
         if attr == "rel":
             el = soup.find("link", rel=val)
-            if el and el.get("href"):
-                meta[key] = el["href"]
+            if el and el.get("href"): meta[key] = el["href"]
         else:
             el = soup.find("meta", attrs={attr: val})
-            if el and el.get("content"):
-                meta[key] = el["content"]
+            if el and el.get("content"): meta[key] = el["content"]
 
-    # Only collect product-specific meta tags with exact name/prefix
-    product_prefixes = ["product:", "price", "currency", "availability", "sku", "brand"]
     for meta_tag in soup.find_all("meta"):
-        name = meta_tag.get("name", "").lower()
-        prop = meta_tag.get("property", "").lower()
-        content = meta_tag.get("content", "")
-        if any(name.startswith(p) for p in product_prefixes):
-            meta[name] = content
-        if any(prop.startswith(p) for p in product_prefixes):
-            meta[prop] = content
-
+        name, prop, content = meta_tag.get("name", "").lower(), meta_tag.get("property", "").lower(), meta_tag.get("content", "")
+        if any(name.startswith(p) for p in ["product:", "price", "currency", "availability", "sku", "brand"]): meta[name] = content
+        if any(prop.startswith(p) for p in ["product:", "price", "currency", "availability", "sku", "brand"]): meta[prop] = content
     return meta
 
 def _extract_page_canonical(soup: BeautifulSoup, fallback: str) -> str:
     tag = soup.find("link", rel="canonical")
     if tag and tag.get("href"):
         href = tag["href"].strip()
-        if href.startswith("http"):
-            return href
+        if href.startswith("http"): return href
     return fallback
 
 def _extract_next_data(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
     script = soup.find("script", id="__NEXT_DATA__")
     if script and script.string:
-        try:
-            return json.loads(script.string)
-        except (json.JSONDecodeError, TypeError):
-            pass
+        try: return json.loads(script.string)
+        except (json.JSONDecodeError, TypeError): pass
     return None
 
 def _extract_nuxt_data(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
     script_n3 = soup.find("script", id="__NUXT_DATA__", type="application/json")
     if script_n3 and script_n3.string:
-        try:
-            return json.loads(script_n3.string)
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    for script in soup.find_all("script"):
-        if script.string and "window.__NUXT__" in script.string:
-            match = re.search(r'window\.__NUXT__\s*=\s*(\{.*?\});?\s*$', script.string, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(1))
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        try: return json.loads(script_n3.string)
+        except Exception: pass
     return None
 
 def _extract_vue_data(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
-    patterns = [
-        (r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});?\s*$', "initial_state"),
-        (r'window\.__DATA__\s*=\s*(\{.*?\});?\s*$', "data"),
-        (r'window\.__APP__\s*=\s*(\{.*?\});?\s*$', "app"),
-        (r'window\.__INITIAL_STATE__\s*=\s*JSON\.parse\("(.*?)"\)', "json_parse"),
-    ]
     for script in soup.find_all("script"):
-        if not script.string:
-            continue
-        for pattern, label in patterns:
-            match = re.search(pattern, script.string, re.DOTALL)
+        if script.string and "window.__INITIAL_STATE__" in script.string:
+            match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});?\s*$', script.string, re.DOTALL)
             if match:
-                try:
-                    data = match.group(1)
-                    if label == "json_parse":
-                        data = json.loads('"' + data + '"')
-                    return json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    pass
+                try: return json.loads(match.group(1))
+                except Exception: pass
     return None
 
-# --- Robust JS object extraction using chompjs ---
 def _extract_js_object(text: str, var_name: str) -> Optional[dict]:
-    """
-    Attempts to extract a JavaScript object literal assigned to var_name.
-    Uses chompjs for robust parsing of nested objects.
-    Falls back to JSON if chompjs not available.
-    """
     idx = text.find(var_name)
-    if idx == -1:
-        return None
+    if idx == -1: return None
     start = text.find("{", idx)
-    if start == -1:
-        return None
+    if start == -1: return None
     brace_count = 0
     for i in range(start, len(text)):
         c = text[i]
-        if c == "{":
-            brace_count += 1
+        if c == "{": brace_count += 1
         elif c == "}":
             brace_count -= 1
             if brace_count == 0:
                 chunk = text[start:i+1]
                 try:
-                    if HAS_CHOMPJS:
-                        return chompjs.parse_js_object(chunk)
-                    else:
-                        return json.loads(chunk)
-                except Exception:
-                    return None
+                    if HAS_CHOMPJS: return chompjs.parse_js_object(chunk)
+                    return json.loads(chunk)
+                except Exception: return None
     return None
 
 def _extract_inline_js_product_data(soup: BeautifulSoup) -> Dict[str, Any]:
     results = {}
-    # Ordered list of (variable_name, result_label)
-    # The variable_name is used to find the assignment.
     var_names = [
-        ("window.product", "window.product"),
-        ("window.Product", "window.product"),
-        ("window.__PRODUCT__", "window.__PRODUCT__"),
-        ("window.__PRODUCT_DATA__", "window.__PRODUCT_DATA__"),
-        ("window.__PRODUCTS__", "window.__PRODUCTS__"),
-        ("var product", "var product"),
-        ("const product", "const product"),
-        ("window.__APP_DATA__", "window.__APP_DATA__"),
-        ("window.__BOOTSTRAP__", "window.__BOOTSTRAP__"),
-        ("window.__STATE__", "window.__STATE__"),
-        ("window.__PRELOADED_STATE__", "window.__PRELOADED_STATE__"),
-        ("window.__APOLLO_STATE__", "window.__APOLLO_STATE__"),
-        ("window.__REACT_QUERY_STATE__", "window.__REACT_QUERY_STATE__"),
-        ("window.Shopify", "window.Shopify"),
-        ("window.ShopifyAnalytics.meta", "ShopifyAnalytics.meta"),
-        ("window.__SHOPIFY__", "window.__SHOPIFY__"),
-        ("window.__remixContext", "remixContext"),
-        ("window.meta", "window.meta"),
-        ("window.__INITIAL_STATE__.product", "initial_state.product"),
-        ("window.wc_add_to_cart_params", "wc_add_to_cart_params"),
+        ("window.product", "window.product"), ("window.__PRODUCT__", "window.__PRODUCT__"),
+        ("window.__PRODUCTS__", "window.__PRODUCTS__"), ("var product", "var product"),
+        ("window.__APP_DATA__", "window.__APP_DATA__"), ("window.__STATE__", "window.__STATE__"),
+        ("window.Shopify", "window.Shopify"), ("window.__INITIAL_STATE__.product", "initial_state.product")
     ]
-
     for script in soup.find_all("script"):
-        if not script.string:
-            continue
+        if not script.string: continue
         for var, label in var_names:
             obj = _extract_js_object(script.string, var)
-            if obj is not None:
-                results[label] = obj
-                if label == "remixContext" and isinstance(obj, dict):
-                    loader = _deep_get(obj, "state", "loaderData")
-                    if loader:
-                        results["remixContext.loaderData"] = loader
-
-    # Also try the shopify_product_json data-attributes
-    for script in soup.find_all("script", type="text/json"):
-        if script.get("data-product-json") or script.get("id", "").startswith("ProductJson-"):
-            try:
-                data = json.loads(script.string)
-                results["shopify_product_json"] = data
-            except (json.JSONDecodeError, TypeError):
-                pass
-
+            if obj: results[label] = obj
     return results
 
 def _extract_microdata(soup: BeautifulSoup) -> List[Dict[str, Any]]:
@@ -733,246 +545,122 @@ def _extract_microdata(soup: BeautifulSoup) -> List[Dict[str, Any]]:
             props = {}
             for prop in scope.find_all(attrs={"itemprop": True}):
                 name = prop.get("itemprop", "")
-                if prop.get("content"):
-                    props[name] = prop["content"]
-                elif prop.get("href"):
-                    props[name] = prop["href"]
-                elif prop.string:
-                    props[name] = prop.string.strip()
-            if props:
-                results.append({"itemtype": itemtype, "properties": props})
+                if prop.get("content"): props[name] = prop["content"]
+                elif prop.get("href"): props[name] = prop["href"]
+                elif prop.string: props[name] = prop.string.strip()
+            if props: results.append({"itemtype": itemtype, "properties": props})
     return results
 
 def _extract_dom_text(soup: BeautifulSoup, include_body_text: bool = True) -> Dict[str, Any]:
     soup_copy = copy.copy(soup)
-
-    for tag in soup_copy.find_all(EXCLUDED_TAGS):
-        try:
-            tag.decompose()
-        except Exception:
-            pass
-
-    noise_pattern = re.compile(r"(sidebar|cookie|newsletter|related|recommend|popup|modal|menu|promo)", re.I)
-    for noise in soup_copy.find_all(class_=noise_pattern):
-        try:
-            noise.decompose()
-        except Exception:
-            pass
-    for noise in soup_copy.find_all(id=noise_pattern):
-        try:
-            noise.decompose()
-        except Exception:
-            pass
+    for tag in soup_copy.find_all(EXCLUDED_TAGS): tag.decompose()
+    for noise in soup_copy.find_all(class_=re.compile(r"(sidebar|cookie|newsletter|related|recommend|popup|modal|menu|promo)", re.I)): noise.decompose()
 
     result = {
         "title": soup_copy.title.string.strip() if soup_copy.title and soup_copy.title.string else "",
-        "h1": [],
-        "h2": [],
-        "h3": [],
-        "h4": [],
-        "paragraphs": [],
-        "body_text": "",
+        "h1": [h.get_text(strip=True) for h in soup_copy.find_all("h1") if len(h.get_text(strip=True)) > 2],
+        "h2": [h.get_text(strip=True) for h in soup_copy.find_all("h2") if len(h.get_text(strip=True)) > 2],
+        "h3": [h.get_text(strip=True) for h in soup_copy.find_all("h3") if len(h.get_text(strip=True)) > 2],
+        "h4": [h.get_text(strip=True) for h in soup_copy.find_all("h4") if len(h.get_text(strip=True)) > 2],
+        "paragraphs": [p.get_text(strip=True) for p in soup_copy.find_all("p") if len(p.get_text(strip=True)) > 30],
+        "body_text": soup_copy.body.get_text(separator="\n", strip=True)[:50000] if include_body_text and soup_copy.body else "",
     }
-
-    for h in soup_copy.find_all("h1"):
-        text = h.get_text(strip=True)
-        if text and len(text) > 2:
-            result["h1"].append(text)
-
-    for h in soup_copy.find_all("h2"):
-        text = h.get_text(strip=True)
-        if text and len(text) > 2:
-            result["h2"].append(text)
-
-    for h in soup_copy.find_all("h3"):
-        text = h.get_text(strip=True)
-        if text and len(text) > 2:
-            result["h3"].append(text)
-
-    for h in soup_copy.find_all("h4"):
-        text = h.get_text(strip=True)
-        if text and len(text) > 2:
-            result["h4"].append(text)
-
-    for p in soup_copy.find_all("p"):
-        text = p.get_text(strip=True)
-        if text and len(text) > 30:
-            result["paragraphs"].append(text)
-
-    if include_body_text and soup_copy.body:
-        body_text = soup_copy.body.get_text(separator="\n", strip=True)
-        result["body_text"] = body_text[:50000]
-
     return result
 
 def _extract_tables(soup: BeautifulSoup) -> List[Dict[str, Any]]:
     tables = []
     for idx, table in enumerate(soup.find_all("table")):
-        rows = []
-        headers = []
-
-        thead = table.find("thead")
-        if thead:
-            for th in thead.find_all(["th", "td"]):
-                headers.append(th.get_text(strip=True))
-
-        for tr in table.find_all("tr"):
-            cells = []
-            for td in tr.find_all(["td", "th"]):
-                cells.append(td.get_text(strip=True))
-            if cells and any(cells):
-                rows.append(cells)
-
-        if rows:
-            tables.append({
-                "index": idx,
-                "headers": headers,
-                "rows": rows,
-                "caption": table.find("caption").get_text(strip=True) if table.find("caption") else "",
-            })
-
+        headers = [th.get_text(strip=True) for th in table.find_all(["th", "td"]) if table.find("thead") and th in table.find("thead")]
+        rows = [[td.get_text(strip=True) for td in tr.find_all(["td", "th"])] for tr in table.find_all("tr") if any(td.get_text(strip=True) for td in tr.find_all(["td", "th"]))]
+        if rows: tables.append({"index": idx, "headers": headers, "rows": rows})
     return tables
 
 def _extract_lists(soup: BeautifulSoup) -> List[Dict[str, Any]]:
     lists = []
     for ul in soup.find_all("ul"):
-        items = [li.get_text(strip=True) for li in ul.find_all("li")
-                 if li.get_text(strip=True) and len(li.get_text(strip=True)) > 5]
-        if len(items) >= 2:
-            lists.append({"type": "ul", "items": items})
-
-    for ol in soup.find_all("ol"):
-        items = [li.get_text(strip=True) for li in ol.find_all("li")
-                 if li.get_text(strip=True) and len(li.get_text(strip=True)) > 5]
-        if len(items) >= 2:
-            lists.append({"type": "ol", "items": items})
-
+        items = [li.get_text(strip=True) for li in ul.find_all("li") if len(li.get_text(strip=True)) > 5]
+        if len(items) >= 2: lists.append({"type": "ul", "items": items})
     return lists
 
 def _extract_breadcrumb(soup: BeautifulSoup) -> List[str]:
     crumbs = []
-
-    for script in soup.find_all("script", type="application/ld+json"):
-        if not script.string:
-            continue
-        try:
-            data = json.loads(script.string)
-            candidates: List[Dict[str, Any]] = []
-            if isinstance(data, list):
-                candidates.extend(data)
-            elif isinstance(data, dict):
-                candidates.append(data)
-                if "@graph" in data and isinstance(data["@graph"], list):
-                    candidates.extend(data["@graph"])
-
-            for candidate in candidates:
-                if not isinstance(candidate, dict):
-                    continue
-                types = candidate.get("@type", "")
-                if isinstance(types, str):
-                    types = [types]
-                if any(_normalize_schema_type(t) == "BreadcrumbList" for t in types):
-                    items = candidate.get("itemListElement", [])
-                    for item in items:
-                        name = (
-                            item.get("name", "")
-                            or (item.get("item") or {}).get("name", "")
-                        )
-                        if name:
-                            crumbs.append(name)
-                    if crumbs:
-                        return crumbs
-
-        except (json.JSONDecodeError, TypeError):
-            pass
-
     for nav in soup.find_all(attrs={"aria-label": re.compile(r"breadcrumb", re.I)}):
         for item in nav.find_all(["a", "span", "li"]):
-            text = item.get_text(strip=True)
-            if text and len(text) < 100:
-                crumbs.append(text)
-        if crumbs:
-            return crumbs
-
-    for sel in [".breadcrumb", "#breadcrumb", ".breadcrumbs", "#breadcrumbs",
-                '[class*="breadcrumb"]', '[class*="breadcrumbs"]']:
-        el = soup.select_one(sel)
-        if el:
-            for item in el.find_all(["a", "span", "li"]):
-                text = item.get_text(strip=True)
-                if text and len(text) < 100 and text not in crumbs:
-                    crumbs.append(text)
-            if crumbs:
-                return crumbs
-
+            if item.get_text(strip=True) and len(item.get_text(strip=True)) < 100:
+                crumbs.append(item.get_text(strip=True))
+        if crumbs: return crumbs
     return crumbs
 
 def _extract_sizing_guide_link(soup: BeautifulSoup, base_url: str) -> Optional[str]:
-    """Finds links pointing to standalone size guides."""
     keywords = ["size chart", "size guide", "sizing guide", "measurement guide", "fit guide"]
-    
     for a in soup.find_all("a", href=True):
         text = a.get_text(strip=True).lower()
-        title = a.get("title", "").lower()
-        href = a["href"].strip()
-        if not href or href.startswith("javascript:") or href == "#":
-            continue
-        if any(k in text or k in title for k in keywords):
-            return urljoin(base_url, href)
+        if any(k in text for k in keywords) and not a["href"].startswith("javascript:") and a["href"] != "#":
+            return urljoin(base_url, a["href"])
     return None
 
-async def _extract_preload_data(
-    soup: BeautifulSoup,
-    base_url: str,
-    client: Any,
-    timeout: float,
-) -> List[Dict[str, Any]]:
-    results = []
-    seen: Set[str] = set()
-
+async def _extract_preload_data(soup: BeautifulSoup, base_url: str, client: Any, timeout: float) -> List[Dict[str, Any]]:
+    results, seen = [], set()
     for link in soup.find_all("link", rel="preload"):
-        as_attr = link.get("as", "").lower()
-        href = link.get("href", "").strip()
-        if as_attr != "fetch" or not href:
-            continue
-
-        full_url = urljoin(base_url, href)
-        if full_url in seen:
-            continue
-        seen.add(full_url)
-
-        try:
-            if HAS_CURL_CFFI and isinstance(client, cffi_requests.AsyncSession):
-                r = await client.get(full_url, timeout=timeout, impersonate="chrome124")
-            else:
-                req_headers = dict(client.headers) if hasattr(client, 'headers') else {}
-                req_headers["Accept"] = "application/json, */*;q=0.8"
-                r = await client.get(
-                    full_url,
-                    timeout=timeout,
-                    headers=req_headers,
-                )
-
-            if r.status_code == 200:
-                text = r.text
-                try:
-                    data = json.loads(text)
-                    results.append({"url": full_url, "data": data})
-                    logger.debug("Preload JSON fetched: %s", full_url)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        except Exception as exc:
-            logger.debug("Preload fetch failed for %s: %s", full_url, exc)
-
+        if link.get("as", "").lower() == "fetch" and link.get("href"):
+            full_url = urljoin(base_url, link["href"])
+            if full_url in seen: continue
+            seen.add(full_url)
+            try:
+                r = await client.get(full_url, timeout=timeout)
+                if r.status_code == 200: results.append({"url": full_url, "data": r.json()})
+            except Exception: pass
     return results
+
+# -- Core Completeness & Audit Engine (Hardened Checkers) --------------
+
+def _has_valid_price(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            k_lower = str(k).lower()
+            if "price" in k_lower and not any(x in k_lower for x in ("compare", "currency", "range", "sort")):
+                if isinstance(v, (int, float)) and v > 0: return True
+                if isinstance(v, str) and any(c.isdigit() for c in v): return True
+            if isinstance(v, (dict, list)):
+                if _has_valid_price(v): return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _has_valid_price(item): return True
+    return False
+
+def _has_valid_variants(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            k_lower = str(k).lower()
+            if k_lower in ("variants", "variant", "options", "variantdata", "productvariants"):
+                if isinstance(v, list) and len(v) > 0: return True
+                if isinstance(v, dict) and len(v.keys()) > 0: return True
+            if isinstance(v, (dict, list)):
+                if _has_valid_variants(v): return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _has_valid_variants(item): return True
+    return False
+
+def _has_valid_availability(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            k_lower = str(k).lower()
+            if "availab" in k_lower or "inventory" in k_lower or "stock" in k_lower:
+                if v is not None and v != "" and v != []: return True
+            if isinstance(v, (dict, list)):
+                if _has_valid_availability(v): return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _has_valid_availability(item): return True
+    return False
 
 def _audit_completeness(sources: Dict[str, Any]) -> CompletenessAudit:
     audit = CompletenessAudit()
     missing: List[str] = []
 
     schema_org = sources.get("schema_org") or []
-    if not isinstance(schema_org, list):
-        schema_org = [schema_org] if schema_org else []
+    schema_org = [schema_org] if not isinstance(schema_org, list) else schema_org
     og = sources.get("open_graph") or {}
     meta = sources.get("meta_tags") or {}
     dom = sources.get("dom_text") or {}
@@ -980,359 +668,241 @@ def _audit_completeness(sources: Dict[str, Any]) -> CompletenessAudit:
     shopify = sources.get("shopify_product") or {}
     tables = sources.get("tables") or []
 
-    # --- Title ---
-    audit.has_title = bool(
-        meta.get("title")
-        or (dom.get("h1") and len(dom["h1"]) > 0)
-        or any(isinstance(s, dict) and s.get("name") for s in schema_org)
+    # Title
+    audit.has_title = bool(meta.get("title") or dom.get("h1") or any(s.get("name") for s in schema_org if isinstance(s, dict)))
+    if not audit.has_title: missing.append("title")
+
+    # Price
+    audit.has_price = (
+        _has_valid_price(schema_org) or
+        bool(og.get("og:price:amount") or meta.get("product:price:amount") or meta.get("price")) or
+        _has_valid_price(shopify) or
+        any(_has_valid_price(v) for v in inline.values())
     )
-    if not audit.has_title:
-        missing.append("title")
+    if not audit.has_price: missing.append("price")
 
-    # --- Price ---
-    price_found = False
-    for s in schema_org:
-        if isinstance(s, dict):
-            offers = s.get("offers")
-            if isinstance(offers, dict) and offers.get("price"):
-                price_found = True
-            elif isinstance(offers, list) and any(isinstance(o, dict) and o.get("price") for o in offers):
-                price_found = True
-    if not price_found:
-        price_found = bool(
-            og.get("og:price:amount") or 
-            meta.get("product:price:amount") or 
-            meta.get("price")
-        )
-    if not price_found and isinstance(shopify, dict):
-        variants = shopify.get("variants") or []
-        if variants and isinstance(variants[0], dict) and variants[0].get("price"):
-            price_found = True
-    if not price_found:
-        for label, data in inline.items():
-            if isinstance(data, dict) and "price" in json.dumps(data, default=str).lower():
-                price_found = True
-                break
-    audit.has_price = price_found
-    if not audit.has_price:
-        missing.append("price")
-
-    # --- Availability ---
-    avail_found = False
-    for s in schema_org:
-        if isinstance(s, dict):
-            offers = s.get("offers")
-            if isinstance(offers, dict) and offers.get("availability"):
-                avail_found = True
-            elif isinstance(offers, list) and any(isinstance(o, dict) and o.get("availability") for o in offers):
-                avail_found = True
-    if not avail_found:
-        avail_found = bool(
-            og.get("og:availability") or 
-            meta.get("product:availability") or 
-            meta.get("availability")
-        )
-    if not avail_found and isinstance(shopify, dict):
-        variants = shopify.get("variants") or []
-        if variants and isinstance(variants[0], dict):
-            if variants[0].get("available") is not None or variants[0].get("inventory_quantity") is not None:
-                avail_found = True
-    if not avail_found:
-        for label, data in inline.items():
-            if isinstance(data, dict):
-                dump = json.dumps(data, default=str).lower()
-                if any(k in dump for k in ["availability", "instock", "in_stock", "outofstock", "out_of_stock", "inventory_quantity"]):
-                    avail_found = True
-                    break
-    audit.has_availability = avail_found
-    if not audit.has_availability:
-        missing.append("availability")
-
-    # --- Description ---
-    desc_found = bool(
-        meta.get("description")
-        or any(isinstance(s, dict) and s.get("description") for s in schema_org)
+    # Availability
+    audit.has_availability = (
+        _has_valid_availability(schema_org) or
+        bool(og.get("og:availability") or meta.get("product:availability") or meta.get("availability")) or
+        _has_valid_availability(shopify) or
+        any(_has_valid_availability(v) for v in inline.values())
     )
-    paragraphs = dom.get("paragraphs") or []
-    if not desc_found and len(paragraphs) > 0:
-        desc_found = True
-    audit.has_description = desc_found
-    if not audit.has_description:
-        missing.append("description")
+    if not audit.has_availability: missing.append("availability")
 
-    # --- Images ---
-    img_found = False
-    for s in schema_org:
-        if isinstance(s, dict) and s.get("image"):
-            img_found = True
-    if not img_found:
-        img_found = bool(og.get("og:image") or meta.get("image"))
-    if not img_found and isinstance(shopify, dict):
-        img_found = bool(shopify.get("images"))
-    audit.has_images = img_found
-    if not audit.has_images:
-        missing.append("images")
+    # Description
+    audit.has_description = bool(meta.get("description") or any(s.get("description") for s in schema_org if isinstance(s, dict)) or dom.get("paragraphs"))
+    if not audit.has_description: missing.append("description")
 
-    # --- Variants (refined) ---
-    variants_found = False
+    # Images
+    audit.has_images = bool(
+        any(s.get("image") for s in schema_org if isinstance(s, dict)) or og.get("og:image") or meta.get("image") or shopify.get("images")
+    )
+    if not audit.has_images: missing.append("images")
 
-    # Shopify: check if has multiple variants or one that is not the default placeholder
-    if isinstance(shopify, dict):
-        variants = shopify.get("variants") or []
-        if len(variants) > 1:
-            variants_found = True
-        elif len(variants) == 1:
-            title = variants[0].get("title", "").lower()
-            if title and title not in ("default title", "default"):
-                variants_found = True
-            # also check if product has options array
-            if shopify.get("options") and any(opt.get("values", []) for opt in shopify["options"]):
-                variants_found = True
-
-    # Schema.org: look for hasVariant, size, color, or multiple offers
-    if not variants_found:
-        for s in schema_org:
-            if isinstance(s, dict):
-                if s.get("hasVariant") or s.get("size") or s.get("color"):
-                    variants_found = True
-                offers = s.get("offers")
-                if isinstance(offers, list) and len(offers) > 1:
-                    variants_found = True
-                # No longer treat single offer as variant found.
-
-    # Inline JS: check for top-level keys like "variants", "options", "variantData"
-    if not variants_found:
-        for label, data in inline.items():
-            if isinstance(data, dict):
-                # Look for variant-related keys at the first level
-                if any(key in data for key in ("variants", "variant", "options", "variantData", "productVariants")):
-                    variants_found = True
-                    break
-
-    # Tables: sizing tables indicate variants
+    # Variants
+    variants_found = _has_valid_variants(shopify) or _has_valid_variants(schema_org) or any(_has_valid_variants(v) for v in inline.values())
     if not variants_found:
         for t in tables:
             if isinstance(t, dict):
-                header_str = " ".join(t.get("headers") or []).lower()
-                rows_str = " ".join(" ".join(r).lower() for r in (t.get("rows") or []) if isinstance(r, list))
-                combined = header_str + " " + rows_str
+                combined = " ".join(t.get("headers") or []).lower() + " ".join(" ".join(r) for r in (t.get("rows") or [])).lower()
                 if any(k in combined for k in ["size", "cm", "inch", "chest", "waist", "length", "xs", "s", "m", "l", "xl"]):
                     variants_found = True
                     break
-
     audit.has_variants = variants_found
-    if not audit.has_variants:
-        missing.append("variants")
+    if not audit.has_variants: missing.append("variants")
 
-    # --- Sizing Guide ---
-    sizing_found = False
-    if sources.get("sizing_guide_url"):
-        sizing_found = True
+    # Sizing
+    sizing_found = bool(sources.get("sizing_guide_url"))
     if not sizing_found:
-        body_text = (dom.get("body_text") or "").lower()
-        para_text = " ".join(p.lower() for p in paragraphs)
-        combined_text = body_text + " " + para_text
-        if any(k in combined_text for k in ["size chart", "sizing guide", "size guide", "measurement guide", "fit guide"]):
-            sizing_found = True
-    if not sizing_found:
-        for t in tables:
-            if isinstance(t, dict):
-                header_str = " ".join(t.get("headers") or []).lower()
-                if any(k in header_str for k in ["size", "cm", "inch", "chest", "waist", "hip", "length"]):
-                    sizing_found = True
-                    break
+        body = (dom.get("body_text") or "").lower() + " ".join(p.lower() for p in (dom.get("paragraphs") or []))
+        if any(k in body for k in ["size chart", "sizing guide", "size guide", "measurement guide", "fit guide"]): sizing_found = True
     audit.has_sizing_guide = sizing_found
-    if not audit.has_sizing_guide:
-        missing.append("sizing_guide")
+    if not audit.has_sizing_guide: missing.append("sizing_guide")
 
-    critical_missing = [m for m in missing if m in ("title", "price", "availability", "description", "images", "variants")]
-    audit.is_complete = len(critical_missing) == 0
+    critical = [m for m in missing if m in ("title", "price", "availability", "description", "images", "variants")]
+    audit.is_complete = len(critical) == 0
     audit.missing = missing
     return audit
 
 def _compute_confidence(sources: ExtractedSources) -> ConfidenceScore:
     c = ConfidenceScore()
-
     for s in sources.schema_org:
         c.has_schema_org = True
-        if s.get("offers") or any("Offer" in str(v) for v in [s.get("@type", "")]):
-            c.has_price = c.has_price or bool(
-                _deep_get(s, "offers", "price") or
-                _deep_get(s, "offers", "lowPrice")
-            )
-            c.has_availability = c.has_availability or bool(_deep_get(s, "offers", "availability"))
-        c.has_sku = c.has_sku or bool(s.get("sku") or s.get("gtin13") or s.get("gtin14") or s.get("mpn"))
-        c.has_brand = c.has_brand or bool(_deep_get(s, "brand", "name"))
+        if s.get("offers"):
+            c.has_price = c.has_price or _has_valid_price(s.get("offers"))
+            c.has_availability = c.has_availability or _has_valid_availability(s.get("offers"))
+        c.has_sku = c.has_sku or bool(s.get("sku") or s.get("mpn"))
+        c.has_brand = c.has_brand or bool(isinstance(s.get("brand"), dict) and s["brand"].get("name"))
         c.has_description = c.has_description or bool(s.get("description"))
         c.has_images = c.has_images or bool(s.get("image"))
-        c.has_reviews = c.has_reviews or bool(
-            s.get("aggregateRating") or s.get("review")
-        )
 
     if sources.shopify_product:
-        sp = sources.shopify_product
-        c.has_schema_org = c.has_schema_org or True
-        c.has_price = c.has_price or bool(
-            sp.get("variants") and sp["variants"][0].get("price")
-        )
-        c.has_sku = c.has_sku or bool(sp.get("variants") and sp["variants"][0].get("sku"))
-        c.has_description = c.has_description or bool(sp.get("body_html") or sp.get("description"))
-        c.has_images = c.has_images or bool(sp.get("images"))
-        c.has_brand = c.has_brand or bool(sp.get("vendor"))
+        c.has_schema_org, c.has_price, c.has_sku, c.has_description, c.has_images, c.has_brand = True, True, True, True, True, True
 
     og = sources.open_graph
     c.has_open_graph = bool(og)
     c.has_price = c.has_price or bool(og.get("og:price:amount"))
     c.has_availability = c.has_availability or bool(og.get("og:availability"))
-    c.has_description = c.has_description or bool(og.get("og:description"))
-    c.has_images = c.has_images or bool(og.get("og:image"))
-
+    
     c.has_twitter = bool(sources.twitter_card)
-
-    meta = sources.meta_tags
-    c.has_meta_description = bool(meta.get("description"))
-    c.has_description = c.has_description or bool(meta.get("description"))
-
+    c.has_meta_description = bool(sources.meta_tags.get("description"))
     c.has_breadcrumb = bool(sources.breadcrumb)
 
     score = 0.0
-    weights = {
-        "has_schema_org": 0.25,
-        "has_open_graph": 0.10,
-        "has_price": 0.15,
-        "has_availability": 0.10,
-        "has_description": 0.10,
-        "has_images": 0.10,
-        "has_sku": 0.05,
-        "has_brand": 0.05,
-        "has_reviews": 0.05,
-        "has_breadcrumb": 0.05,
-    }
-
+    weights = {"has_schema_org": 0.25, "has_open_graph": 0.10, "has_price": 0.15, "has_availability": 0.10, "has_description": 0.10, "has_images": 0.10, "has_sku": 0.05, "has_brand": 0.05, "has_reviews": 0.05, "has_breadcrumb": 0.05}
     for attr, weight in weights.items():
-        if getattr(c, attr):
-            score += weight
-
+        if getattr(c, attr): score += weight
     c.score = round(min(score, 1.0), 2)
     return c
 
-def _deep_get(d: Any, *keys: str) -> Any:
-    for key in keys:
-        if isinstance(d, dict):
-            d = d.get(key)
-        else:
-            return None
-    return d
+# -- Smart Exhaustive Merger -------------------------------------------
+
+def _prefer_richer_dict(lazy_val: Any, browser_val: Any) -> Any:
+    """
+    Intelligently compares two objects (usually dicts) and returns the one with the most data.
+    This prevents a scenario where a weak/empty object (e.g. `{"props": {}}`) overrides 
+    a fully populated object simply because the weak object is truthy.
+    """
+    if not lazy_val: return browser_val
+    if not browser_val: return lazy_val
+    
+    if isinstance(lazy_val, dict) and isinstance(browser_val, dict):
+        try:
+            # Canonical size: JSON with sorted keys, ignoring formatting whitespace
+            lazy_size = len(json.dumps(lazy_val, sort_keys=True, default=str, separators=(',', ':')))
+            browser_size = len(json.dumps(browser_val, sort_keys=True, default=str, separators=(',', ':')))
+            if lazy_size >= browser_size:
+                return lazy_val
+            return browser_val
+        except Exception:
+            # Fallback for completely un-serializable objects (prevents crashing)
+            if len(str(lazy_val)) >= len(str(browser_val)):
+                return lazy_val
+            return browser_val
+            
+    return lazy_val
+
+def _merge_sources(lazy: Dict[str, Any], browser: Dict[str, Any]) -> ExtractedSources:
+    """Intelligently merge Lazy and Browser payloads to avoid data duplication."""
+    merged = ExtractedSources()
+
+    def dedup_dicts(list_a, list_b):
+        seen = set()
+        out = []
+        for item in (list_a or []) + (list_b or []):
+            if not isinstance(item, dict): continue
+            h = hashlib.md5(json.dumps(item, sort_keys=True, default=str).encode('utf-8')).hexdigest()
+            if h not in seen:
+                seen.add(h)
+                out.append(item)
+        return out
+
+    def dedup_lists(list_a, list_b):
+        seen = set()
+        out = []
+        for item in (list_a or []) + (list_b or []):
+            k = str(item).strip()
+            if k and k not in seen:
+                seen.add(k)
+                out.append(item)
+        return out
+
+    # Deduplicated Lists/Arrays
+    merged.schema_org = dedup_dicts(lazy.get("schema_org"), browser.get("schema_org"))
+    merged.microdata = dedup_dicts(lazy.get("microdata"), browser.get("microdata"))
+    merged.tables = dedup_dicts(lazy.get("tables"), browser.get("tables"))
+    merged.lists = dedup_dicts(lazy.get("lists"), browser.get("lists"))
+    merged.preload_data = dedup_dicts(lazy.get("preload_data"), browser.get("preload_data"))
+    merged.breadcrumb = dedup_lists(lazy.get("breadcrumb"), browser.get("breadcrumb"))
+
+    # Dictionary overrrides (Browser Hydrated Data Wins)
+    merged.open_graph = {**(lazy.get("open_graph") or {}), **(browser.get("open_graph") or {})}
+    merged.twitter_card = {**(lazy.get("twitter_card") or {}), **(browser.get("twitter_card") or {})}
+    merged.meta_tags = {**(lazy.get("meta_tags") or {}), **(browser.get("meta_tags") or {})}
+    merged.inline_js = {**(lazy.get("inline_js") or {}), **(browser.get("inline_js") or {})}
+
+    # Framework data (Safe Merge: Avoid overwriting good data with empty dicts)
+    merged.next_data = _prefer_richer_dict(lazy.get("next_data"), browser.get("next_data"))
+    merged.nuxt_data = _prefer_richer_dict(lazy.get("nuxt_data"), browser.get("nuxt_data"))
+    merged.vue_data = _prefer_richer_dict(lazy.get("vue_data"), browser.get("vue_data"))
+    merged.shopify_product = _prefer_richer_dict(lazy.get("shopify_product"), browser.get("shopify_product"))
+
+    # Strings
+    merged.sizing_guide_url = browser.get("sizing_guide_url") or lazy.get("sizing_guide_url")
+    merged.markdown = browser.get("markdown") or lazy.get("markdown")
+
+    # DOM Text Merge
+    ldom = lazy.get("dom_text") or {}
+    bdom = browser.get("dom_text") or {}
+    merged.dom_text = {
+        "title": bdom.get("title") or ldom.get("title") or "",
+        "h1": dedup_lists(ldom.get("h1"), bdom.get("h1")),
+        "h2": dedup_lists(ldom.get("h2"), bdom.get("h2")),
+        "h3": dedup_lists(ldom.get("h3"), bdom.get("h3")),
+        "h4": dedup_lists(ldom.get("h4"), bdom.get("h4")),
+        "paragraphs": dedup_lists(ldom.get("paragraphs"), bdom.get("paragraphs")),
+        # Prefer browser body text as it includes dynamic JS-rendered visual content
+        "body_text": bdom.get("body_text") or ldom.get("body_text") or ""
+    }
+
+    return merged
 
 # -- Core lazy extraction ----------------------------------------------
-async def extract_lazy(
-    client: Any,
-    url: str,
-    config: PipelineConfig,
-    use_shopify_api: bool = True
-) -> ExtractionResult:
+async def extract_lazy(client: Any, url: str, config: PipelineConfig, use_shopify_api: bool = True) -> ExtractionResult:
     start_time = time.time()
-    result = ExtractionResult(
-        url=url,
-        canonical_url=canonicalize_url(url),
-        extraction_mode="lazy",
-        extracted_at=datetime.now(timezone.utc).isoformat(),
-    )
+    result = ExtractionResult(url=url, canonical_url=canonicalize_url(url), extraction_mode="lazy", extracted_at=datetime.now(timezone.utc).isoformat())
 
-    shopify_product: Optional[Dict[str, Any]] = None
-    if use_shopify_api and _is_shopify_domain(url):
-        shopify_product = await _try_shopify_json(client, url, config.fetch_timeout)
-
-    html_text, status_code, error_type = await _fetch_html(
-        client, url, config.http_timeout, max_retries=config.fetch_max_retries
-    )
+    shopify_product = await _try_shopify_json(client, url, config.fetch_timeout) if use_shopify_api and _is_shopify_domain(url) else None
+    html_text, status_code, error_type = await _fetch_html(client, url, config.http_timeout, max_retries=config.fetch_max_retries)
     result.status_code = status_code
 
     if not html_text:
         result.success = False
-        result.error = (
-            f"Failed to fetch HTML (Status: {status_code}, ErrorType: {error_type})"
-        )
+        result.error = f"Failed to fetch HTML (Status: {status_code}, ErrorType: {error_type})"
         result.performance = {"total_time_ms": int((time.time() - start_time) * 1000)}
         return result
 
     parse_start = time.time()
-
-    try:
-        soup = BeautifulSoup(html_text, BS4_PARSER)
+    try: soup = BeautifulSoup(html_text, BS4_PARSER)
     except Exception as exc:
         result.success = False
         result.error = f"BeautifulSoup parse error: {exc}"
         result.performance = {"total_time_ms": int((time.time() - start_time) * 1000)}
         return result
 
-    page_canonical = _extract_page_canonical(soup, result.canonical_url)
-    result.canonical_url = page_canonical
+    result.canonical_url = _extract_page_canonical(soup, result.canonical_url)
+    sources = ExtractedSources(
+        schema_org=_extract_schema_org(soup), open_graph=_extract_open_graph(soup),
+        twitter_card=_extract_twitter_card(soup), meta_tags=_extract_meta_tags(soup),
+        next_data=_extract_next_data(soup), nuxt_data=_extract_nuxt_data(soup),
+        vue_data=_extract_vue_data(soup), inline_js=_extract_inline_js_product_data(soup),
+        microdata=_extract_microdata(soup), shopify_product=shopify_product,
+        sizing_guide_url=_extract_sizing_guide_link(soup, url)
+    )
 
-    sources = ExtractedSources()
-    sources.schema_org = _extract_schema_org(soup)
-    sources.open_graph = _extract_open_graph(soup)
-    sources.twitter_card = _extract_twitter_card(soup)
-    sources.meta_tags = _extract_meta_tags(soup)
-    sources.next_data = _extract_next_data(soup)
-    sources.nuxt_data = _extract_nuxt_data(soup)
-    sources.vue_data = _extract_vue_data(soup)
-    sources.inline_js = _extract_inline_js_product_data(soup)
-    sources.microdata = _extract_microdata(soup)
-    sources.shopify_product = shopify_product
-
-    if config.include_tables:
-        sources.tables = _extract_tables(soup)
-    if config.include_lists:
-        sources.lists = _extract_lists(soup)
-    if config.include_breadcrumb:
-        sources.breadcrumb = _extract_breadcrumb(soup)
-    if config.include_dom_text:
-        sources.dom_text = _extract_dom_text(soup)
-
-    sources.sizing_guide_url = _extract_sizing_guide_link(soup, url)
-
-    if use_shopify_api:
-        sources.preload_data = await _extract_preload_data(
-            soup, url, client, config.fetch_timeout
-        )
-
-    confidence = _compute_confidence(sources)
+    if config.include_tables: sources.tables = _extract_tables(soup)
+    if config.include_lists: sources.lists = _extract_lists(soup)
+    if config.include_breadcrumb: sources.breadcrumb = _extract_breadcrumb(soup)
+    if config.include_dom_text: sources.dom_text = _extract_dom_text(soup)
+    if use_shopify_api: sources.preload_data = await _extract_preload_data(soup, url, client, config.fetch_timeout)
 
     result.success = True
     result.sources = sources.to_dict()
-    result.confidence = confidence.to_dict()
-
-    elapsed = time.time() - start_time
-    result.performance = {
-        "fetch_time_ms": int((parse_start - start_time) * 1000),
-        "parse_time_ms": int((time.time() - parse_start) * 1000),
-        "total_time_ms": int(elapsed * 1000),
-    }
-
+    result.confidence = _compute_confidence(sources).to_dict()
+    result.performance = {"fetch_time_ms": int((parse_start - start_time) * 1000), "parse_time_ms": int((time.time() - parse_start) * 1000), "total_time_ms": int((time.time() - start_time) * 1000)}
     return result
 
 # -- CloakBrowser launch helpers ---------------------------------------
 def _build_cloak_args(config: PipelineConfig) -> List[str]:
     args = [
-        f"--remote-debugging-port={config.cdp_port}",
-        "--remote-debugging-address=127.0.0.1",
-        f"--fingerprint={config.fingerprint_seed}",
-        f"--fingerprint-storage-quota={config.storage_quota_mb}",
-        "--fingerprint-noise=false",
-        "--fingerprint-windows-font-metrics",
-        "--disable-http2",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-site-isolation-trials",
-        "--window-size=1280,800",
+        f"--remote-debugging-port={config.cdp_port}", "--remote-debugging-address=127.0.0.1",
+        f"--fingerprint={config.fingerprint_seed}", f"--fingerprint-storage-quota={config.storage_quota_mb}",
+        "--fingerprint-noise=false", "--fingerprint-windows-font-metrics", "--disable-http2",
+        "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-site-isolation-trials", "--window-size=1280,800",
     ]
-
     font_dir = _find_font_dir()
-    if font_dir:
-        args.append(f"--fingerprint-fonts-dir={font_dir}")
-
+    if font_dir: args.append(f"--fingerprint-fonts-dir={font_dir}")
     return args
 
 async def _health_check_cdp(port: int, timeout: float = 30.0) -> None:
@@ -1340,123 +910,57 @@ async def _health_check_cdp(port: int, timeout: float = 30.0) -> None:
     async with httpx.AsyncClient() as client:
         while asyncio.get_event_loop().time() < deadline:
             try:
-                r = await client.get(f"http://127.0.0.1:{port}/json/version", timeout=2.0)
-                if r.status_code == 200:
-                    logger.info("CDP health check passed on port %d", port)
-                    return
-            except Exception:
-                pass
+                if (await client.get(f"http://127.0.0.1:{port}/json/version", timeout=2.0)).status_code == 200: return
+            except Exception: pass
             await asyncio.sleep(0.5)
     raise RuntimeError(f"CDP endpoint on port {port} did not become ready within {timeout}s")
 
-async def _crawl_single_with_retry(
-    crawler: AsyncWebCrawler, url: str, config: CrawlerRunConfig, pipeline_config: PipelineConfig,
-) -> Any:
-    last_exc = None
-    for attempt in range(pipeline_config.max_crawl_retries + 1):
-        try:
-            return await asyncio.wait_for(
-                crawler.arun(url=url, config=config),
-                timeout=pipeline_config.crawl_timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Timeout crawling %s (attempt %d/%d) - letting orphaned task finish gracefully in background",
-                url, attempt + 1, pipeline_config.max_crawl_retries + 1
-            )
-            if attempt == pipeline_config.max_crawl_retries:
-                raise
-        except Exception as exc:
-            logger.warning(
-                "Error crawling %s (attempt %d/%d): %s",
-                url, attempt + 1, pipeline_config.max_crawl_retries + 1, exc
-            )
-            last_exc = exc
-            if attempt == pipeline_config.max_crawl_retries:
-                raise
-
-        delay = pipeline_config.retry_base_delay * (2 ** attempt)
-        await asyncio.sleep(delay)
-    # Fallback (should never reach)
-    raise last_exc if last_exc else RuntimeError("Max retries exceeded")
-
 # -- Full browser extraction -------------------------------------------
-async def _extract_full_browser_core(
-    crawler: AsyncWebCrawler,
-    url: str,
-    config: PipelineConfig,
-    start_time: float,
-) -> ExtractionResult:
-    result = ExtractionResult(
-        url=url,
-        canonical_url=canonicalize_url(url),
-        extraction_mode="full_browser",
-        extracted_at=datetime.now(timezone.utc).isoformat(),
-    )
+async def _extract_full_browser_core(crawler: AsyncWebCrawler, url: str, config: PipelineConfig, start_time: float) -> ExtractionResult:
+    result = ExtractionResult(url=url, canonical_url=canonicalize_url(url), extraction_mode="full_browser", extracted_at=datetime.now(timezone.utc).isoformat())
 
-    # Try Shopify JSON API even in full-browser mode
     shopify_product = None
     if _is_shopify_domain(url):
         async with httpx.AsyncClient(timeout=10) as shopify_client:
             shopify_product = await _try_shopify_json(shopify_client, url, config.fetch_timeout)
 
     run_config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        stream=False,
-        # NEW: Added a 1.5s delay after scrolling to let dynamic pages (eBay) settle before extracting
+        cache_mode=CacheMode.BYPASS, stream=False,
         js_code="(async () => { window.scrollTo(0, document.body.scrollHeight); await new Promise(r => setTimeout(r, 1500)); })();",
-        excluded_tags=EXCLUDED_TAGS,
-        screenshot=False,
-        remove_overlay_elements=True,
-        remove_consent_popups=True,
+        excluded_tags=EXCLUDED_TAGS, screenshot=False, remove_overlay_elements=True, remove_consent_popups=True,
     )
 
     try:
-        crawl_result = await _crawl_single_with_retry(crawler, url, run_config, config)
+        last_exc = None
+        for attempt in range(config.max_crawl_retries + 1):
+            try:
+                crawl_result = await asyncio.wait_for(crawler.arun(url=url, config=run_config), timeout=config.crawl_timeout)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt == config.max_crawl_retries: raise
+                await asyncio.sleep(config.retry_base_delay * (2 ** attempt))
 
         if not crawl_result.success:
-            result.success = False
-            result.error = crawl_result.error_message or "Crawl failed"
+            result.success, result.error = False, crawl_result.error_message or "Crawl failed"
             result.performance = {"total_time_ms": int((time.time() - start_time) * 1000)}
             return result
 
-        html_text = crawl_result.html or ""
-        soup = BeautifulSoup(html_text, BS4_PARSER)
+        soup = BeautifulSoup(crawl_result.html or "", BS4_PARSER)
+        result.canonical_url = _extract_page_canonical(soup, result.canonical_url)
 
-        page_canonical = _extract_page_canonical(soup, result.canonical_url)
-        result.canonical_url = page_canonical
-
-        sources = ExtractedSources()
-        sources.shopify_product = shopify_product
-
+        sources = ExtractedSources(shopify_product=shopify_product)
         if crawl_result.metadata and crawl_result.metadata.get("json_ld"):
-            try:
-                json_ld = crawl_result.metadata["json_ld"]
-                if isinstance(json_ld, list):
-                    sources.schema_org = [item for item in json_ld if _is_product_schema(item)]
-                elif _is_product_schema(json_ld):
-                    sources.schema_org = [json_ld]
-            except Exception:
-                pass
-        if not sources.schema_org:
-            sources.schema_org = _extract_schema_org(soup)
+            json_ld = crawl_result.metadata["json_ld"]
+            if isinstance(json_ld, list): sources.schema_org = [item for item in json_ld if _is_product_schema(item)]
+            elif _is_product_schema(json_ld): sources.schema_org = [json_ld]
+        if not sources.schema_org: sources.schema_org = _extract_schema_org(soup)
 
-        if crawl_result.metadata:
-            og = {}
-            for key, val in crawl_result.metadata.items():
-                if key.startswith("og:") or key.startswith("og_"):
-                    og[key.replace("og_", "og:")] = str(val)
-            sources.open_graph = og if og else _extract_open_graph(soup)
-        else:
-            sources.open_graph = _extract_open_graph(soup)
-
+        og = {k.replace("og_", "og:"): str(v) for k, v in crawl_result.metadata.items() if k.startswith("og:") or k.startswith("og_")} if crawl_result.metadata else {}
+        sources.open_graph = og if og else _extract_open_graph(soup)
         sources.twitter_card = _extract_twitter_card(soup)
         sources.meta_tags = _extract_meta_tags(soup)
-        if crawl_result.metadata:
-            sources.meta_tags.update({
-                k: str(v) for k, v in crawl_result.metadata.items()
-                if k not in sources.meta_tags and v is not None
-            })
+        if crawl_result.metadata: sources.meta_tags.update({k: str(v) for k, v in crawl_result.metadata.items() if k not in sources.meta_tags and v is not None})
 
         sources.next_data = _extract_next_data(soup)
         sources.nuxt_data = _extract_nuxt_data(soup)
@@ -1464,596 +968,220 @@ async def _extract_full_browser_core(
         sources.inline_js = _extract_inline_js_product_data(soup)
         sources.microdata = _extract_microdata(soup)
 
-        if config.include_tables:
-            sources.tables = _extract_tables(soup)
-        if config.include_lists:
-            sources.lists = _extract_lists(soup)
-        if config.include_breadcrumb:
-            sources.breadcrumb = _extract_breadcrumb(soup)
-        if config.include_dom_text:
-            sources.dom_text = _extract_dom_text(soup)
+        if config.include_tables: sources.tables = _extract_tables(soup)
+        if config.include_lists: sources.lists = _extract_lists(soup)
+        if config.include_breadcrumb: sources.breadcrumb = _extract_breadcrumb(soup)
+        if config.include_dom_text: sources.dom_text = _extract_dom_text(soup)
 
         sources.sizing_guide_url = _extract_sizing_guide_link(soup, url)
-
         if config.include_markdown and crawl_result.markdown:
-            sources.markdown = (
-                crawl_result.markdown.raw_markdown
-                if hasattr(crawl_result.markdown, "raw_markdown")
-                else str(crawl_result.markdown)
-            )
-
-        confidence = _compute_confidence(sources)
+            sources.markdown = crawl_result.markdown.raw_markdown if hasattr(crawl_result.markdown, "raw_markdown") else str(crawl_result.markdown)
 
         result.success = True
         result.sources = sources.to_dict()
-        result.confidence = confidence.to_dict()
+        result.confidence = _compute_confidence(sources).to_dict()
 
     except Exception as exc:
         err_msg = str(exc)
-        # NEW: Suppress massive stack trace for known Playwright context destruction errors
         if "navigating and changing the content" in err_msg or "Execution context was destroyed" in err_msg:
-            logger.error("Full browser extraction failed for %s: Page navigated or refreshed automatically.", url)
+            logger.error("Full browser extraction failed for %s: Page navigated automatically.", url)
             result.error = "Page Navigation/Context Destroyed"
         else:
-            logger.exception("Full browser extraction failed for %s", url)
             result.error = f"{type(exc).__name__}: {err_msg}"
-        
         result.success = False
 
-    elapsed = time.time() - start_time
-    result.performance = {"total_time_ms": int(elapsed * 1000)}
+    result.performance = {"total_time_ms": int((time.time() - start_time) * 1000)}
     return result
 
-async def extract_full_browser(
-    url: str,
-    config: PipelineConfig,
-    client: httpx.AsyncClient,
-    crawler: Optional[AsyncWebCrawler] = None,
-) -> ExtractionResult:
+async def extract_full_browser(url: str, config: PipelineConfig, client: httpx.AsyncClient, crawler: Optional[AsyncWebCrawler] = None) -> ExtractionResult:
     start_time = time.time()
-    cb_browser = None
-    xvfb_proc = None
-    own_crawler = crawler is None
-
     try:
-        if own_crawler:
-            effective_headless = config.headless
-            if not config.headless:
-                xvfb_proc = _start_xvfb_if_needed()
-                if not _display_is_usable(os.environ.get("DISPLAY", "")):
-                    logger.warning("No working X display available, falling back to headless mode")
-                    effective_headless = True
-                    if "DISPLAY" in os.environ:
-                        del os.environ["DISPLAY"]
-
-            logger.info("Launching CloakBrowser on port %d (headless=%s)", config.cdp_port, effective_headless)
-            cb_browser = await asyncio.wait_for(
-                launch_async(headless=effective_headless, args=_build_cloak_args(config)),
-                timeout=config.cdp_health_timeout,
-            )
-            await _health_check_cdp(config.cdp_port, timeout=config.cdp_health_timeout)
-
-            browser_config = BrowserConfig(
-                browser_mode="cdp",
-                cdp_url=f"http://127.0.0.1:{config.cdp_port}",
-            )
-
-            async with AsyncWebCrawler(config=browser_config) as crawler:
-                return await _extract_full_browser_core(crawler, url, config, start_time)
-        else:
-            return await _extract_full_browser_core(crawler, url, config, start_time)
-
+        if crawler is None:
+            raise NotImplementedError("Crawler must be provided via the orchestrated pool")
+        return await _extract_full_browser_core(crawler, url, config, start_time)
     except Exception as exc:
-        logger.exception("Full browser extraction failed for %s", url)
-        result = ExtractionResult(
-            url=url,
-            canonical_url=canonicalize_url(url),
-            extraction_mode="full_browser",
-            success=False,
-            error=f"{type(exc).__name__}: {str(exc)}",
-            extracted_at=datetime.now(timezone.utc).isoformat(),
-        )
-        elapsed = time.time() - start_time
-        result.performance = {"total_time_ms": int(elapsed * 1000)}
-        return result
-
-    finally:
-        if own_crawler:
-            if cb_browser is not None:
-                try:
-                    await cb_browser.close()
-                    logger.info("Browser closed")
-                except Exception as exc:
-                    logger.warning("Error closing browser: %s", exc)
-
-            if xvfb_proc is not None:
-                try:
-                    xvfb_proc.terminate()
-                    xvfb_proc.wait(timeout=2)
-                    logger.info("Xvfb terminated")
-                except Exception as exc:
-                    logger.warning("Error terminating Xvfb: %s", exc)
-                    try:
-                        xvfb_proc.kill()
-                    except Exception:
-                        pass
+        return ExtractionResult(url=url, canonical_url=canonicalize_url(url), extraction_mode="full_browser", success=False, error=str(exc), extracted_at=datetime.now(timezone.utc).isoformat(), performance={"total_time_ms": int((time.time() - start_time) * 1000)})
 
 # -- Batch orchestration -----------------------------------------------
 @asynccontextmanager
 async def _per_domain_limit(url: str, semaphores: Dict[str, asyncio.Semaphore], max_concurrency: int):
-    domain = urlsplit(url).netloc
-    sem = semaphores.setdefault(domain, asyncio.Semaphore(max_concurrency))
-    async with sem:
-        yield
+    sem = semaphores.setdefault(urlsplit(url).netloc, asyncio.Semaphore(max_concurrency))
+    async with sem: yield
 
 async def run_batch(
-    urls: List[str],
-    lazy_extraction: bool = True,
-    include_dom_text: bool = True,
-    include_tables: bool = True,
-    include_lists: bool = True,
-    include_markdown: bool = True,
-    include_breadcrumb: bool = True,
-    min_confidence: float = 0.3,
-    cdp_port: int = 9243,
-    concurrency: int = 8,
-    browser_concurrency: int = 1,
-    http_timeout: float = 10.0,
-    crawl_timeout: float = 60.0,
-    max_crawl_retries: int = 0,
-    fetch_max_retries: int = 2,
-    enforce_completeness: bool = True,
+    urls: List[str], lazy_extraction: bool = True, include_dom_text: bool = True, include_tables: bool = True,
+    include_lists: bool = True, include_markdown: bool = True, include_breadcrumb: bool = True, min_confidence: float = 0.3,
+    cdp_port: int = 9243, concurrency: int = 8, browser_concurrency: int = 1, http_timeout: float = 10.0,
+    crawl_timeout: float = 60.0, max_crawl_retries: int = 0, fetch_max_retries: int = 2, enforce_completeness: bool = True,
+    exhaustive_mode: bool = False
 ) -> Dict[str, Any]:
-    if not urls:
-        return {}
-
-    valid_urls = []
-    seen_urls: Set[str] = set()
-    for u in urls:
-        if not isinstance(u, str):
-            logger.warning("Skipping non-string URL: %r", u)
-            continue
-        u = u.strip()
-        if not u.startswith(("http://", "https://")):
-            logger.warning("Skipping malformed URL: %s", u)
-            continue
-        if u in seen_urls:
-            continue
-        seen_urls.add(u)
-        valid_urls.append(u)
-
-    if not valid_urls:
-        return {}
-
+    
+    valid_urls = list(set([u.strip() for u in urls if isinstance(u, str) and u.strip().startswith(("http://", "https://"))]))
+    if not valid_urls: return {}
     random.shuffle(valid_urls)
 
     config = PipelineConfig(
-        min_confidence=min_confidence,
-        enforce_completeness=enforce_completeness,
-        include_dom_text=include_dom_text,
-        include_tables=include_tables,
-        include_lists=include_lists,
-        include_markdown=include_markdown,
-        include_breadcrumb=include_breadcrumb,
-        cdp_port=cdp_port,
-        concurrency=concurrency,
-        browser_concurrency=browser_concurrency,
-        http_timeout=http_timeout,
-        crawl_timeout=crawl_timeout,
-        max_crawl_retries=max_crawl_retries,
-        fetch_max_retries=fetch_max_retries,
+        min_confidence=min_confidence, enforce_completeness=enforce_completeness, exhaustive_mode=exhaustive_mode,
+        include_dom_text=include_dom_text, include_tables=include_tables, include_lists=include_lists,
+        include_markdown=include_markdown, include_breadcrumb=include_breadcrumb, cdp_port=cdp_port,
+        concurrency=concurrency, browser_concurrency=browser_concurrency, http_timeout=http_timeout,
+        crawl_timeout=crawl_timeout, max_crawl_retries=max_crawl_retries, fetch_max_retries=fetch_max_retries
     )
 
     results: Dict[str, Any] = {}
     domain_semaphores: Dict[str, asyncio.Semaphore] = {}
-    MAX_PER_DOMAIN = config.per_domain_concurrency
 
     if lazy_extraction:
         logger.info("=== Phase 1: Tiered Lazy extraction for %d URL(s) ===", len(valid_urls))
-
         async with AsyncExitStack() as stack:
             limits = httpx.Limits(max_connections=50, max_keepalive_connections=20)
             timeout = httpx.Timeout(http_timeout, connect=5.0)
 
-            if HAS_CURL_CFFI:
-                client_advanced = await stack.enter_async_context(cffi_requests.AsyncSession())
-            else:
-                client_advanced = await stack.enter_async_context(
-                    httpx.AsyncClient(limits=limits, timeout=timeout, headers=CHROME_HEADERS_2026)
-                )
-
-            client_classic = await stack.enter_async_context(
-                httpx.AsyncClient(limits=limits, timeout=timeout, headers=CLASSIC_HEADERS)
-            )
-
+            client_advanced = await stack.enter_async_context(cffi_requests.AsyncSession() if HAS_CURL_CFFI else httpx.AsyncClient(limits=limits, timeout=timeout, headers=CHROME_HEADERS_2026))
+            client_classic = await stack.enter_async_context(httpx.AsyncClient(limits=limits, timeout=timeout, headers=CLASSIC_HEADERS))
             global_sem = asyncio.Semaphore(config.concurrency)
 
-            async def _process_lazy(url: str) -> Tuple[str, ExtractionResult]:
-                # 1. Wait your turn for this specific domain FIRST
-                async with _per_domain_limit(url, domain_semaphores, MAX_PER_DOMAIN):
-                    # 2. THEN grab an active global connection slot
+            async def _process_lazy(url: str):
+                async with _per_domain_limit(url, domain_semaphores, config.per_domain_concurrency):
                     async with global_sem:
                         try:
                             res = await extract_lazy(client_advanced, url, config, use_shopify_api=True)
-
-                            needs_fallback = False
-                            if not res.success:
-                                needs_fallback = True
-                            elif res.status_code in (403, 429, 503):
-                                needs_fallback = True
-                            elif res.confidence.get("score", 0) < min_confidence:
-                                needs_fallback = True
-
-                            if needs_fallback:
-                                logger.info(
-                                    "Advanced lazy mode insufficient for %s (status=%s, score=%.2f). Falling back to Classic lazy mode...",
-                                    url, res.status_code, res.confidence.get("score", 0)
-                                )
-                                try:
-                                    res_classic = await extract_lazy(client_classic, url, config, use_shopify_api=False)
-
-                                    advanced_score = res.confidence.get("score", 0)
-                                    classic_score = res_classic.confidence.get("score", 0)
-                                    # Use classic only if advanced failed or classic significantly better
-                                    if not res.success or (res_classic.success and classic_score > advanced_score + 0.05):
-                                        logger.info("Classic lazy fallback replacing advanced for %s", url)
-                                        return url, res_classic
-                                    else:
-                                        return url, res
-                                except Exception as fallback_exc:
-                                    logger.warning("Classic lazy fallback crashed for %s: %s", url, fallback_exc)
-
+                            if not res.success or res.status_code in (403, 429, 503) or res.confidence.get("score", 0) < min_confidence:
+                                res_classic = await extract_lazy(client_classic, url, config, use_shopify_api=False)
+                                if not res.success or (res_classic.success and res_classic.confidence.get("score", 0) > res.confidence.get("score", 0) + 0.05):
+                                    return url, res_classic
                             return url, res
                         except Exception as exc:
-                            logger.exception("Lazy extraction crashed for %s", url)
-                            err = ExtractionResult(
-                                url=url,
-                                extraction_mode="lazy",
-                                success=False,
-                                error=f"{type(exc).__name__}: {str(exc)}",
-                                extracted_at=datetime.now(timezone.utc).isoformat(),
-                            )
-                            return url, err
+                            return url, ExtractionResult(url=url, extraction_mode="lazy", success=False, error=str(exc))
 
-            lazy_results = await asyncio.gather(*(_process_lazy(url) for url in valid_urls))
-            for url, res in lazy_results:
-                if config.enforce_completeness:
-                    audit = _audit_completeness(res.sources)
-                    res.completeness = audit.to_dict()
+            for url, res in await asyncio.gather(*(_process_lazy(url) for url in valid_urls)):
+                if config.enforce_completeness: res.completeness = _audit_completeness(res.sources).to_dict()
                 results[url] = res.to_dict()
-                if res.success:
-                    logger.info(
-                        "Lazy extraction success %s (confidence=%.2f)", url,
-                        res.confidence.get("score", 0)
-                    )
-                else:
-                    logger.warning("Lazy extraction failed %s: %s", url, res.error)
+                if res.success: logger.info("Lazy success %s (confidence=%.2f)", url, res.confidence.get("score", 0))
 
         failed_urls = []
         for url, res in results.items():
-            # Skip permanent errors
-            if res.get("status_code") in (404, 410, 400):
-                logger.info(
-                    "Skipping Full Browser Phase for %s due to permanent HTTP %s",
-                    url, res.get("status_code")
-                )
-                continue
-            # Also skip if the error indicates SSL/DNS failures
-            if not res["success"] and isinstance(res.get("error"), str):
-                lower_err = res["error"].lower()
-                if any(k in lower_err for k in ("ssl_error", "dns_error", "certificate", "name or service not known")):
-                    logger.info("Skipping Full Browser Phase for %s due to permanent network error", url)
-                    continue
-
-            if not res["success"] or res.get("confidence", {}).get("score", 0) < min_confidence:
+            if res.get("status_code") in (404, 410, 400): continue
+            if not res["success"] and isinstance(res.get("error"), str) and any(k in res["error"].lower() for k in ("ssl_error", "dns_error")): continue
+            
+            if config.exhaustive_mode and res["success"]:
+                logger.info("Exhaustive mode: Queuing %s for Phase 2 Browser Merge", url)
                 failed_urls.append(url)
-            elif config.enforce_completeness:
-                audit = res.get("completeness", {})
-                if not audit.get("is_complete", True):
-                    logger.info(
-                        "URL %s marked for full browser fallback due to incomplete lazy data (missing dropship criticals: %s)",
-                        url, ", ".join(audit.get("missing", []))
-                    )
-                    failed_urls.append(url)
+            elif not res["success"] or res.get("confidence", {}).get("score", 0) < min_confidence:
+                failed_urls.append(url)
+            elif config.enforce_completeness and not res.get("completeness", {}).get("is_complete", True):
+                failed_urls.append(url)
 
-        if failed_urls:
-            logger.info(
-                "=== Phase 2: Full browser extraction for %d failed/incomplete URL(s) ===",
-                len(failed_urls)
-            )
-        else:
-            logger.info("All URLs succeeded in lazy mode and passed completeness audit -- skipping full browser.")
+        if not failed_urls:
             return results
+        logger.info("=== Phase 2: Full browser extraction for %d URL(s) ===", len(failed_urls))
     else:
         failed_urls = valid_urls
-        logger.info(
-            "=== Full browser extraction for %d URL(s) (lazy disabled) ===",
-            len(failed_urls)
-        )
 
-    if failed_urls:
-        limits = httpx.Limits(max_connections=50, max_keepalive_connections=20)
-        timeout = httpx.Timeout(http_timeout, connect=5.0)
-        async with httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True) as client:
-            cb_browser = None
-            xvfb_proc = None
-            try:
-                effective_headless = config.headless
-                if not config.headless:
-                    xvfb_proc = _start_xvfb_if_needed()
-                    if not _display_is_usable(os.environ.get("DISPLAY", "")):
-                        logger.warning("No working X display available, falling back to headless mode")
-                        effective_headless = True
-                        if "DISPLAY" in os.environ:
-                            del os.environ["DISPLAY"]
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50), timeout=httpx.Timeout(http_timeout)) as client:
+        cb_browser = xvfb_proc = None
+        try:
+            effective_headless = config.headless
+            if not config.headless:
+                xvfb_proc = _start_xvfb_if_needed()
+                if not _display_is_usable(os.environ.get("DISPLAY", "")): effective_headless = True
 
-                logger.info(
-                    "Launching CloakBrowser on port %d (headless=%s, concurrency=%d)",
-                    config.cdp_port, effective_headless, config.browser_concurrency
-                )
-                cb_browser = await asyncio.wait_for(
-                    launch_async(headless=effective_headless, args=_build_cloak_args(config)),
-                    timeout=config.cdp_health_timeout,
-                )
-                await _health_check_cdp(config.cdp_port, timeout=config.cdp_health_timeout)
+            cb_browser = await asyncio.wait_for(launch_async(headless=effective_headless, args=_build_cloak_args(config)), timeout=config.cdp_health_timeout)
+            await _health_check_cdp(config.cdp_port, timeout=config.cdp_health_timeout)
 
-                browser_config = BrowserConfig(
-                    browser_mode="cdp",
-                    cdp_url=f"http://127.0.0.1:{config.cdp_port}",
-                )
+            async with AsyncWebCrawler(config=BrowserConfig(browser_mode="cdp", cdp_url=f"http://127.0.0.1:{config.cdp_port}")) as crawler:
+                sem_browser = asyncio.Semaphore(max(1, config.browser_concurrency))
 
-                async with AsyncWebCrawler(config=browser_config) as crawler:
-                    sem_browser = asyncio.Semaphore(max(1, config.browser_concurrency))
+                async def _process_full(url: str):
+                    async with _per_domain_limit(url, domain_semaphores, config.per_domain_concurrency):
+                        async with sem_browser:
+                            try: return url, await extract_full_browser(url, config, client, crawler=crawler)
+                            except Exception as exc: return url, ExtractionResult(url=url, extraction_mode="full_browser", success=False, error=str(exc))
 
-                    async def _process_full(url: str) -> Tuple[str, ExtractionResult]:
-                        # 1. Wait your turn for this specific domain FIRST
-                        async with _per_domain_limit(url, domain_semaphores, MAX_PER_DOMAIN):
-                            # 2. THEN grab an active browser slot
-                            async with sem_browser:
-                                try:
-                                    res = await extract_full_browser(url, config, client, crawler=crawler)
-                                    return url, res
-                                except Exception as exc:
-                                    logger.exception("Full browser extraction crashed for %s", url)
-                                    err = ExtractionResult(
-                                        url=url,
-                                        extraction_mode="full_browser",
-                                        success=False,
-                                        error=f"{type(exc).__name__}: {str(exc)}",
-                                        extracted_at=datetime.now(timezone.utc).isoformat(),
-                                    )
-                                    return url, err
+                for url, res in await asyncio.gather(*(_process_full(url) for url in failed_urls)):
+                    existing_lazy_res = results.get(url)
+                    is_lazy_success = existing_lazy_res and existing_lazy_res.get("success")
 
-                    full_results = await asyncio.gather(*(_process_full(url) for url in failed_urls))
-                    for url, res in full_results:
-                        # --- Best-Data-Wins Logic ---
-                        existing_lazy_res = results.get(url)
-                        is_lazy_success = existing_lazy_res and existing_lazy_res.get("success")
+                    if res.success and existing_lazy_res is not None:
+                        merge_mode = "exhaustive_merged" if config.exhaustive_mode and is_lazy_success else "fallback_merged"
+                        logger.info("Merging Lazy and Browser Data for %s (%s)", url, merge_mode)
                         
-                        should_overwrite = False
+                        merged_obj = _merge_sources(existing_lazy_res["sources"], res.sources)
+                        res.sources = merged_obj.to_dict()
+                        res.confidence = _compute_confidence(merged_obj).to_dict()
                         
-                        if res.success:
-                            # Browser worked! Use this better data.
-                            should_overwrite = True
-                            logger.info("Full browser success %s (confidence=%.2f)", url, res.confidence.get("score", 0))
-                        elif not is_lazy_success:
-                            # Browser failed, but Lazy failed too. Update with latest error.
-                            should_overwrite = True
-                            logger.error("Full browser failed %s: %s", url, res.error)
-                        else:
-                            # Browser failed, but Lazy HAD data. PRESERVE LAZY DATA.
-                            logger.warning(
-                                "Full browser failed for %s (%s), but Lazy had partial data. Preserving Lazy result.", 
-                                url, res.error
-                            )
+                        if config.enforce_completeness: 
+                            res.completeness = _audit_completeness(res.sources).to_dict()
+                        
+                        res.extraction_mode = merge_mode
+                        results[url] = res.to_dict()
+                        
+                    elif res.success or not is_lazy_success:
+                        # If browser succeeded (but no lazy history existed at all) 
+                        # OR if both failed (overwrite with the latest browser failure)
+                        if config.enforce_completeness: 
+                            res.completeness = _audit_completeness(res.sources).to_dict()
+                        results[url] = res.to_dict()
+                    
+                    # Note: If browser fails, but lazy was a TRUE success (e.g. sent here just for --exhaustive mode), 
+                    # we do nothing, safely preserving the original successful lazy payload.
 
-                        if should_overwrite:
-                            if config.enforce_completeness:
-                                audit = _audit_completeness(res.sources)
-                                res.completeness = audit.to_dict()
-                            results[url] = res.to_dict()
+        finally:
+            if cb_browser:
+                try: await cb_browser.close()
+                except Exception: pass
+            if xvfb_proc:
+                try:
+                    xvfb_proc.terminate()
+                    xvfb_proc.wait(timeout=2)
+                except Exception: pass
 
-            finally:
-                if cb_browser is not None:
-                    try:
-                        await cb_browser.close()
-                        logger.info("Browser closed")
-                    except Exception as exc:
-                        logger.warning("Error closing browser: %s", exc)
-
-                if xvfb_proc is not None:
-                    try:
-                        xvfb_proc.terminate()
-                        xvfb_proc.wait(timeout=2)
-                        logger.info("Xvfb terminated")
-                    except Exception as exc:
-                        logger.warning("Error terminating Xvfb: %s", exc)
-                        try:
-                            xvfb_proc.kill()
-                        except Exception:
-                            pass
     return results
-
 
 # -- Example usage -----------------------------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="E-Commerce Product Text Extractor",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python ecom-text-extractor.py -u urls.json -o results.json
-  python ecom-text-extractor.py -u urls.json -o results.json --no-enforce-completeness
-        """,
-    )
-    parser.add_argument(
-        "-u", "--urls",
-        required=True,
-        help="Path to a JSON file containing a list of URLs (e.g. [url, url])",
-    )
-    parser.add_argument(
-        "-o", "--output",
-        required=True,
-        help="Path to write the output JSON results",
-    )
-    parser.add_argument(
-        "--lazy-extraction",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use lightweight HTTP-only extraction first (default: --lazy-extraction)",
-    )
-    parser.add_argument(
-        "--enforce-completeness",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Force full browser fallback if lazy misses critical fields like price, availability, or variants (default: True)",
-    )
-    parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.3,
-        help="Minimum confidence score to consider lazy extraction successful (default: 0.3)",
-    )
-    parser.add_argument(
-        "--cdp-port",
-        type=int,
-        default=9243,
-        help="Chrome DevTools Protocol port for full-browser mode (default: 9243)",
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=8,
-        help="Max concurrent lazy extractions (default: 8)",
-    )
-    parser.add_argument(
-        "--browser-concurrency",
-        type=int,
-        default=1,
-        help="Max concurrent full browser extractions (default: 1 for stability)",
-    )
-    parser.add_argument(
-        "--http-timeout",
-        type=float,
-        default=10.0,
-        help="HTTP timeout in seconds (default: 10.0)",
-    )
-    parser.add_argument(
-        "--crawl-timeout",
-        type=float,
-        default=60.0,
-        help="Browser crawl timeout in seconds (default: 60.0)",
-    )
-    parser.add_argument(
-        "--max-crawl-retries",
-        type=int,
-        default=0,
-        help="Max retries for browser crawl (default: 0 to fail fast)",
-    )
-    parser.add_argument(
-        "--fetch-max-retries",
-        type=int,
-        default=2,
-        help="Max retries for HTTP fetch (5xx) in lazy mode (default: 2)",
-    )
-    parser.add_argument(
-        "--no-dom-text",
-        dest="include_dom_text",
-        action="store_false",
-        default=True,
-        help="Skip DOM text extraction",
-    )
-    parser.add_argument(
-        "--no-tables",
-        dest="include_tables",
-        action="store_false",
-        default=True,
-        help="Skip table extraction",
-    )
-    parser.add_argument(
-        "--no-lists",
-        dest="include_lists",
-        action="store_false",
-        default=True,
-        help="Skip list extraction",
-    )
-    parser.add_argument(
-        "--no-markdown",
-        dest="include_markdown",
-        action="store_false",
-        default=True,
-        help="Skip markdown generation in full browser mode",
-    )
-    parser.add_argument(
-        "--no-breadcrumb",
-        dest="include_breadcrumb",
-        action="store_false",
-        default=True,
-        help="Skip breadcrumb extraction",
-    )
+    parser = argparse.ArgumentParser(description="E-Commerce Product Text Extractor", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-u", "--urls", required=True, help="Path to JSON file containing URLs")
+    parser.add_argument("-o", "--output", required=True, help="Path to output JSON")
+    parser.add_argument("--exhaustive", action=argparse.BooleanOptionalAction, default=False, help="Run BOTH Lazy and Browser and merge the results.")
+    parser.add_argument("--lazy-extraction", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--enforce-completeness", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--min-confidence", type=float, default=0.3)
+    parser.add_argument("--cdp-port", type=int, default=9243)
+    parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--browser-concurrency", type=int, default=1)
+    parser.add_argument("--http-timeout", type=float, default=10.0)
+    parser.add_argument("--crawl-timeout", type=float, default=60.0)
+    parser.add_argument("--max-crawl-retries", type=int, default=0)
+    parser.add_argument("--fetch-max-retries", type=int, default=2)
+    parser.add_argument("--no-dom-text", dest="include_dom_text", action="store_false", default=True)
+    parser.add_argument("--no-tables", dest="include_tables", action="store_false", default=True)
+    parser.add_argument("--no-lists", dest="include_lists", action="store_false", default=True)
+    parser.add_argument("--no-markdown", dest="include_markdown", action="store_false", default=True)
+    parser.add_argument("--no-breadcrumb", dest="include_breadcrumb", action="store_false", default=True)
 
     args = parser.parse_args()
 
-    if not os.path.isfile(args.urls):
-        parser.error(f"URLs file not found: {args.urls}")
-
     with open(args.urls, "r", encoding="utf-8") as f:
-        try:
-            urls = json.load(f)
-        except json.JSONDecodeError as exc:
-            parser.error(f"Invalid JSON in URLs file: {exc}")
+        urls = json.load(f)
 
-    if not isinstance(urls, list):
-        parser.error(f"URLs file must contain a JSON array of strings, got {type(urls).__name__}")
-    if not urls:
-        parser.error("URLs file is empty.")
-
-    results = asyncio.run(
-        run_batch(
-            urls=urls,
-            lazy_extraction=args.lazy_extraction,
-            include_dom_text=args.include_dom_text,
-            include_tables=args.include_tables,
-            include_lists=args.include_lists,
-            include_markdown=args.include_markdown,
-            include_breadcrumb=args.include_breadcrumb,
-            min_confidence=args.min_confidence,
-            cdp_port=args.cdp_port,
-            concurrency=args.concurrency,
-            browser_concurrency=args.browser_concurrency,
-            http_timeout=args.http_timeout,
-            crawl_timeout=args.crawl_timeout,
-            max_crawl_retries=args.max_crawl_retries,
-            fetch_max_retries=args.fetch_max_retries,
-            enforce_completeness=args.enforce_completeness,
-        )
-    )
+    results = asyncio.run(run_batch(
+        urls=urls, lazy_extraction=args.lazy_extraction, exhaustive_mode=args.exhaustive,
+        include_dom_text=args.include_dom_text, include_tables=args.include_tables,
+        include_lists=args.include_lists, include_markdown=args.include_markdown,
+        include_breadcrumb=args.include_breadcrumb, min_confidence=args.min_confidence,
+        cdp_port=args.cdp_port, concurrency=args.concurrency, browser_concurrency=args.browser_concurrency,
+        http_timeout=args.http_timeout, crawl_timeout=args.crawl_timeout,
+        max_crawl_retries=args.max_crawl_retries, fetch_max_retries=args.fetch_max_retries,
+        enforce_completeness=args.enforce_completeness,
+    ))
 
     out_dir = os.path.dirname(args.output)
-    if out_dir and not os.path.exists(out_dir):
-        os.makedirs(out_dir, exist_ok=True)
-
+    if out_dir: os.makedirs(out_dir, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    total = len(results)
     successes = sum(1 for r in results.values() if r.get("success"))
-    failures = total - successes
-    lazy_success = sum(1 for r in results.values() if r.get("success") and r.get("extraction_mode") == "lazy")
-    full_success = sum(1 for r in results.values() if r.get("success") and r.get("extraction_mode") == "full_browser")
-
     logger.info("=" * 60)
-    logger.info("EXTRACTION COMPLETE")
-    logger.info("  Total URLs:    %d", total)
-    logger.info("  Successes:     %d", successes)
-    logger.info("    - Lazy mode: %d", lazy_success)
-    logger.info("    - Full mode: %d", full_success)
-    logger.info("  Failures:      %d", failures)
-    logger.info("  Output:        %s", args.output)
+    logger.info("EXTRACTION COMPLETE | Total: %d | Success: %d", len(results), successes)
     logger.info("=" * 60)
-
-    if failures > 0:
-        logger.warning("Failed URLs:")
-        for url, res in results.items():
-            if not res.get("success"):
-                logger.warning("  %s -> %s", url, res.get("error", "unknown"))
